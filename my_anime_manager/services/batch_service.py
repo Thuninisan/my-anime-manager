@@ -35,7 +35,7 @@ def _sanitize_dir_name(name: str | None) -> str:
     return re.sub(r'[<>:"/\\|?*]', "", name).strip()
 
 
-def _pick_show_name(file_list: list[dict]) -> str:
+def _pick_show_name(file_list: list[dict]) -> tuple[str, str | None]:
     """Pick the show name from the parsed file list.
 
     Uses majority vote among parsed titles, then strips trailing year
@@ -45,19 +45,23 @@ def _pick_show_name(file_list: list[dict]) -> str:
         file_list: List of dicts with 'showName' keys
 
     Returns:
-        Best show name string
+        Tuple of (best show name string, extracted year or None)
     """
     names = [f["showName"] for f in file_list if f.get("showName")]
     if not names:
-        return ""
+        return "", None
 
     # Majority vote
     from collections import Counter
     best = Counter(names).most_common(1)[0][0]
 
+    # Extract trailing year before stripping (e.g. "Horimiya 2021" → year="2021")
+    year_match = re.search(r"[\s\-–—]*(\d{4})$", best)
+    year = year_match.group(1) if year_match else None
+
     # Strip trailing year (e.g. "Horimiya -piece- 2023" → "Horimiya -piece-")
     best = re.sub(r"[\s\-–—]*\d{4}$", "", best).strip()
-    return best
+    return best, year
 
 
 def _find_entry_in_chain(target_title: str, chain: list[dict]) -> int:
@@ -152,16 +156,21 @@ async def process_torrent(torrent_path: str) -> None:
     episodes.sort(key=lambda e: (e["season"], e["episode"]))
 
     # ---------- Step 5: Determine show name, search TMDB ----------
-    show_name = _pick_show_name(episodes)
-    print(f'🔍 从文件名推断节目名: "{show_name}"\n')
+    show_name, show_year = _pick_show_name(episodes)
+    print(f'🔍 从文件名推断节目名: "{show_name}"')
+    if show_year:
+        print(f'   从文件名提取年份: {show_year}')
+    print()
 
     print("📡 === TMDB 阶段 ===")
-    tv_show = await tmdb_service.search_tv_show(show_name)
+    tv_show = await tmdb_service.search_tv_show(show_name, prefer_year=show_year)
 
     # Retry with first file's full show name
     if not tv_show and episodes[0]["showName"] != show_name:
         print(f'   用完整文件名重试: "{episodes[0]["showName"]}"')
-        tv_show = await tmdb_service.search_tv_show(episodes[0]["showName"])
+        tv_show = await tmdb_service.search_tv_show(
+            episodes[0]["showName"], prefer_year=show_year
+        )
 
     if not tv_show:
         print(f'❌ TMDB 未找到节目，尝试的名称: "{show_name}"')

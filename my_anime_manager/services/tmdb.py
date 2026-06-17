@@ -3,25 +3,100 @@
 from ..clients import tmdb as tmdb_client
 
 
-async def search_tv_show(show_name: str) -> dict | None:
-    """Search for a TV show and return the first result summary.
+def _score_result(show: dict, query: str, prefer_year: str | None) -> float:
+    """Score a TMDB search result against the query.
+
+    Higher is better. Factors (in order of weight):
+    1. Name match quality (exact > partial > none)
+    2. Year match (if prefer_year is given and matches first_air_date)
+    3. Popularity (tiebreaker, very small weight)
+    """
+    score = 0.0
+    name = (show.get("name") or "").lower()
+    orig = (show.get("original_name") or "").lower()
+    q = query.lower()
+
+    # Name match
+    if q == name or q == orig:
+        score += 100
+    elif q in name or name in q:
+        score += 60
+    elif q in orig or orig in q:
+        score += 50
+    else:
+        # Partial word overlap
+        q_words = set(q.split())
+        name_words = set(name.split())
+        orig_words = set(orig.split())
+        overlap = max(len(q_words & name_words), len(q_words & orig_words))
+        score += overlap * 10
+
+    # Year match — strong signal
+    if prefer_year:
+        first_air = show.get("first_air_date", "") or ""
+        if first_air.startswith(prefer_year):
+            score += 90
+        elif first_air and first_air[:4] == prefer_year:
+            score += 90
+
+    # Popularity tiebreaker (normalized, tiny weight)
+    pop = show.get("popularity", 0) or 0
+    score += min(pop, 100) * 0.001
+
+    return score
+
+
+async def search_tv_show(
+    show_name: str, prefer_year: str | None = None
+) -> dict | None:
+    """Search for a TV show and return the best-matching result.
+
+    Scores all results instead of blindly taking the first one.
+    Matching factors: name similarity, year (from torrent filename), popularity.
 
     Args:
         show_name: Show name to search for
+        prefer_year: Optional 4-digit year to prefer (extracted from torrent name)
 
     Returns:
         dict with id, name, original_name, first_air_date or None
     """
     print(f'🔍 TMDB 搜索: "{show_name}"')
+    if prefer_year:
+        print(f"   偏好年份: {prefer_year}")
     res = await tmdb_client.search_tv(show_name)
     results = res.json().get("results", [])
     if not results:
+        print("   ❌ 无结果")
         return None
-    show = results[0]
-    print(
-        f"   ✅ 找到: {show['name']} "
-        f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
-    )
+
+    # If only one result, no scoring needed
+    if len(results) == 1:
+        show = results[0]
+        print(
+            f"   ✅ 唯一结果: {show['name']} "
+            f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
+        )
+    else:
+        # Score all results and pick best
+        scored = sorted(
+            results,
+            key=lambda s: _score_result(s, show_name, prefer_year),
+            reverse=True,
+        )
+        show = scored[0]
+        print(
+            f"   ✅ 最佳匹配: {show['name']} "
+            f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
+        )
+        # Show alternatives for debugging
+        if len(scored) > 1:
+            alts = [
+                f"{s['name']} ({s.get('first_air_date', '?')[:4]})"
+                for s in scored[1:4]
+            ]
+            print(f"   📋 其他结果: {', '.join(alts)}")
+
     return {
         "id": show["id"],
         "name": show["name"],
