@@ -100,16 +100,42 @@ async def _watch_worker(dir_path: str):
             print(f"📁 扫描到 {len(files)} 个 torrent 文件")
             _watch_status["errors"] = []
 
+            # Ensure failed/ dir exists for files that can't be processed
+            failed_dir = abs_dir / "failed"
+            failed_dir.mkdir(exist_ok=True)
+
             for file in files:
                 _watch_status["current_file"] = file.name
+                success = False
                 try:
                     await process_torrent(str(file))
-                    file.unlink()
-                    _watch_status["processed"] += 1
-                    _watch_status["deleted"] += 1
+                    success = True
                 except Exception as e:
                     _watch_status["failed"] += 1
                     _watch_status["errors"].append(f"{file.name}: {e}")
+                    print(f"❌ 处理失败 {file.name}: {e}")
+
+                if not file.exists():
+                    # Already cleaned up (deleted by process_torrent or otherwise)
+                    _watch_status["processed"] += 1
+                    _watch_status["deleted"] += 1
+                elif success:
+                    # Processed successfully, delete the .torrent file
+                    file.unlink()
+                    _watch_status["processed"] += 1
+                    _watch_status["deleted"] += 1
+                else:
+                    # Failed — move to failed/ to avoid re-processing
+                    dest = failed_dir / file.name
+                    # Avoid overwriting: append counter if name exists
+                    if dest.exists():
+                        stem = file.stem
+                        counter = 1
+                        while dest.exists():
+                            dest = failed_dir / f"{stem}_{counter}.torrent"
+                            counter += 1
+                    file.rename(dest)
+                    print(f"   ⚠️ 处理失败，已移到 {dest}")
 
             _watch_status["current_file"] = ""
             print("   继续监控...")
