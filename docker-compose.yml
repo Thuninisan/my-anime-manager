@@ -1,6 +1,6 @@
 services:
   my-anime-manager:
-    image: ghcr.io/thuninisan/my_anime_manager:latest
+    image: ghcr.io/thuninisan/my-anime-manager:latest
     environment:
       - TMDB_API_KEY=改成你的TMDB_API_KEY
       - QBITTORRENT_URL=http://改成你的qBittorrent_IP:8080
