@@ -82,11 +82,24 @@ async def get_subject(subject_id: int) -> dict:
 
     Returns:
         Subject data dict
+
+    Raises:
+        RuntimeError: If the API request fails
     """
     await _delay()
     async with _get_client() as client:
-        res = await client.get(f"/v0/subjects/{subject_id}")
-        return res.json()
+        try:
+            res = await client.get(f"/v0/subjects/{subject_id}")
+            res.raise_for_status()
+            return res.json()
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(
+                f"Bangumi API 返回 {e.response.status_code} (id={subject_id})"
+            ) from e
+        except Exception as e:
+            raise RuntimeError(
+                f"获取 Bangumi 条目失败 (id={subject_id}): {e}"
+            ) from e
 
 
 async def get_relations(subject_id: int) -> list[dict]:

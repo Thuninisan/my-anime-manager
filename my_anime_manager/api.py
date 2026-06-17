@@ -12,6 +12,7 @@ Usage:
 import asyncio
 import os
 import tempfile
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -112,8 +113,9 @@ async def _watch_worker(dir_path: str):
                     success = True
                 except Exception as e:
                     _watch_status["failed"] += 1
-                    _watch_status["errors"].append(f"{file.name}: {e}")
-                    print(f"❌ 处理失败 {file.name}: {e}")
+                    _watch_status["errors"].append(f"{file.name}: {e!r}")
+                    print(f"❌ 处理失败 {file.name}: {e!r}")
+                    traceback.print_exc()
 
                 if not file.exists():
                     # Already cleaned up (deleted by process_torrent or otherwise)
