@@ -6,42 +6,20 @@ from ..clients import tmdb as tmdb_client
 def _score_result(show: dict, query: str, prefer_year: str | None) -> float:
     """Score a TMDB search result against the query.
 
-    Higher is better. Factors (in order of weight):
-    1. Name match quality (exact > partial > none)
-    2. Year match (if prefer_year is given and matches first_air_date)
-    3. Popularity (tiebreaker, very small weight)
+    Higher is better. Factors:
+    1. Year match — if prefer_year matches first_air_date, big bonus
+    2. Popularity — fallback when no year info
     """
     score = 0.0
-    name = (show.get("name") or "").lower()
-    orig = (show.get("original_name") or "").lower()
-    q = query.lower()
 
-    # Name match
-    if q == name or q == orig:
-        score += 100
-    elif q in name or name in q:
-        score += 60
-    elif q in orig or orig in q:
-        score += 50
-    else:
-        # Partial word overlap
-        q_words = set(q.split())
-        name_words = set(name.split())
-        orig_words = set(orig.split())
-        overlap = max(len(q_words & name_words), len(q_words & orig_words))
-        score += overlap * 10
-
-    # Year match — strong signal
+    # Year match — strongest signal
     if prefer_year:
         first_air = show.get("first_air_date", "") or ""
-        if first_air.startswith(prefer_year):
-            score += 90
-        elif first_air and first_air[:4] == prefer_year:
-            score += 90
+        if first_air and first_air[:4] == prefer_year:
+            score += 100
 
-    # Popularity tiebreaker (normalized, tiny weight)
-    pop = show.get("popularity", 0) or 0
-    score += min(pop, 100) * 0.001
+    # Popularity fallback
+    score += (show.get("popularity", 0) or 0) * 0.01
 
     return score
 
