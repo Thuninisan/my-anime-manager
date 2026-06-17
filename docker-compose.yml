@@ -1,6 +1,6 @@
 services:
   my-anime-manager:
-    image: ghcr.io/thuninisan/my-anime-manager:latest
+    image: karlkono/my-anime-manager:latest
     restart: unless-stopped
     ports:
       - "8000:8000"

@@ -126,7 +126,24 @@ async def on_startup():
     if watch_dir:
         global _watch_task
         _watch_task = asyncio.create_task(_watch_worker(watch_dir))
-        print(f"   📡 WATCH_DIR={watch_dir}")
+
+
+# ========== / ==========
+
+@app.get("/")
+async def root():
+    """Health check + status overview."""
+    return {
+        "service": "My Anime Manager",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "watch": {
+            "running": _watch_status["running"],
+            "dir": _watch_status["dir"],
+            "processed": _watch_status["processed"],
+            "failed": _watch_status["failed"],
+        },
+    }
 
 
 # ========== /torrent ==========
