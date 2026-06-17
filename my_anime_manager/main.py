@@ -348,51 +348,61 @@ async def _single_episode_mode(show_name: str, season: int, episode: int, nfo_fl
 
 
 async def _scan_and_process(dir_path: str) -> None:
-    """Scan a directory for .torrent files and process each one.
+    """Continuously watch a directory for .torrent files and process them.
+
+    Runs forever, scanning every 30 seconds. Processed files are deleted
+    on success.
 
     Args:
-        dir_path: Directory path to scan
+        dir_path: Directory path to watch
     """
     abs_dir = Path(dir_path).resolve()
     if not abs_dir.exists():
         print(f"❌ 目录不存在: {abs_dir}")
         sys.exit(1)
 
-    files = sorted(abs_dir.glob("*.torrent"))
+    SCAN_INTERVAL = 30  # seconds between scans
 
-    if not files:
-        print(f"📭 {abs_dir} 中没有 .torrent 文件")
-        return
+    print(f"👀 开始监控 {abs_dir}，每 {SCAN_INTERVAL}s 扫描一次...")
+    print("   将 .torrent 文件放入该目录即可自动处理\n")
 
-    print(f"📁 扫描到 {len(files)} 个 torrent 文件\n")
+    while True:
+        files = sorted(abs_dir.glob("*.torrent"))
 
-    processed = 0
-    deleted = 0
-    failed = 0
+        if not files:
+            await asyncio.sleep(SCAN_INTERVAL)
+            continue
 
-    for file in files:
+        print(f"📁 扫描到 {len(files)} 个 torrent 文件\n")
+
+        processed = 0
+        deleted = 0
+        failed = 0
+
+        for file in files:
+            print("═" * 55)
+            print(f"📦 处理: {file.name}")
+            print("═" * 55)
+
+            try:
+                await process_torrent(str(file))
+                # Delete on success
+                file.unlink()
+                print(f"\n🗑️ 已删除: {file.name}")
+                processed += 1
+                deleted += 1
+            except Exception as e:
+                print(f"\n❌ 处理失败: {file.name} — {e}")
+                failed += 1
+            print("")
+
         print("═" * 55)
-        print(f"📦 处理: {file.name}")
+        print("📊 本轮扫描完成")
+        print(f"   处理: {processed} 个")
+        print(f"   删除: {deleted} 个")
+        print(f"   失败: {failed} 个")
+        print(f"   继续监控 {abs_dir}...")
         print("═" * 55)
-
-        try:
-            await process_torrent(str(file))
-            # Delete on success
-            file.unlink()
-            print(f"\n🗑️ 已删除: {file.name}")
-            processed += 1
-            deleted += 1
-        except Exception as e:
-            print(f"\n❌ 处理失败: {file.name} — {e}")
-            failed += 1
-        print("")
-
-    print("═" * 55)
-    print("📊 扫描完成")
-    print(f"   处理: {processed} 个")
-    print(f"   删除: {deleted} 个")
-    print(f"   失败: {failed} 个")
-    print("═" * 55)
 
 
 def main() -> None:

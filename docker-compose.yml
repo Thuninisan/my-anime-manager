@@ -1,6 +1,9 @@
 services:
   my-anime-manager:
     image: ghcr.io/thuninisan/my-anime-manager:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
     environment:
       - TMDB_API_KEY=改成你的TMDB_API_KEY
       - QBITTORRENT_URL=http://改成你的qBittorrent_IP:8080
@@ -9,7 +12,8 @@ services:
       - QBITTORRENT_SAVE_PATH=/downloads
       - PROXY_HOST=改成你的代理IP或不填
       - PROXY_PORT=7890
+      - WATCH_DIR=/torrents
     volumes:
       - /改成你的种子目录路径:/torrents
       - /改成你的下载目录路径:/downloads
-    command: --scan /torrents
+    command: --serve 0.0.0.0:8000

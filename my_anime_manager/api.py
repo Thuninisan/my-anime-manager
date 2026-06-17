@@ -10,6 +10,7 @@ Usage:
 """
 
 import asyncio
+import os
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -60,6 +61,72 @@ class ScanStatus(BaseModel):
     failed: int
     current_file: str
     errors: list[str]
+
+
+# ========== background watch state ==========
+
+_watch_task: Optional[asyncio.Task] = None
+_watch_status: dict = {
+    "running": False,
+    "dir": "",
+    "processed": 0,
+    "deleted": 0,
+    "failed": 0,
+    "current_file": "",
+    "errors": [],
+}
+
+
+async def _watch_worker(dir_path: str):
+    """Background worker: continuously watch directory for .torrent files."""
+    global _watch_status
+    abs_dir = Path(dir_path).resolve()
+
+    if not abs_dir.exists():
+        print(f"❌ 监控目录不存在: {abs_dir}")
+        _watch_status["running"] = False
+        return
+
+    SCAN_INTERVAL = 30
+    print(f"👀 开始监控 {abs_dir}，每 {SCAN_INTERVAL}s 扫描一次...")
+
+    _watch_status["running"] = True
+    _watch_status["dir"] = str(abs_dir)
+
+    while True:
+        files = sorted(abs_dir.glob("*.torrent"))
+
+        if files:
+            print(f"📁 扫描到 {len(files)} 个 torrent 文件")
+            _watch_status["errors"] = []
+
+            for file in files:
+                _watch_status["current_file"] = file.name
+                try:
+                    await process_torrent(str(file))
+                    file.unlink()
+                    _watch_status["processed"] += 1
+                    _watch_status["deleted"] += 1
+                except Exception as e:
+                    _watch_status["failed"] += 1
+                    _watch_status["errors"].append(f"{file.name}: {e}")
+
+            _watch_status["current_file"] = ""
+            print("   继续监控...")
+
+        await asyncio.sleep(SCAN_INTERVAL)
+
+
+# ========== lifecycle ==========
+
+@app.on_event("startup")
+async def on_startup():
+    """Auto-start directory watcher if WATCH_DIR env var is set."""
+    watch_dir = os.environ.get("WATCH_DIR", "")
+    if watch_dir:
+        global _watch_task
+        _watch_task = asyncio.create_task(_watch_worker(watch_dir))
+        print(f"   📡 WATCH_DIR={watch_dir}")
 
 
 # ========== /torrent ==========
@@ -160,6 +227,12 @@ async def start_scan(dir_path: str = Form(...)):
 async def scan_status():
     """Get the current scan progress."""
     return ScanStatus(**_scan_status)
+
+
+@app.get("/watch/status")
+async def watch_status():
+    """Get the current watch loop status (auto-started via WATCH_DIR)."""
+    return _watch_status
 
 
 # ========== /config ==========
