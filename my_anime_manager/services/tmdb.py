@@ -2,39 +2,44 @@
 
 from ..clients import tmdb as tmdb_client
 
+# TMDB genre ID for Animation
+GENRE_ANIMATION = 16
 
-def _score_result(show: dict, query: str, prefer_year: str | None) -> float:
-    """Score a TMDB search result against the query.
 
-    Higher is better. Factors:
-    1. Year match — if prefer_year matches first_air_date, big bonus
-    2. Popularity — fallback when no year info
-    """
-    score = 0.0
+def _format_show(show: dict) -> dict:
+    """Extract needed fields from a TMDB search result."""
+    return {
+        "id": show["id"],
+        "name": show["name"],
+        "original_name": show.get("original_name"),
+        "first_air_date": show.get("first_air_date"),
+    }
 
-    # Year match — strongest signal
-    if prefer_year:
-        first_air = show.get("first_air_date", "") or ""
-        if first_air and first_air[:4] == prefer_year:
-            score += 100
 
-    # Popularity fallback
-    score += (show.get("popularity", 0) or 0) * 0.01
-
-    return score
+def _print_candidates(label: str, items: list[dict]) -> None:
+    """Print current candidate list for debugging."""
+    names = [
+        f"{s['name']} ({s.get('first_air_date', '?')[:4]})"
+        for s in items[:4]
+    ]
+    print(f"   {label}: [{len(items)}] {', '.join(names)}")
 
 
 async def search_tv_show(
     show_name: str, prefer_year: str | None = None
 ) -> dict | None:
-    """Search for a TV show and return the best-matching result.
+    """Search TMDB for a TV show, returning the best match.
 
-    Scores all results instead of blindly taking the first one.
-    Matching factors: name similarity, year (from torrent filename), popularity.
+    Filter pipeline:
+    1. Single result → return immediately
+    2. Multiple results → filter by Animation genre
+    3. Still multiple → if year known, filter by year
+    4. Still multiple → exact title match (name / original_name)
+    5. Still multiple → highest popularity wins
 
     Args:
         show_name: Show name to search for
-        prefer_year: Optional 4-digit year to prefer (extracted from torrent name)
+        prefer_year: Optional 4-digit year (extracted from torrent filename)
 
     Returns:
         dict with id, name, original_name, first_air_date or None
@@ -42,45 +47,89 @@ async def search_tv_show(
     print(f'🔍 TMDB 搜索: "{show_name}"')
     if prefer_year:
         print(f"   偏好年份: {prefer_year}")
+
     res = await tmdb_client.search_tv(show_name)
     results = res.json().get("results", [])
     if not results:
         print("   ❌ 无结果")
         return None
 
-    # If only one result, no scoring needed
+    # ── Step 1: only one result ──
     if len(results) == 1:
         show = results[0]
         print(
             f"   ✅ 唯一结果: {show['name']} "
             f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
         )
+        return _format_show(show)
+
+    _print_candidates("原始结果", results)
+
+    # ── Step 2: keep only Animation genre ──
+    anime = [r for r in results if GENRE_ANIMATION in r.get("genre_ids", [])]
+    if anime:
+        candidates = anime
+        if len(anime) < len(results):
+            _print_candidates("过滤动画标签后", candidates)
     else:
-        # Score all results and pick best
-        scored = sorted(
-            results,
-            key=lambda s: _score_result(s, show_name, prefer_year),
-            reverse=True,
-        )
-        show = scored[0]
+        candidates = results
+        print("   ⚠️ 无动画标签，保留全部结果")
+
+    if len(candidates) == 1:
+        show = candidates[0]
         print(
-            f"   ✅ 最佳匹配: {show['name']} "
+            f"   ✅ 动画过滤后唯一: {show['name']} "
             f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
         )
-        # Show alternatives for debugging
-        if len(scored) > 1:
-            alts = [
-                f"{s['name']} ({s.get('first_air_date', '?')[:4]})"
-                for s in scored[1:4]
-            ]
-            print(f"   📋 其他结果: {', '.join(alts)}")
+        return _format_show(show)
 
-    return {
-        "id": show["id"],
-        "name": show["name"],
-        "original_name": show.get("original_name"),
-        "first_air_date": show.get("first_air_date"),
-    }
+    # ── Step 3: year match ──
+    if prefer_year:
+        year_matches = [
+            r for r in candidates
+            if (r.get("first_air_date", "") or "")[:4] == prefer_year
+        ]
+        if year_matches:
+            candidates = year_matches
+            _print_candidates(f"年份匹配 ({prefer_year})", candidates)
+        else:
+            print(f"   ⚠️ 无匹配年份 {prefer_year}，保留全部")
+
+    if len(candidates) == 1:
+        show = candidates[0]
+        print(
+            f"   ✅ 年份过滤后唯一: {show['name']} "
+            f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
+        )
+        return _format_show(show)
+
+    # ── Step 4: exact title match ──
+    q = show_name.lower()
+    exact = [
+        r for r in candidates
+        if q == (r.get("name") or "").lower()
+        or q == (r.get("original_name") or "").lower()
+    ]
+    if exact:
+        candidates = exact
+        _print_candidates("精确标题匹配", candidates)
+
+    if len(candidates) == 1:
+        show = candidates[0]
+        print(
+            f"   ✅ 标题匹配唯一: {show['name']} "
+            f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
+        )
+        return _format_show(show)
+
+    # ── Step 5: highest popularity ──
+    show = max(candidates, key=lambda r: r.get("popularity", 0) or 0)
+    print(
+        f"   ✅ 热度最高: {show['name']} "
+        f"({show.get('original_name', '无原名')}) "
+        f"[id: {show['id']}, pop={show.get('popularity', 0):.1f}]"
+    )
+    return _format_show(show)
 
 
 async def get_tv_show_detail(tv_id: int) -> dict:
