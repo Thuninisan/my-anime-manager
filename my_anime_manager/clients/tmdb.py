@@ -76,6 +76,19 @@ async def get_episode_group_detail(group_id: str) -> httpx.Response:
         return await client.get(f"/tv/episode_group/{group_id}")
 
 
+async def get_alternative_titles(tv_id: int) -> httpx.Response:
+    """Get all alternative titles for a TV show.
+
+    Args:
+        tv_id: TMDB show ID
+
+    Returns:
+        httpx Response object with 'results' list of {iso_3166_1, title, type}
+    """
+    async with _get_client() as client:
+        return await client.get(f"/tv/{tv_id}/alternative_titles")
+
+
 async def get_tv_images(tv_id: int, languages: str = "ja,zh,null") -> httpx.Response:
     """Get TV show images (backdrops, posters, logos).
 

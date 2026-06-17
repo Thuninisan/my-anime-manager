@@ -103,16 +103,32 @@ async def search_tv_show(
         )
         return _format_show(show)
 
-    # ── Step 4: exact title match ──
-    q = show_name.lower()
-    exact = [
-        r for r in candidates
-        if q == (r.get("name") or "").lower()
-        or q == (r.get("original_name") or "").lower()
-    ]
-    if exact:
-        candidates = exact
-        _print_candidates("精确标题匹配", candidates)
+    # ── Step 4: exact title match (including all aliases) ──
+    if len(candidates) > 1:
+        q = show_name.lower()
+        exact: list[dict] = []
+        for r in candidates:
+            # Check name and original_name from search results
+            names = [
+                (r.get("name") or "").lower(),
+                (r.get("original_name") or "").lower(),
+            ]
+            # Also fetch alternative titles (lightweight, cached by TMDB)
+            try:
+                alt_res = await tmdb_client.get_alternative_titles(r["id"])
+                for alt in alt_res.json().get("results", []):
+                    title = (alt.get("title") or "").lower()
+                    if title:
+                        names.append(title)
+            except Exception:
+                pass  # Non-critical, skip if API fails
+
+            if q in names:
+                exact.append(r)
+
+        if exact:
+            candidates = exact
+            _print_candidates("精确标题匹配(含别名)", candidates)
 
     if len(candidates) == 1:
         show = candidates[0]
