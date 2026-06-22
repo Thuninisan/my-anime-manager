@@ -1,8 +1,6 @@
-import { useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useTheme } from '@/hooks/useTheme';
-import SettingsModal from '@/components/SettingsModal';
 import {
   IconSpa, IconDashboard, IconMemory, IconRss, IconSettings,
   IconAddCircle, IconSearch, IconNotifications, IconSun, IconMoon, IconUser,
@@ -17,7 +15,6 @@ const PAGE_META: Record<string, { title: string; Icon: typeof IconMemory }> = {
 
 export default function AppLayout() {
   const { theme, toggleTheme } = useTheme();
-  const [showSettings, setShowSettings] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -151,8 +148,6 @@ export default function AppLayout() {
         </div>
       </main>
 
-      {/* Settings Modal — still accessible via gear icon */}
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
