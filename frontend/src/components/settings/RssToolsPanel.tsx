@@ -7,27 +7,35 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 
+function SectionCard({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
+  return (
+    <section className="bg-card rounded-xl sakura-shadow border border-border/30 p-6">
+      <div className="flex items-center gap-2 mb-5">
+        <span className="text-lg">{icon}</span>
+        <h3 className="text-base font-semibold text-foreground">{title}</h3>
+      </div>
+      {children}
+    </section>
+  );
+}
+
 interface Props {
   config: AppConfig;
   onChange: (key: keyof AppConfig, value: string) => void;
 }
 
 export default function RssToolsPanel({ config, onChange }: Props) {
-  /* ── Data status ── */
   const [dataStatus, setDataStatus] = useState<{ exists: boolean; count: number } | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadMsg, setDownloadMsg] = useState('');
 
-  /* ── Poller ── */
   const [dlRunning, setDlRunning] = useState(false);
   const [dlStatus, setDlStatus] = useState({ downloaded: 0, last_run: '', errors: [] as string[] });
   const [dlInterval, setDlInterval] = useState(30);
 
-  /* ── Exclude patterns ── */
   const [excludePatterns, setExcludePatterns] = useState<string[]>(['全集']);
   const [excludeInput, setExcludeInput] = useState('');
 
-  /* ── Init ── */
   useEffect(() => {
     refreshDlStatus();
     checkDataStatus();
@@ -35,8 +43,7 @@ export default function RssToolsPanel({ config, onChange }: Props) {
   }, []);
 
   const checkDataStatus = async () => {
-    try { setDataStatus(await rssApi.getDataStatus()); }
-    catch { setDataStatus({ exists: false, count: 0 }); }
+    try { setDataStatus(await rssApi.getDataStatus()); } catch { setDataStatus({ exists: false, count: 0 }); }
   };
   const handleDownloadData = async () => {
     setDownloading(true); setDownloadMsg('');
@@ -63,46 +70,48 @@ export default function RssToolsPanel({ config, onChange }: Props) {
   };
 
   return (
-    <div className="space-y-5">
-      {/* RSS 映射数据 */}
-      <div>
-        <p className="text-sm font-medium mb-2">RSS 映射数据</p>
-        <p className="text-xs text-muted-foreground mb-2">查询番剧在 Mikan 上的字幕组 RSS，需要先下载映射数据</p>
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-xs text-muted-foreground">
-            {dataStatus === null ? '检查中...' : dataStatus.exists ? `就绪 (${dataStatus.count} 条)` : '未下载'}
+    <div className="flex flex-col gap-6">
+      {/* ── RSS Mapping Data ── */}
+      <SectionCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><circle cx="12" cy="12" r="10"/><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-13.88 5.66"/></svg>} title="RSS Mapping Data">
+        <p className="text-xs text-muted-foreground mb-3">Query subtitle group RSS feeds on Mikan. Requires mapping data download first.</p>
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">
+            {dataStatus === null ? 'Checking...'
+              : dataStatus.exists ? `Ready (${dataStatus.count} entries)`
+              : 'Not downloaded'}
           </span>
-          <Button variant="secondary" size="sm" className="text-xs h-7"
+          <Button variant="secondary" size="sm" className="text-xs h-8"
             onClick={dataStatus?.exists ? checkDataStatus : handleDownloadData}
             disabled={downloading}>
-            {downloading ? '下载中...' : dataStatus?.exists ? '刷新' : '下载数据'}
+            {downloading ? 'Downloading...' : dataStatus?.exists ? 'Refresh' : 'Download Data'}
           </Button>
         </div>
-        {downloadMsg && <pre className="mt-2 p-2 bg-muted rounded text-xs text-muted-foreground whitespace-pre-wrap max-h-24 overflow-y-auto">{downloadMsg}</pre>}
-      </div>
+        {downloadMsg && <pre className="mt-3 p-3 bg-muted rounded-lg text-xs text-muted-foreground whitespace-pre-wrap max-h-24 overflow-y-auto">{downloadMsg}</pre>}
+      </SectionCard>
 
-      <div className="border-t border-border" />
-
-      {/* RSS Download Path */}
-      <div>
-        <label htmlFor="cfg-RSS_DOWNLOAD_PATH" className="text-sm font-medium">RSS Download Path</label>
-        <Input id="cfg-RSS_DOWNLOAD_PATH" type="text" value={config.RSS_DOWNLOAD_PATH as string}
+      {/* ── RSS Download Path ── */}
+      <SectionCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>} title="RSS Download Path">
+        <p className="text-xs text-muted-foreground mb-3">Base directory for auto-downloaded files and generated NFO metadata.</p>
+        <Input
+          type="text"
+          value={config.RSS_DOWNLOAD_PATH as string}
           placeholder="/Media/番剧"
-          onChange={e => onChange('RSS_DOWNLOAD_PATH', e.target.value)} className="mt-1" />
-        <p className="text-xs text-muted-foreground mt-1">Base path for RSS auto-downloads (NFO + renamed files)</p>
-      </div>
+          onChange={e => onChange('RSS_DOWNLOAD_PATH', e.target.value)}
+        />
+      </SectionCard>
 
-      <div className="border-t border-border" />
-
-      {/* RSS 轮询器 */}
-      <div>
-        <p className="text-sm font-medium mb-3">RSS 轮询器</p>
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-xs text-muted-foreground">
-            {dlRunning ? '● 运行中' : '○ 已停止'}
-            {dlStatus.last_run && ` · 上次 ${dlStatus.last_run.slice(11, 16)}`}
-            {dlStatus.downloaded > 0 && ` · 累计 ${dlStatus.downloaded} 集`}
-          </span>
+      {/* ── Poller ── */}
+      <SectionCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>} title="RSS Poller">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="text-sm text-muted-foreground">
+              {dlRunning ? '● Running' : '○ Stopped'}
+              {dlStatus.last_run && ` · Last run ${dlStatus.last_run.slice(11, 16)}`}
+            </p>
+            {dlStatus.downloaded > 0 && (
+              <p className="text-xs text-muted-foreground mt-0.5">Total downloaded: {dlStatus.downloaded} episodes</p>
+            )}
+          </div>
           <Switch checked={dlRunning} onCheckedChange={async (v) => {
             if (v) { await rssApi.setDownloaderInterval(dlInterval); await rssApi.startDownloader(); }
             else { await rssApi.stopDownloader(); }
@@ -110,42 +119,45 @@ export default function RssToolsPanel({ config, onChange }: Props) {
           }} />
         </div>
         <div className="flex items-center gap-3">
-          <span className="text-xs text-muted-foreground shrink-0">间隔</span>
+          <span className="text-xs text-muted-foreground shrink-0">Interval</span>
           <Slider
             value={dlInterval} min={0} max={1440} step={1}
             onValueChange={setDlInterval}
             onValueCommit={async (v) => {
               await rssApi.setDownloaderInterval(v);
               await refreshDlStatus();
-              toast.success(`轮询间隔已更新为 ${v >= 60 ? `${(v / 60).toFixed(1)} 小时` : `${v} 分钟`}`, { duration: 3000, position: 'bottom-left' });
+              toast.success(`Poll interval updated to ${v >= 60 ? `${(v/60).toFixed(1)}h` : `${v}m`}`, { duration: 3000, position: 'bottom-left' });
             }}
           />
           <span className="text-xs font-medium tabular-nums w-16 text-right">
-            {dlInterval >= 60 ? `${(dlInterval / 60).toFixed(1)}h` : `${dlInterval}m`}
+            {dlInterval >= 60 ? `${(dlInterval/60).toFixed(1)}h` : `${dlInterval}m`}
           </span>
         </div>
         {dlStatus.errors.length > 0 && (
-          <pre className="mt-2 p-2 bg-destructive/10 rounded text-xs text-destructive whitespace-pre-wrap max-h-24 overflow-y-auto">{dlStatus.errors.join('\n')}</pre>
+          <pre className="mt-3 p-3 bg-destructive/10 rounded-lg text-xs text-destructive whitespace-pre-wrap max-h-24 overflow-y-auto">{dlStatus.errors.join('\n')}</pre>
         )}
-      </div>
+      </SectionCard>
 
-      <div className="border-t border-border" />
-
-      {/* 全局排除 */}
-      <div>
-        <p className="text-sm font-medium mb-2">全局排除</p>
+      {/* ── Exclude Patterns ── */}
+      <SectionCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>} title="Global Exclude Patterns">
+        <p className="text-xs text-muted-foreground mb-3">Torrent titles matching these keywords will be skipped during RSS polling.</p>
         <div className="flex flex-wrap items-center gap-1.5">
           {excludePatterns.map(p => (
-            <span key={p} className="text-xs bg-destructive/15 text-destructive px-1.5 py-0.5 rounded flex items-center gap-1">
-              {p}<button className="text-destructive hover:text-destructive/80 cursor-pointer text-xs" onClick={() => removeExclude(p)}>✕</button>
+            <span key={p} className="text-xs bg-destructive/10 text-destructive px-2 py-1 rounded-full flex items-center gap-1">
+              {p}
+              <button className="hover:text-destructive/70 cursor-pointer text-xs font-bold" onClick={() => removeExclude(p)}>×</button>
             </span>
           ))}
-          <input className="text-xs bg-muted border border-border rounded px-2 py-1 w-24 text-foreground placeholder:text-muted-foreground"
-            placeholder="新增..." value={excludeInput} onChange={e => setExcludeInput(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') addExclude(); }} />
-          <Button variant="outline" size="sm" className="text-xs h-6" onClick={addExclude}>+</Button>
+          <input
+            className="text-xs bg-muted border border-border rounded-full px-3 py-1 w-28 text-foreground placeholder:text-muted-foreground outline-none focus:border-primary"
+            placeholder="Add keyword..."
+            value={excludeInput}
+            onChange={e => setExcludeInput(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addExclude(); }}
+          />
+          <Button variant="outline" size="sm" className="text-xs h-7 rounded-full" onClick={addExclude}>+</Button>
         </div>
-      </div>
+      </SectionCard>
     </div>
   );
 }

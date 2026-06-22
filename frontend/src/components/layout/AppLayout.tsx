@@ -51,8 +51,8 @@ export default function AppLayout() {
             onClick={() => navigate('/torrent')}
             className={`flex items-center gap-3 p-3 rounded-lg group cursor-pointer text-left transition-all ${
               location.pathname === '/torrent'
-                ? 'text-primary font-bold bg-accent/20'
-                : 'text-muted-foreground hover:bg-muted'
+                ? 'text-primary font-bold bg-accent/20 border-l-2 border-primary'
+                : 'text-muted-foreground hover:bg-muted border-l-2 border-transparent'
             }`}
           >
             <span className="group-hover:scale-110 transition-transform"><IconMemory /></span>
@@ -63,8 +63,8 @@ export default function AppLayout() {
             onClick={() => navigate('/rss')}
             className={`flex items-center gap-3 p-3 rounded-lg group cursor-pointer text-left transition-all ${
               location.pathname === '/rss'
-                ? 'text-primary font-bold bg-accent/20'
-                : 'text-muted-foreground hover:bg-muted'
+                ? 'text-primary font-bold bg-accent/20 border-l-2 border-primary'
+                : 'text-muted-foreground hover:bg-muted border-l-2 border-transparent'
             }`}
           >
             <span className="group-hover:scale-110 transition-transform"><IconRss /></span>
@@ -75,8 +75,8 @@ export default function AppLayout() {
             onClick={() => navigate('/settings')}
             className={`flex items-center gap-3 p-3 rounded-lg group cursor-pointer text-left transition-all ${
               location.pathname === '/settings'
-                ? 'text-primary font-bold bg-accent/20'
-                : 'text-muted-foreground hover:bg-muted'
+                ? 'text-primary font-bold bg-accent/20 border-l-2 border-primary'
+                : 'text-muted-foreground hover:bg-muted border-l-2 border-transparent'
             }`}
           >
             <span className="group-hover:scale-110 transition-transform"><IconSettings /></span>

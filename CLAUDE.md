@@ -96,6 +96,7 @@ frontend/
 
 ## 开发注意事项
 
+- **前端禁止使用 emoji** — 所有图标必须使用 SVG 组件（`frontend/src/components/icons/`），禁止 emoji 字符
 - Windows 环境下 stdout/stderr 会自动重配置为 UTF-8
 - 当执行代码修改时, 在相应的位置添加清晰的代码注释
 - 异步 HTTP 请求使用 httpx (通过 clients 模块)
