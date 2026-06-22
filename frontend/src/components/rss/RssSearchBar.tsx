@@ -1,6 +1,3 @@
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent } from '@/components/ui/card';
 import { IconSearch } from '@/components/icons';
 
 interface Props {
@@ -13,28 +10,28 @@ interface Props {
 
 export default function RssSearchBar({ bangumiId, searching, searchError, onBangumiIdChange, onSearch }: Props) {
   return (
-    <Card>
-      <CardContent className="pt-4">
-        <div className="flex gap-2">
-          <div className="relative flex-1">
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
-              <IconSearch />
-            </span>
-            <Input
-              type="number"
-              className="flex-1 pl-8"
-              placeholder="Bangumi ID, e.g. 467461"
-              value={bangumiId}
-              onChange={e => onBangumiIdChange(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') onSearch(); }}
-            />
-          </div>
-          <Button onClick={onSearch} disabled={searching}>
-            {searching ? '查询中...' : '查询'}
-          </Button>
-        </div>
-        {searchError && <p className="mt-2 text-sm text-destructive">{searchError}</p>}
-      </CardContent>
-    </Card>
+    <div className="space-y-2">
+      <div className="flex items-center gap-3 bg-card p-1 rounded-xl shadow-sm border border-border w-full max-w-md">
+        <span className="pl-3 text-muted-foreground">
+          <IconSearch />
+        </span>
+        <input
+          type="number"
+          className="border-0 focus:ring-0 bg-transparent flex-grow text-sm py-2 outline-none"
+          placeholder="Enter Bangumi ID (e.g. 402315)"
+          value={bangumiId}
+          onChange={e => onBangumiIdChange(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') onSearch(); }}
+        />
+        <button
+          className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-xs font-semibold hover:brightness-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+          onClick={onSearch}
+          disabled={searching}
+        >
+          {searching ? 'Searching...' : 'Subscribe'}
+        </button>
+      </div>
+      {searchError && <p className="text-sm text-destructive">{searchError}</p>}
+    </div>
   );
 }
