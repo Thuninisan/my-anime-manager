@@ -1,0 +1,189 @@
+@import "tailwindcss";
+
+/* Class-based dark variant for shadcn-style dark mode toggle. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ======== Sakura Breeze — Light mode ======== */
+:root {
+  /* Surface / Background */
+  --background: 30 20% 98%;       /* #fbf9f8 surface */
+  --foreground: 180 2% 11%;       /* #1b1c1c on-surface */
+  --card: 30 10% 96%;             /* #f5f3f3 surface-container-low */
+  --card-foreground: 180 2% 11%;
+  --popover: 0 0% 100%;           /* #ffffff surface-container-lowest */
+  --popover-foreground: 180 2% 11%;
+
+  /* Primary — Sakura rose */
+  --primary: 357 35% 43%;         /* #94464f */
+  --primary-foreground: 0 0% 100%; /* #ffffff on-primary */
+
+  /* Secondary — Teal */
+  --secondary: 194 100% 26%;      /* #006686 */
+  --secondary-foreground: 0 0% 100%;
+
+  /* Muted surfaces */
+  --muted: 30 6% 93%;             /* #efeded surface-container */
+  --muted-foreground: 0 3% 30%;   /* #544343 on-surface-variant */
+
+  /* Accent — Sakura container pink */
+  --accent: 355 72% 75%;          /* #f09199 primary-container */
+  --accent-foreground: 355 40% 30%; /* #6e2932 on-primary-container */
+
+  /* Destructive */
+  --destructive: 0 76% 42%;       /* #ba1a1a error */
+  --destructive-foreground: 0 0% 100%;
+
+  /* Borders & inputs */
+  --border: 0 15% 83%;            /* #d9c1c1 outline-variant */
+  --input: 0 15% 83%;
+  --ring: 357 35% 43%;            /* primary */
+
+  /* Radius */
+  --radius: 0.625rem;
+
+  /* Semantic status colors */
+  --success: 142 76% 36%;
+  --warning: 38 92% 50%;
+  --info: 194 100% 26%;
+
+  /* Sidebar */
+  --sidebar-background: 30 10% 96%;       /* surface-container-low */
+  --sidebar-foreground: 180 2% 11%;
+  --sidebar-primary: 357 35% 43%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 30 6% 92%;            /* surface-container-high */
+  --sidebar-accent-foreground: 180 2% 11%;
+  --sidebar-border: 0 15% 83%;
+  --sidebar-ring: 357 35% 43%;
+  --sidebar-width: 16rem;
+  --sidebar-width-collapsed: 3rem;
+}
+
+/* ======== Sakura Breeze — Dark mode ======== */
+.dark {
+  /* Surface / Background — warm dark */
+  --background: 0 4% 10%;          /* #1a1818 */
+  --foreground: 30 20% 95%;
+  --card: 0 3% 13%;
+  --card-foreground: 30 20% 95%;
+  --popover: 0 3% 15%;
+  --popover-foreground: 30 20% 95%;
+
+  /* Primary — softer pink for dark */
+  --primary: 355 70% 75%;          /* #f09199 light sakura */
+  --primary-foreground: 355 60% 12%;
+
+  /* Secondary — lighter teal */
+  --secondary: 194 80% 55%;
+  --secondary-foreground: 194 80% 10%;
+
+  /* Muted surfaces */
+  --muted: 0 3% 18%;
+  --muted-foreground: 0 6% 65%;
+
+  /* Accent */
+  --accent: 357 30% 25%;
+  --accent-foreground: 355 50% 75%;
+
+  /* Destructive */
+  --destructive: 0 62% 50%;
+  --destructive-foreground: 0 0% 100%;
+
+  /* Borders */
+  --border: 0 5% 25%;
+  --input: 0 5% 25%;
+  --ring: 355 70% 75%;
+
+  /* Semantic — dark mode */
+  --success: 142 70% 45%;
+  --warning: 38 92% 60%;
+  --info: 194 80% 55%;
+
+  /* Sidebar (dark) */
+  --sidebar-background: 0 4% 8%;
+  --sidebar-foreground: 30 20% 95%;
+  --sidebar-primary: 355 70% 75%;
+  --sidebar-primary-foreground: 355 60% 12%;
+  --sidebar-accent: 0 3% 16%;
+  --sidebar-accent-foreground: 30 20% 95%;
+  --sidebar-border: 0 5% 22%;
+  --sidebar-ring: 355 70% 75%;
+}
+
+/* ======== Tailwind color tokens ======== */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-info: hsl(var(--info));
+
+  --color-sidebar-background: hsl(var(--sidebar-background));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  --radius: 0.625rem;
+}
+
+/* ======== Base reset ======== */
+* {
+  border-color: hsl(var(--border));
+}
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+
+/* ======== Sakura Breeze custom utilities ======== */
+.glass-card {
+  background: hsl(var(--card) / 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid hsl(var(--accent) / 0.1);
+}
+
+.sakura-shadow {
+  box-shadow: 0px 4px 20px hsl(var(--accent) / 0.08);
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--accent));
+  border-radius: 10px;
+}
+
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-5px); }
+  100% { transform: translateY(0px); }
+}
+.animate-float {
+  animation: float 3s ease-in-out infinite;
+}

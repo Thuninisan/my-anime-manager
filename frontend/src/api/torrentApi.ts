@@ -1,0 +1,79 @@
+import type { TorrentPreviewResponse, ConfirmResponse, AppConfig } from '../types/preview';
+
+const API_BASE = '/api';
+
+export async function uploadPreview(file: File): Promise<TorrentPreviewResponse> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_BASE}/torrent/preview`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Upload failed (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+export async function confirmTorrent(previewData: TorrentPreviewResponse): Promise<ConfirmResponse> {
+  const res = await fetch(`${API_BASE}/torrent/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(previewData),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Confirm failed (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
+// ── Config ──
+
+export async function getConfig(): Promise<AppConfig> {
+  const res = await fetch('/config');
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    // Detect Vite proxy error or SPA fallback HTML
+    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+      throw new Error(
+        'Backend not reachable — make sure the FastAPI server is running on port 8000.\n' +
+        'Start it with: python -m my_anime_manager --serve'
+      );
+    }
+    throw new Error(`Failed to fetch config (HTTP ${res.status}): ${text.slice(0, 200)}`);
+  }
+  // Guard against HTML responses that somehow return 200
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    const text = await res.text().catch(() => '');
+    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+      throw new Error(
+        'Backend returned HTML instead of JSON.\n' +
+        'If running via --serve: restart the FastAPI server.\n' +
+        'If running via npm run dev: make sure the backend is running on port 8000.'
+      );
+    }
+    throw new Error(`Expected JSON but got ${ct || 'unknown content-type'}`);
+  }
+  return res.json();
+}
+
+export async function updateConfig(changes: Partial<AppConfig>): Promise<AppConfig> {
+  const res = await fetch('/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Failed to update config (HTTP ${res.status})`);
+  }
+  return res.json();
+}
