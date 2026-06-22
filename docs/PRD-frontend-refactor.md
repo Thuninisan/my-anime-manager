@@ -101,18 +101,21 @@ App
     └── RSS Tab: 映射数据、下载路径、轮询器开关/间隔、全局排除
 ```
 
-### 2.3 组件规模（行数）
+### 2.3 组件规模（行数）— 重构后
 
-| 组件 | 行数 | 问题 |
-|---|---|---|
-| MappingOverviewCard | 428 | 包含双视图 + 编辑 Sheet + 状态 + 路径构建 |
-| SettingsModal | 377 | 内含 Slider/Switch/NavItem 子组件 |
-| RssManager | 372 | 搜索 + 订阅 + 历史 Dialog 全在一个文件 |
-| EpisodeEditSheet | 306 | 可接受，但依赖父组件透传大量 props |
-| App | 224 | 内联 5 个 SVG 图标组件 + 状态机条件渲染 |
-| ConfirmAction | 21 | ✅ 合理 |
-| ProcessingResult | 32 | ✅ 合理 |
-| TorrentUpload | 76 | ✅ 合理 |
+| 组件 | 重构前 | 重构后 | 说明 |
+|---|---|---|---|
+| MappingOverviewCard | 428 | 407 | 卡片式布局 + stats sidebar |
+| SettingsModal | 377 | **已删除** | 拆为 7 个文件 |
+| RssManager | 372 | **已删除** | 拆为 7 个文件 |
+| EpisodeEditSheet | 306 | 306 | 未变 |
+| App | 224 | **6** | 仅导出 AppLayout |
+| TorrentUpload | 76 | 170 | Sakura Breeze 风格 |
+| RssPage | — | 130 | 状态容器 (hooks) |
+| SettingsPage | — | 101 | 独立页面 (useConfig) |
+| AppLayout | — | 155 | Sidebar + Header + Outlet |
+
+**新增文件**: icons/ (101), rss/×7 (527), settings/×3 (271), shared/FieldGroup (33), ui/switch (29), ui/slider (31), hooks/×4 (213), api/client (39)
 
 ### 2.4 API 层现状
 
@@ -612,47 +615,22 @@ frontend/src/
 
 ## 11. 实施阶段
 
-### 阶段 1: 基础设施 (预计 1-2 天)
+### 已完成 ✅
 
-- [ ] 安装 react-router-dom
-- [ ] 创建 `api/client.ts` 统一 fetch 封装
-- [ ] 提取所有 SVG 图标到 `components/icons/`
-- [ ] 提取 `Slider`, `Switch` 到 `components/ui/`
-- [ ] 清理 `types/preview.ts` 中的重复定义
-- [ ] 建立 `pages/` 和 `stores/` 目录结构
-- [ ] 配置路由 + AppLayout 壳
+| 阶段 | 内容 | 提交 |
+|---|---|---|
+| 1: 基础设施 | react-router-dom v7, 路由表(3条), pages/, icons/, types修复, 删除 ConfirmAction | `db77d4e` |
+| 2: RssManager 拆分 | 373行→7子组件 (RssSearchBar, SubtitleGroupTable, TagFilterPanel, FeedPreview, SubscriptionCard, SubscriptionList, DownloadHistoryDialog) | `0d58804` |
+| 3: SettingsModal 拆分 | 376行→Switch/Slider/FieldGroup + GeneralConfigForm/QbitConfigForm/RssToolsPanel + SettingsPage 独立页面 | `f3db51f` |
+| 4: Hooks 提取 | api/client.ts + useRssSearch/useSubscriptions/useDownloadHistory/useConfig, RssPage 208→130, SettingsPage 135→101 | `07a1186` |
 
-### 阶段 2: Torrent 模块重构 (预计 2 天)
+### 待完成 ⬜
 
-- [ ] 拆分 `MappingOverviewCard` → `SeasonMappingTable` + `EpisodeMappingTable`
-- [ ] 提取 `ErrorCard`, `ProcessingOverlay` 为独立组件
-- [ ] 创建 `TorrentFlowContext` 或 `useTorrentFlow` hook
-- [ ] 组装 `TorrentPage`
-- [ ] **回归测试**: 上传 → 预览 → 编辑 → 确认 → 结果全流程
-
-### 阶段 3: RSS 模块重构 (预计 2 天)
-
-- [ ] 拆分 `RssManager` → 7 个子组件
-- [ ] 创建 `useRssSearch`, `useSubscriptions`, `useDownloadHistory` hooks
-- [ ] 添加骨架屏 + 空状态 + 错误状态
-- [ ] 组装 `RssPage`
-- [ ] **回归测试**: 搜索 → 订阅 → Feed 预览 → 历史查看全流程
-
-### 阶段 4: 设置模块重构 (预计 1 天)
-
-- [ ] 拆分 `SettingsModal` → 5 个子组件
-- [ ] 创建 `useConfig` hook
-- [ ] 改为独立页面 `/settings`
-- [ ] 添加离开确认（脏数据保护）
-- [ ] **回归测试**: 配置读写、连接检测、轮询器控制、排除模式
-
-### 阶段 5: 收尾 (预计 1 天)
-
-- [ ] 响应式适配完善
-- [ ] 无障碍 (a11y) review
-- [ ] 整体 UI 一致性检查（间距、字号、颜色）
-- [ ] TypeScript strict mode 通过
-- [ ] 端到端手动测试
+- [ ] 骨架屏 (SkeletonCard/SkeletonTable) — `components/ui/skeleton.tsx`
+- [ ] 空状态插画 (EmptyState) — `components/ui/empty-state.tsx`
+- [ ] 响应式适配 — 侧边栏汉堡菜单 / 表格→卡片 / 底部TabBar
+- [ ] 无障碍 (a11y) — 键盘导航、aria-label、focus-visible
+- [ ] 代码分割 — 按路由 lazy load 页面组件
 
 ---
 
