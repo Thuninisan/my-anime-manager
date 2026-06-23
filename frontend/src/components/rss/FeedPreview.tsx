@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import type { RssFeedItem } from '@/types/preview';
 import { TAG_COLORS } from './TagFilterPanel';
+
+const INITIAL_SHOW = 5;
 
 function formatSize(bytes: number) {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
@@ -9,20 +12,17 @@ function formatSize(bytes: number) {
 
 function renderTags(tags: string[]) {
   return tags.map(t => (
-    <span key={t} className={`text-xs px-1.5 py-0.5 rounded ${TAG_COLORS[t] || 'bg-muted text-muted-foreground'}`}>
+    <span key={t} className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${TAG_COLORS[t] || 'bg-muted text-muted-foreground'}`}>
       {t}
     </span>
   ));
 }
 
-/* ── v1/v2 dedup ──────────────────────────────────────────────────
-   Group by (episode_number + sorted tags), keep newest pub_date.
-   Older items in the same group are marked as outdated (v1). ────── */
+/* ── v1/v2 dedup ────────────────────────────────────────────────── */
 
 type ItemWithIndex = RssFeedItem & { _idx: number };
 
 function markOutdated(items: RssFeedItem[]): (RssFeedItem & { outdated: boolean })[] {
-  // Group by episode_number + tags (sorted, joined)
   const groups = new Map<string, ItemWithIndex[]>();
   items.forEach((item, idx) => {
     const ep = item.episode_number || 0;
@@ -32,23 +32,15 @@ function markOutdated(items: RssFeedItem[]): (RssFeedItem & { outdated: boolean 
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push({ ...item, _idx: idx });
   });
-
-  // Mark newest in each group, others as outdated
   const newestIdx = new Set<number>();
   for (const [, group] of groups) {
-    if (group.length < 2) {
-      newestIdx.add(group[0]._idx);
-      continue;
-    }
+    if (group.length < 2) { newestIdx.add(group[0]._idx); continue; }
     let newest = group[0];
     for (const g of group) {
-      if ((g.pub_date || '') > (newest.pub_date || '')) {
-        newest = g;
-      }
+      if ((g.pub_date || '') > (newest.pub_date || '')) newest = g;
     }
     newestIdx.add(newest._idx);
   }
-
   return items.map((item, idx) => ({
     ...item,
     outdated: item.episode_number > 0 && !newestIdx.has(idx),
@@ -63,60 +55,102 @@ interface Props {
 }
 
 export default function FeedPreview({ items, selectedTags }: Props) {
+  const [showAll, setShowAll] = useState(false);
+
   if (items.length === 0) {
     return <p className="py-4 text-center text-muted-foreground text-sm">No items in this feed</p>;
   }
 
   const marked = markOutdated(items);
+  const visible = showAll ? marked : marked.slice(0, INITIAL_SHOW);
+  const hidden = marked.length - INITIAL_SHOW;
 
   return (
-    <div className="bg-muted rounded-lg">
-      {marked.map((item, i) => {
-        const passed = selectedTags.length === 0 || selectedTags.every(t => item.tags.includes(t));
-        const dim = !passed || item.outdated || item.downloaded;
-        return (
-          <div
-            key={i}
-            className={`flex flex-wrap items-start gap-2 px-4 py-2.5 text-sm border-b border-border last:border-b-0 ${dim ? 'opacity-40' : ''}`}
+    <div>
+      {/* Header */}
+      <div className="px-5 py-2 flex justify-between items-center border-b border-border">
+        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+          Recent Entries ({marked.length} items)
+        </span>
+      </div>
+
+      {/* Table */}
+      <table className="w-full text-left border-collapse">
+        <thead className="bg-muted/30">
+          <tr className="text-[10px] uppercase tracking-widest text-muted-foreground border-b border-border">
+            <th className="px-5 py-2 font-semibold">Title / Episode</th>
+            <th className="px-4 py-2 font-semibold w-20">Size</th>
+            <th className="px-4 py-2 font-semibold">Tags</th>
+            <th className="px-5 py-2 font-semibold w-14 text-center">Status</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border/50">
+          {visible.map((item, i) => {
+            const hasEp = item.episode_number > 0;
+            const passed = selectedTags.length === 0 || selectedTags.every(t => item.tags.includes(t));
+            const dim = !passed || item.outdated || item.downloaded;
+
+            return (
+              <tr key={i} className={`hover:bg-muted/20 transition-colors ${dim ? 'opacity-50' : ''}`}>
+                <td className="px-5 py-2.5">
+                  <div className={`text-[13px] font-bold truncate max-w-lg ${dim ? 'text-muted-foreground' : 'text-foreground'}`} title={item.guid}>
+                    {item.guid}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {hasEp && (
+                      <span className={`text-[10px] font-bold ${dim ? 'text-muted-foreground/60' : 'text-primary'}`}>
+                        EP{item.episode_number.toString().padStart(2, '0')}
+                        {item.outdated ? ' (v1)' : ''}
+                      </span>
+                    )}
+                    {item.excluded && (
+                      <span className="text-[10px] text-destructive font-medium">Excluded</span>
+                    )}
+                    {item.outdated && (
+                      <span className="text-[10px] px-1 py-0.5 rounded bg-muted-foreground/15 text-muted-foreground font-medium">
+                        v1 skipped
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-4 py-2.5 text-xs text-muted-foreground tabular-nums">
+                  {formatSize(item.size_bytes)}
+                </td>
+                <td className="px-4 py-2.5">
+                  <div className="flex flex-wrap gap-1">{renderTags(item.tags)}</div>
+                </td>
+                <td className="px-5 py-2.5 text-center">
+                  {item.downloaded || item.outdated ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground mx-auto">
+                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  ) : passed ? (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500 mx-auto">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-destructive mx-auto">
+                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+
+      {/* "View more" button */}
+      {hidden > 0 && (
+        <div className="p-4 text-center border-t border-border">
+          <button
+            className="text-primary text-xs font-semibold hover:underline cursor-pointer"
+            onClick={() => setShowAll(!showAll)}
           >
-            <span className={`flex-1 min-w-0 break-all ${dim ? 'text-muted-foreground' : 'text-foreground'}`}>
-              {item.guid}
-            </span>
-
-            <span className="shrink-0 flex items-center gap-1.5 text-xs">
-              {/* Excluded badge */}
-              {item.excluded && <span className="text-destructive font-medium">Excluded</span>}
-
-              {/* v1 outdated badge */}
-              {item.outdated && (
-                <span className="text-[10px] px-1 py-0.5 rounded bg-muted-foreground/20 text-muted-foreground font-medium">
-                  v1
-                </span>
-              )}
-
-              {renderTags(item.tags)}
-              <span className="text-muted-foreground min-w-16 text-right tabular-nums">
-                {formatSize(item.size_bytes)}
-              </span>
-
-              {/* Status icon */}
-              {item.downloaded || item.outdated ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              ) : passed ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-500">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-destructive">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              )}
-            </span>
-          </div>
-        );
-      })}
+            {showAll ? 'Collapse entries' : `View ${hidden} more entries...`}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

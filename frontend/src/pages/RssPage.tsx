@@ -12,7 +12,7 @@ import { useDownloadHistory } from '@/hooks/useDownloadHistory';
 
 export default function RssPage() {
   const [bangumiId, setBangumiId] = useState('');
-  const { result, searching, error: searchError, search } = useRssSearch();
+  const { result, searching, error: searchError, search, clear: clearSearch } = useRssSearch();
   const { subscriptions, loading: subLoading, subscribe, unsubscribe, activate } = useSubscriptions();
   const { open: historyOpen, data: historyData, loading: historyLoading, subscription: historySub, openHistory, closeHistory } = useDownloadHistory();
 
@@ -78,35 +78,84 @@ export default function RssPage() {
         />
       </div>
 
-      {/* Search results (subtitle groups) */}
+      {/* Search results dialog */}
       {result && (
-        <div className="mt-6 glass-card rounded-xl sakura-shadow p-6 space-y-3">
-          <h3 className="text-base font-semibold flex items-center gap-2">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-13.88 5.66"/>
-            </svg>
-            Subtitle Groups
-            <span className="ml-2 text-sm font-normal text-muted-foreground">Mikan ID: {result.mikan_id}</span>
-          </h3>
-          <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg text-sm">
-            <span className="text-muted-foreground shrink-0">Global RSS:</span>
-            <a href={result.global_rss} target="_blank" rel="noreferrer" className="text-primary break-all">
-              {result.global_rss}
-            </a>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4">
+          <div className="bg-card w-full max-w-5xl h-[85vh] rounded-xl shadow-2xl overflow-hidden flex flex-col border border-border">
+            {/* Header */}
+            <header className="px-5 py-4 border-b border-border bg-muted/20 flex justify-between items-start shrink-0">
+              <div className="space-y-2">
+                <div className="flex items-center gap-3">
+                  <div className="bg-primary/10 p-2 rounded-lg">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground leading-tight">{result.name}</h2>
+                    <div className="flex items-center gap-3 mt-1">
+                      <span className="text-[10px] font-bold bg-muted px-2 py-0.5 rounded text-muted-foreground">
+                        Mikan ID: {result.mikan_id}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{result.groups.length} groups available</span>
+                    </div>
+                  </div>
+                </div>
+                {/* Global RSS */}
+                <div className="flex items-center gap-1 text-xs group/ml-0">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary shrink-0">
+                    <path d="M4 11a9 9 0 0 1 9 9" /><path d="M4 4a16 16 0 0 1 16 16" /><circle cx="5" cy="19" r="1" />
+                  </svg>
+                  <span className="text-muted-foreground truncate max-w-lg">Global RSS: <a href={result.global_rss} target="_blank" rel="noreferrer" className="text-primary font-medium">{result.global_rss}</a></span>
+                </div>
+              </div>
+              <button
+                className="p-2 hover:bg-muted rounded-full transition-colors cursor-pointer shrink-0"
+                onClick={clearSearch}
+                aria-label="Close"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                  <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </header>
+
+            {/* Scrollable group list */}
+            <div className="flex-1 overflow-y-auto">
+              <SubtitleGroupTable
+                result={result}
+                subscriptions={subscriptions}
+                expanded={expanded}
+                loadingFeed={loadingFeed}
+                filterTags={filterTags}
+                tagBoxOpen={tagBoxOpen}
+                onToggleFeed={toggleFeed}
+                onToggleTag={toggleTag}
+                onToggleTagBox={(id) => setTagBoxOpen(prev => ({ ...prev, [id]: !prev[id] }))}
+                onSubscribe={doSubscribe}
+                getSubMode={getSubMode}
+              />
+            </div>
+
+            {/* Footer */}
+            <footer className="px-5 py-3 border-t border-border bg-muted/20 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                  {result.groups.length} groups
+                </span>
+                <span className="text-muted-foreground/30">|</span>
+                <span className="text-[10px] text-primary font-semibold">
+                  {subscriptions.filter(s => s.active !== 0).length} active subscriptions
+                </span>
+              </div>
+              <button
+                className="bg-primary text-primary-foreground px-5 py-2 rounded-lg text-xs font-semibold hover:brightness-110 active:scale-95 transition-all cursor-pointer"
+                onClick={clearSearch}
+              >
+                Close
+              </button>
+            </footer>
           </div>
-          <SubtitleGroupTable
-            result={result}
-            subscriptions={subscriptions}
-            expanded={expanded}
-            loadingFeed={loadingFeed}
-            filterTags={filterTags}
-            tagBoxOpen={tagBoxOpen}
-            onToggleFeed={toggleFeed}
-            onToggleTag={toggleTag}
-            onToggleTagBox={(id) => setTagBoxOpen(prev => ({ ...prev, [id]: !prev[id] }))}
-            onSubscribe={doSubscribe}
-            getSubMode={getSubMode}
-          />
         </div>
       )}
 
