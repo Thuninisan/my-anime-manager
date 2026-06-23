@@ -30,6 +30,20 @@ async def _delay() -> None:
     await asyncio.sleep(config.API_DELAY_MS / 1000.0)
 
 
+async def _retry(fn, *args, max_retries: int = 3, **kwargs):
+    """Call *fn(*args, **kwargs)*, retrying up to *max_retries* times on failure."""
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            return await fn(*args, **kwargs)
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries - 1:
+                wait = (attempt + 1) * 1.5  # 1.5s, 3s, 4.5s backoff
+                await asyncio.sleep(wait)
+    raise last_err  # type: ignore[misc]
+
+
 async def search_subjects(keyword: str) -> list[dict]:
     """Search Bangumi subjects (v0 API with legacy fallback).
 
@@ -42,7 +56,8 @@ async def search_subjects(keyword: str) -> list[dict]:
     await _delay()
     async with _get_client() as client:
         try:
-            res = await client.post(
+            res = await _retry(
+                client.post,
                 "/v0/search/subjects",
                 json={"keyword": keyword, "filter": {"type": [2]}},
                 params={"limit": 20},
@@ -52,8 +67,9 @@ async def search_subjects(keyword: str) -> list[dict]:
         except Exception:
             # v0 search failed, try legacy API
             try:
-                res = await client.get(
-                    f"/search/subject/{quote(keyword)}?type=2"
+                res = await _retry(
+                    client.get,
+                    f"/search/subject/{quote(keyword)}?type=2",
                 )
                 data = res.json()
                 raw_list = data.get("list", [])
@@ -89,7 +105,7 @@ async def get_subject(subject_id: int) -> dict:
     await _delay()
     async with _get_client() as client:
         try:
-            res = await client.get(f"/v0/subjects/{subject_id}")
+            res = await _retry(client.get, f"/v0/subjects/{subject_id}")
             res.raise_for_status()
             return res.json()
         except httpx.HTTPStatusError as e:
@@ -114,7 +130,7 @@ async def get_relations(subject_id: int) -> list[dict]:
     await _delay()
     async with _get_client() as client:
         try:
-            res = await client.get(f"/v0/subjects/{subject_id}/subjects")
+            res = await _retry(client.get, f"/v0/subjects/{subject_id}/subjects")
             return res.json()
         except Exception as e:
             print(f"   ⚠️ 获取关系失败 (id={subject_id}): {e}")
@@ -133,7 +149,8 @@ async def get_episode_total(subject_id: int) -> int:
     await _delay()
     async with _get_client() as client:
         try:
-            res = await client.get(
+            res = await _retry(
+                client.get,
                 "/v0/episodes",
                 params={"subject_id": subject_id, "type": 0, "limit": 1},
             )
@@ -159,7 +176,8 @@ async def get_episodes(subject_id: int) -> list[dict]:
 
     async with _get_client() as client:
         while True:
-            res = await client.get(
+            res = await _retry(
+                client.get,
                 "/v0/episodes",
                 params={
                     "subject_id": subject_id,

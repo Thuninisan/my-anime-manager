@@ -5,7 +5,7 @@ import SubscriptionCard from './SubscriptionCard';
 interface Props {
   subscriptions: SubscriptionOut[];
   loading: boolean;
-  onOpenHistory: (bangumiId: number) => void;
+  onOpenHistory: (bangumiId: number, subscription: SubscriptionOut) => void;
   onUnsubscribe: (bangumiId: number) => void;
   onActivate: (bangumiId: number) => Promise<void>;
 }

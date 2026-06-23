@@ -163,7 +163,7 @@ async def _single_episode_mode(show_name: str, season: int, episode: int, nfo_fl
     print(f"   起始条目 ID: {first_id}")
 
     # Traverse sequels
-    chain = await bangumi_service.build_bangumi_chain(first_id)
+    chain, _ = await bangumi_service.build_bangumi_chain(first_id)
 
     # If chain is too short, try date-sorted fallback
     total_tv_seasons = len(season_map)
@@ -173,7 +173,7 @@ async def _single_episode_mode(show_name: str, season: int, episode: int, nfo_fl
             f"但 TMDB 有 {total_tv_seasons} 季"
         )
         print("   尝试按日期排序的备选方案...")
-        chain = await bangumi_service.build_chain_by_date(bgm_results)
+        chain, _ = await bangumi_service.build_chain_by_date(bgm_results)
 
         if len(chain) < total_tv_seasons:
             print(

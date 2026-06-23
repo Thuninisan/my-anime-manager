@@ -14,7 +14,7 @@ export default function RssPage() {
   const [bangumiId, setBangumiId] = useState('');
   const { result, searching, error: searchError, search } = useRssSearch();
   const { subscriptions, loading: subLoading, subscribe, unsubscribe, activate } = useSubscriptions();
-  const { open: historyOpen, data: historyData, loading: historyLoading, openHistory, closeHistory } = useDownloadHistory();
+  const { open: historyOpen, data: historyData, loading: historyLoading, subscription: historySub, openHistory, closeHistory } = useDownloadHistory();
 
   const [expanded, setExpanded] = useState<Record<string, RssFeedResponse | null>>({});
   const [loadingFeed, setLoadingFeed] = useState<Record<string, boolean>>({});
@@ -125,6 +125,7 @@ export default function RssPage() {
         open={historyOpen}
         data={historyData}
         loading={historyLoading}
+        subscription={historySub}
         onClose={closeHistory}
       />
     </>

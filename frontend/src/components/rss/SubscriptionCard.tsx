@@ -1,31 +1,47 @@
+import { useState } from 'react';
 import type { SubscriptionOut } from '@/types/preview';
 
 interface Props {
   subscription: SubscriptionOut;
-  onOpenHistory: (bangumiId: number) => void;
+  onOpenHistory: (bangumiId: number, subscription: SubscriptionOut) => void;
   onUnsubscribe: (bangumiId: number) => void;
   onActivate: (bangumiId: number) => Promise<void>;
 }
 
 export default function SubscriptionCard({ subscription: s, onOpenHistory, onUnsubscribe, onActivate }: Props) {
   const totalEps = s.bgm_sortrange ? s.bgm_sortrange[1] - s.bgm_sortrange[0] + 1 : 0;
-  const downloaded = 0; // placeholder until we have real data in list view
+  const downloaded = s.downloaded_count || 0;
   const progressPct = totalEps > 0 ? (downloaded / totalEps) * 100 : 0;
   const isActive = s.active !== 0;
   const hue = (s.bangumi_id * 137) % 360;
+  const [imgError, setImgError] = useState(false);
+  const showImage = !!(s.poster_url && !imgError);
 
   return (
     <div className="group relative bg-card rounded-xl overflow-hidden sakura-shadow transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
-      {/* Poster area */}
+      {/* Poster area — gradient background always visible, image renders on top when available */}
       <div
         className="aspect-[2/3] relative overflow-hidden cursor-pointer"
         style={{ background: `linear-gradient(135deg, hsl(${hue},45%,35%), hsl(${(hue+40)%360},35%,20%))` }}
-        onClick={() => onOpenHistory(s.bangumi_id)}
+        onClick={() => onOpenHistory(s.bangumi_id, s)}
       >
-        {/* Title overlay on poster */}
-        <div className="absolute inset-0 flex items-center justify-center p-4">
-          <span className="text-3xl font-bold text-white/25">{(s.name || '?')[0]}</span>
-        </div>
+        {/* Bangumi poster image — loads on top of gradient background */}
+        {showImage && (
+          <img
+            src={s.poster_url!}
+            alt={s.name}
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={() => setImgError(true)}
+            loading="lazy"
+          />
+        )}
+
+        {/* First-letter placeholder — only visible when poster image is absent */}
+        {!showImage && (
+          <div className="absolute inset-0 flex items-center justify-center p-4">
+            <span className="text-3xl font-bold text-white/25">{(s.name || '?')[0]}</span>
+          </div>
+        )}
 
         {/* Rating badge */}
         <div className="absolute top-3 left-3 bg-secondary text-white text-[10px] font-bold px-2 py-1 rounded-full glass-effect">
@@ -39,7 +55,7 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-y-4 group-hover:translate-y-0 bg-primary/20 backdrop-blur-[2px]">
           <button
             className="bg-card text-primary p-3 rounded-full shadow-md hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer"
-            onClick={(e) => { e.stopPropagation(); onOpenHistory(s.bangumi_id); }}
+            onClick={(e) => { e.stopPropagation(); onOpenHistory(s.bangumi_id, s); }}
             title="Download History"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

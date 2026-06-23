@@ -6,3 +6,4 @@ venv
 .github
 Dockerfile
 .dockerignore
+frontend/node_modules

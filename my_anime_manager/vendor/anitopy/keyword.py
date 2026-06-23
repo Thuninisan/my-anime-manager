@@ -32,6 +32,7 @@ class KeywordManager:
 
         self._file_extensions = {}
         self._keys = {}
+        self._display_names = {}  # normalized keyword → display name
 
         self.add(ElementCategory.ANIME_SEASON_PREFIX, options_unidentifiable, [
             'S', 'SAISON', 'SEASON'])
@@ -81,7 +82,8 @@ class KeywordManager:
             'ASS', 'SRT'])
 
         self.add(ElementCategory.LANGUAGE, options_default, [
-            'ENG', 'ENGLISH', 'ESPANOL', 'JAP', 'PT-BR', 'SPANISH', 'VOSTFR'])
+            'ENG', 'ENGLISH', 'ESPANOL', 'JAP', 'JP', 'PT-BR', 'SPANISH', 'VOSTFR',
+            'CHS', 'CHT', 'CHS_JP', 'CHT_JP', 'CHS&CHT', 'CHT&CHS'])
         self.add(ElementCategory.LANGUAGE, options_unidentifiable, [
             'ESP', 'ITA'])  # e.g. "Tokyo ESP", "Bokura ga Ita"
 
@@ -91,6 +93,8 @@ class KeywordManager:
 
         self.add(ElementCategory.RELEASE_GROUP, options_default, [
             'THORA'])
+
+        self._register_displays()
 
         self.add(ElementCategory.RELEASE_INFORMATION, options_default, [
             'BATCH', 'COMPLETE', 'PATCH', 'REMUX'])
@@ -139,6 +143,10 @@ class KeywordManager:
                 continue
             keyword_container[keyword] = Keyword(category, options)
 
+    def get_display(self, keyword_text):
+        """Return the display name for a keyword, or the original if no mapping."""
+        return self._display_names.get(self.normalize(keyword_text), keyword_text)
+
     def find(self, string, category=ElementCategory.UNKNOWN):
         keyword_container = self._get_keyword_container(category)
         if string not in keyword_container.keys():
@@ -180,6 +188,16 @@ class KeywordManager:
         without_accents = ''.join([c for c in nfkd if not ud.combining(c)])
 
         return without_accents.upper()
+
+    def _register_displays(self):
+        """Map abbreviated keywords to human-readable display names."""
+        mapping = {
+            'CHS': '简体中文',
+            'CHT': '繁体中文',
+            'JP': '日语',
+        }
+        for k, v in mapping.items():
+            self._display_names[self.normalize(k)] = v
 
     def _get_keyword_container(self, category):
         return self._file_extensions \

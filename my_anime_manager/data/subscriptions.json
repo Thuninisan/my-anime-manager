@@ -1,0 +1,28 @@
+[
+  {
+    "name": "冰之城墙",
+    "rss_url": "https://mikanani.me/RSS/Bangumi?bangumiId=3898&subgroupid=203",
+    "bangumi_id": 535669,
+    "subgroup_id": 203,
+    "subgroup_name": "桜都字幕组",
+    "filter_tags": [
+      "内封"
+    ],
+    "backup_rss_url": "",
+    "backup_subgroup_id": 0,
+    "backup_subgroup_name": "",
+    "backup_filter_tags": [],
+    "download_path": "/冰之城墙/Season {season}",
+    "active": 1,
+    "created_at": "2026-06-23T15:44:45",
+    "bgm_season": 1,
+    "bgm_sortrange": [
+      1,
+      14
+    ],
+    "tmdb_id": 283428,
+    "tmdb_season": null,
+    "updated_at": "2026-06-23T15:44:51",
+    "poster_url": "https://lain.bgm.tv/pic/cover/l/93/8f/535669_4zoHG.jpg"
+  }
+]

@@ -181,6 +181,35 @@ async def download_show_images(
     return results
 
 
+async def get_subscription_poster_url(
+    bangumi_id: int,
+) -> str | None:
+    """Fetch the Bangumi cover image CDN URL for an RSS subscription.
+
+    Does NOT download the image — just returns the CDN URL so the
+    frontend can load it directly from Bangumi's servers.
+
+    Args:
+        bangumi_id: Bangumi subject ID
+
+    Returns:
+        CDN URL string (e.g. ``"https://..."``) or ``None`` on failure.
+    """
+    from ..clients.bangumi import get_subject
+
+    try:
+        subject = await get_subject(bangumi_id)
+    except Exception:
+        return None
+
+    if not subject.get("images"):
+        return None
+
+    # Bangumi images priority: large > common > medium
+    imgs = subject["images"]
+    return imgs.get("large") or imgs.get("common") or imgs.get("medium") or None
+
+
 async def download_season_poster(
     bgm_subject: dict,
     output_dir: str,

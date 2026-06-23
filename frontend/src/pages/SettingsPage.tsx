@@ -105,12 +105,6 @@ export default function SettingsPage() {
         </div>
       ) : null}
 
-      {/* Floating decoration */}
-      <div className="fixed bottom-12 right-12 pointer-events-none opacity-10">
-        <svg width="120" height="120" viewBox="0 0 24 24" fill="currentColor" className="text-primary rotate-12">
-          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
-        </svg>
-      </div>
     </>
   );
 }

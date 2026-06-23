@@ -46,7 +46,7 @@ def is_skippable_subject(subject: dict) -> bool:
         if pattern in name_str:
             return True
 
-    # type 1 = book / movie
+    # type 1 = 书籍 (book)
     if subject.get("type") == 1:
         return True
     if subject.get("platform") and "movie" in str(subject["platform"]).lower():
@@ -87,18 +87,53 @@ async def find_first_in_chain(subject_id: int) -> int:
     return current_id
 
 
-async def build_bangumi_chain(first_subject_id: int) -> list[dict]:
+def _classify_skipped(subject: dict) -> str:
+    """Classify a skipped (non-TV) subject into a human-readable kind label.
+
+    Args:
+        subject: Bangumi subject dict
+
+    Returns:
+        Kind label string, e.g. "剧场版", "总集篇", "OVA", "番外篇", "其他"
+    """
+    name_str = (
+        (subject.get("name") or "")
+        + " "
+        + (subject.get("name_cn") or "")
+    ).lower()
+
+    if any(w in name_str for w in ("剧场版", "劇場版", "movie", "film")):
+        return "剧场版"
+    if any(w in name_str for w in ("总集篇", "總集篇", "総集編")):
+        return "总集篇"
+    if "ova" in name_str or "oad" in name_str:
+        return "OVA"
+    if any(w in name_str for w in ("特别篇", "特番", "スペシャル")):
+        return "特别篇"
+    if "未放送" in name_str:
+        return "未放送"
+    if "映像特典" in name_str:
+        return "映像特典"
+    if subject.get("type") == 1:
+        return "电影"
+    return "番外篇"
+
+
+async def build_bangumi_chain(first_subject_id: int) -> tuple[list[dict], list[dict]]:
     """Build a chain of Bangumi entries by traversing sequel relations.
 
-    Filters out non-TV entries (movies, OVAs, etc.).
+    Filters out non-TV entries (movies, OVAs, etc.) into a separate skipped
+    list so they don't interrupt the chain, but are still available for
+    manual selection in the frontend.
 
     Args:
         first_subject_id: Starting subject ID (should be the first in series)
 
     Returns:
-        List of chain entry dicts
+        Tuple of (chain_entries, skipped_entries)
     """
     chain: list[dict] = []
+    skipped: list[dict] = []
     visited: set[int] = set()
     current_id = first_subject_id
 
@@ -108,10 +143,18 @@ async def build_bangumi_chain(first_subject_id: int) -> list[dict]:
             break
         visited.add(current_id)
 
-        try:
-            subject = await bgm_client.get_subject(current_id)
-        except Exception as e:
-            print(f"   ❌ 获取条目 {current_id} 失败: {e}")
+        subject = None
+        for attempt in range(3):
+            try:
+                subject = await bgm_client.get_subject(current_id)
+                break
+            except Exception as e:
+                if attempt < 2:
+                    print(f"   ⚠️ 获取条目 {current_id} 失败 (第{attempt+1}次): {e}，重试中...")
+                    await asyncio.sleep(2)
+                else:
+                    print(f"   ❌ 获取条目 {current_id} 失败 (已重试3次): {e}")
+        if subject is None:
             break
 
         if is_skippable_subject(subject):
@@ -119,6 +162,17 @@ async def build_bangumi_chain(first_subject_id: int) -> list[dict]:
                 f"   ⏩ 跳过: {subject.get('name_cn') or subject['name']} "
                 f"[type={subject.get('type')}] (剧场版/OVA/总集篇)"
             )
+            kind = _classify_skipped(subject)
+            skipped.append({
+                "id": subject["id"],
+                "name": subject["name"],
+                "name_cn": subject.get("name_cn"),
+                "date": subject.get("date"),
+                "eps": subject.get("eps") or subject.get("total_episodes") or 0,
+                "type": subject.get("type"),
+                "platform": subject.get("platform"),
+                "kind": kind,
+            })
         else:
             chain.append({
                 "id": subject["id"],
@@ -148,10 +202,108 @@ async def build_bangumi_chain(first_subject_id: int) -> list[dict]:
             break
         current_id = sequel["id"]
 
-    return chain
+    return chain, skipped
 
 
-async def build_chain_by_date(bgm_search_results: list[dict]) -> list[dict]:
+async def collect_side_entries(
+    chain: list[dict],
+    already_skipped: list[dict] | None = None,
+) -> list[dict]:
+    """Scan ALL relations of each chain entry for side stories and recaps.
+
+    The main chain only follows "续集" (sequel) relations. 番外篇, 总集篇,
+    OVAs, movies etc. are linked via other relation types ("番外篇", "其他",
+    "角色", etc.) — this function collects them without affecting the chain.
+
+    Args:
+        chain: Main chain entries
+        already_skipped: Entries already collected during chain traversal
+
+    Returns:
+        List of side entry dicts (deduplicated against chain + already_skipped)
+    """
+    seen_ids: set[int] = {e["id"] for e in chain}
+    if already_skipped:
+        seen_ids.update(e["id"] for e in already_skipped)
+
+    side_entries: list[dict] = []
+
+    for entry in chain:
+        try:
+            relations = await bgm_client.get_relations(entry["id"])
+        except Exception:
+            continue
+
+        for rel in relations:
+            rid = rel.get("id")
+            if not rid or rid in seen_ids:
+                continue
+            rel_type = rel.get("relation", "")
+
+            # Skip pure character/person/voice-actor relations
+            if rel_type in ("角色", "人物", "声优", "制作人员"):
+                continue
+
+            # Fetch the full subject
+            try:
+                subject = await bgm_client.get_subject(rid)
+            except Exception:
+                continue
+
+            # Exclude non-animation types
+            subj_type = subject.get("type")
+            if subj_type in (1, 3, 4, 6):
+                # 1=书籍, 3=音乐, 4=游戏, 6=三次元
+                continue
+
+            # If it's a regular TV entry (not skippable), check whether it
+            # should still be collected as a side entry.  A TV entry that is
+            # not in the main chain may be an OVA/ONA/special that Bangumi
+            # didn't label with skip keywords.
+            if is_skippable_subject(subject):
+                kind = _classify_skipped(subject)
+            else:
+                # TV-type entry not in chain — classify by relation type
+                kind = _classify_skipped(subject)
+                if kind == "番外篇":
+                    # _classify_skipped returned the fallback — try harder
+                    if "番外" in rel_type or "side" in rel_type.lower():
+                        kind = "番外篇"
+                    elif "总集" in rel_type or "recap" in rel_type.lower():
+                        kind = "总集篇"
+                    elif "角色" in rel_type or "character" in rel_type.lower():
+                        kind = "角色篇"
+                    else:
+                        kind = rel_type or "番外篇"
+
+            # Only collect 番外篇 and 剧场版
+            if kind not in ("番外篇", "剧场版"):
+                continue
+
+            seen_ids.add(rid)
+            side_entries.append({
+                "id": subject["id"],
+                "name": subject["name"],
+                "name_cn": subject.get("name_cn"),
+                "date": subject.get("date"),
+                "eps": subject.get("eps") or subject.get("total_episodes") or 0,
+                "type": subject.get("type"),
+                "platform": subject.get("platform"),
+                "kind": kind,
+                "relation": rel_type,
+            })
+            ename = subject.get("name_cn") or subject["name"]
+            print(
+                f"   📎 发现关联条目: [{kind}] {ename} "
+                f"(via {rel_type}) [id: {subject['id']}]"
+            )
+
+    if not side_entries:
+        print("   (无番外篇/总集篇等关联条目)")
+    return side_entries
+
+
+async def build_chain_by_date(bgm_search_results: list[dict]) -> tuple[list[dict], list[dict]]:
     """Fallback: build chain by sorting all search results by date.
 
     Used when the sequel chain is too short compared to TMDB seasons.
@@ -160,24 +312,29 @@ async def build_chain_by_date(bgm_search_results: list[dict]) -> list[dict]:
         bgm_search_results: Raw Bangumi search results
 
     Returns:
-        Deduplicated chain sorted by date
+        Tuple of (deduplicated_chain, skipped_entries) sorted by date
     """
     print("   📡 按日期排序构建条目链（备选方案）...")
     subjects = []
+    skipped = []
 
     for result in bgm_search_results[:15]:
         try:
             subject = await bgm_client.get_subject(result["id"])
+            entry = {
+                "id": subject["id"],
+                "name": subject["name"],
+                "name_cn": subject.get("name_cn"),
+                "date": subject.get("date"),
+                "eps": subject.get("eps") or subject.get("total_episodes") or 0,
+                "type": subject.get("type"),
+                "platform": subject.get("platform"),
+            }
             if not is_skippable_subject(subject):
-                subjects.append({
-                    "id": subject["id"],
-                    "name": subject["name"],
-                    "name_cn": subject.get("name_cn"),
-                    "date": subject.get("date"),
-                    "eps": subject.get("eps") or subject.get("total_episodes") or 0,
-                    "type": subject.get("type"),
-                    "platform": subject.get("platform"),
-                })
+                subjects.append(entry)
+            else:
+                entry["kind"] = _classify_skipped(subject)
+                skipped.append(entry)
         except Exception:
             pass
 
@@ -193,6 +350,13 @@ async def build_chain_by_date(bgm_search_results: list[dict]) -> list[dict]:
             seen.add(key)
             deduped.append(s)
 
+    if skipped:
+        print(f"   额外条目 (番外篇/总集篇等): {len(skipped)} 个")
+        for s in skipped:
+            name = s.get("name_cn") or s["name"]
+            kind = s.get("kind", "其他")
+            print(f"     [{kind}] {name} [id: {s['id']}]")
+
     print("   按日期排序后的条目:")
     for i, s in enumerate(deduped):
         name = s.get("name_cn") or s["name"]
@@ -200,7 +364,7 @@ async def build_chain_by_date(bgm_search_results: list[dict]) -> list[dict]:
         eps = s.get("eps", 0)
         print(f"   [{i + 1}] {name} ({date}, {eps} 集) [id: {s['id']}]")
 
-    return deduped
+    return deduped, skipped
 
 
 async def get_episode_count(

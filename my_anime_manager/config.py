@@ -13,16 +13,18 @@ from typing import Any
 _SENSITIVE_KEYS = {"TMDB_API_KEY", "QBITTORRENT_PASSWORD"}
 
 _DEFAULTS: dict[str, Any] = {
-    "TMDB_API_KEY": "",
+    "TMDB_API_KEY": "c5b546796de52125f23b47e0dff47add",
     "BANGUMI_UA": "JellyfinTmdbHelper/1.0 (https://github.com)",
     "API_DELAY_MS": 600,
-    "PROXY_HOST": "",
+    "PROXY_HOST": "192.168.18.55",
     "PROXY_PORT": 7890,
     "TORRENT_WATCH_DIR": "/data/torrent",
-    "QBITTORRENT_URL": "http://localhost:8080",
+    "MIKAN_BASE_URL": "https://mikanani.me",
+    "QBITTORRENT_URL": "http://192.168.18.68:8080",
     "QBITTORRENT_USERNAME": "admin",
-    "QBITTORRENT_PASSWORD": "",
-    "QBITTORRENT_SAVE_PATH": "/downloads",
+    "QBITTORRENT_PASSWORD": "Wu_570048008",
+    "QBITTORRENT_SAVE_PATH": "/Media/BD",
+    "RSS_DOWNLOAD_PATH": "/Media/番剧",
 }
 
 # Runtime overrides (set via API) — empty dict means "use env / default"

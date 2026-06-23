@@ -138,6 +138,7 @@ class Parser:
                 # For Chinese subtitle decomposition, individual parts were
                 # already inserted; skip inserting the raw word.
                 if not decomposed:
+                    word = keyword_manager.get_display(word) if keyword else word
                     Elements.insert(category, word)
                 if keyword is None or keyword.options.identifiable:
                     token.category = TokenCategory.IDENTIFIER

@@ -167,6 +167,10 @@ export interface SubscriptionOut {
   bgm_sortrange?: number[];
   tmdb_id?: number;
   tmdb_season?: number | null;
+  // Poster image URL (served from backend /posters/ static mount)
+  poster_url?: string;
+  // Downloaded episode count (from download history)
+  downloaded_count?: number;
 }
 
 /* Download history */
