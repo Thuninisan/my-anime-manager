@@ -4,7 +4,7 @@ import type { SubscriptionOut } from '@/types/preview';
 interface Props {
   subscription: SubscriptionOut;
   onOpenHistory: (bangumiId: number, subscription: SubscriptionOut) => void;
-  onUnsubscribe: (bangumiId: number) => void;
+  onUnsubscribe: (bangumiId: number, subscription: SubscriptionOut) => void;
   onActivate: (bangumiId: number) => Promise<void>;
 }
 
@@ -65,7 +65,7 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
           {isActive ? (
             <button
               className="bg-card text-destructive p-3 rounded-full shadow-md hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer"
-              onClick={(e) => { e.stopPropagation(); onUnsubscribe(s.bangumi_id); }}
+              onClick={(e) => { e.stopPropagation(); onUnsubscribe(s.bangumi_id, s); }}
               title="Unsubscribe"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

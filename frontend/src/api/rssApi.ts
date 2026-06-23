@@ -57,8 +57,11 @@ export async function createSubscription(sub: SubscriptionIn): Promise<Subscript
   return res.json();
 }
 
-export async function deleteSubscription(bangumiId: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}`, { method: 'DELETE' });
+export async function deleteSubscription(bangumiId: number, deleteFiles?: boolean): Promise<void> {
+  const url = deleteFiles
+    ? `${API_BASE}/subscriptions/${bangumiId}?delete_files=true`
+    : `${API_BASE}/subscriptions/${bangumiId}`;
+  const res = await fetch(url, { method: 'DELETE' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 

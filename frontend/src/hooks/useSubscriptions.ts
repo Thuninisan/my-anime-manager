@@ -7,7 +7,7 @@ interface UseSubscriptionsReturn {
   loading: boolean;
   refresh: () => Promise<void>;
   subscribe: (result: { bangumi_id: number; name: string }, group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup', filterTags: Record<number, string[]>) => Promise<void>;
-  unsubscribe: (bangumiId: number) => Promise<void>;
+  unsubscribe: (bangumiId: number, deleteFiles?: boolean) => Promise<void>;
   activate: (bangumiId: number) => Promise<void>;
 }
 
@@ -60,8 +60,8 @@ export function useSubscriptions(): UseSubscriptionsReturn {
     });
   }, [subscriptions]);
 
-  const unsubscribe = useCallback(async (bangumiId: number) => {
-    await rssApi.deleteSubscription(bangumiId);
+  const unsubscribe = useCallback(async (bangumiId: number, deleteFiles?: boolean) => {
+    await rssApi.deleteSubscription(bangumiId, deleteFiles);
     setSubscriptions(prev => prev.filter(s => s.bangumi_id !== bangumiId));
   }, []);
 

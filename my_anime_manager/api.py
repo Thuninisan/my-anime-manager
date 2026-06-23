@@ -35,7 +35,7 @@ from .services.batch_service import build_preview, execute_confirm, process_torr
 from .services import rss as rss_service
 from .services import downloader
 from .services import image_downloader as image_service
-from .clients.qbittorrent import login as qb_login, get_torrents_by_hashes
+from .clients.qbittorrent import login as qb_login, get_torrents_by_hashes, delete_torrent
 from . import data
 
 app = FastAPI(
@@ -702,8 +702,28 @@ async def create_subscription(body: SubscriptionIn):
 
 
 @app.delete("/api/rss/subscriptions/{bangumi_id}")
-async def delete_subscription(bangumi_id: int):
-    """Remove an RSS subscription by Bangumi ID."""
+async def delete_subscription(bangumi_id: int, delete_files: bool = False):
+    """Remove an RSS subscription by Bangumi ID.
+
+    If *delete_files* is True, also:
+    - Delete all related torrents from qBittorrent (with files)
+    - Clear download history for this bangumi_id
+    """
+    if delete_files:
+        eps = data.get_all_episodes(bangumi_id)
+        hashes = [e["info_hash"] for e in eps.values() if e.get("info_hash")]
+        if hashes:
+            try:
+                qb = await qb_login(config.QBITTORRENT_URL, config.QBITTORRENT_USERNAME, config.QBITTORRENT_PASSWORD)
+                for h in hashes:
+                    try:
+                        await delete_torrent(qb, str(h), delete_files=True)
+                    except Exception:
+                        pass  # best-effort per torrent
+            except Exception as e:
+                print(f"⚠️ qBittorrent 连接失败，跳过种子删除: {e}")
+        data.clear_download_history(bangumi_id)
+
     if data.remove_subscription(bangumi_id):
         return {"ok": True}
     raise HTTPException(404, "订阅不存在")

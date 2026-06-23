@@ -6,7 +6,7 @@ interface Props {
   subscriptions: SubscriptionOut[];
   loading: boolean;
   onOpenHistory: (bangumiId: number, subscription: SubscriptionOut) => void;
-  onUnsubscribe: (bangumiId: number) => void;
+  onUnsubscribe: (bangumiId: number, subscription: SubscriptionOut) => void;
   onActivate: (bangumiId: number) => Promise<void>;
 }
 

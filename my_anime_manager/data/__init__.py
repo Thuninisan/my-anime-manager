@@ -267,6 +267,18 @@ def get_all_episodes(bangumi_id: int) -> dict[str, dict]:
     return hist.get("episodes", {}).get(str(bangumi_id), {})
 
 
+def clear_download_history(bangumi_id: int) -> int:
+    """Remove ALL download history entries for a bangumi_id. Returns count."""
+    hist = _load_hist()
+    episodes = hist.setdefault("episodes", {})
+    bgm_key = str(bangumi_id)
+    count = len(episodes.get(bgm_key, {}))
+    if bgm_key in episodes:
+        del episodes[bgm_key]
+        _save_hist(hist)
+    return count
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Global RSS settings (exclude patterns, etc.)
 # ═══════════════════════════════════════════════════════════════════════

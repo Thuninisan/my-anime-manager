@@ -6,6 +6,7 @@ import RssSearchBar from '@/components/rss/RssSearchBar';
 import SubtitleGroupTable from '@/components/rss/SubtitleGroupTable';
 import SubscriptionList from '@/components/rss/SubscriptionList';
 import DownloadHistoryDialog from '@/components/rss/DownloadHistoryDialog';
+import UnsubscribeDialog from '@/components/rss/UnsubscribeDialog';
 import { useRssSearch } from '@/hooks/useRssSearch';
 import { useSubscriptions } from '@/hooks/useSubscriptions';
 import { useDownloadHistory } from '@/hooks/useDownloadHistory';
@@ -20,6 +21,7 @@ export default function RssPage() {
   const [loadingFeed, setLoadingFeed] = useState<Record<string, boolean>>({});
   const [filterTags, setFilterTags] = useState<Record<number, string[]>>({});
   const [tagBoxOpen, setTagBoxOpen] = useState<Record<number, boolean>>({});
+  const [unsubTarget, setUnsubTarget] = useState<import('@/types/preview').SubscriptionOut | null>(null);
 
   const handleSearch = () => search(bangumiId);
 
@@ -165,7 +167,7 @@ export default function RssPage() {
           subscriptions={subscriptions}
           loading={subLoading}
           onOpenHistory={openHistory}
-          onUnsubscribe={unsubscribe}
+          onUnsubscribe={(bangumiId, sub) => setUnsubTarget(sub)}
           onActivate={activate}
         />
       </div>
@@ -176,6 +178,16 @@ export default function RssPage() {
         loading={historyLoading}
         subscription={historySub}
         onClose={closeHistory}
+      />
+
+      <UnsubscribeDialog
+        open={unsubTarget !== null}
+        subscription={unsubTarget}
+        onClose={() => setUnsubTarget(null)}
+        onConfirm={async (bangumiId, deleteFiles) => {
+          await unsubscribe(bangumiId, deleteFiles);
+          setUnsubTarget(null);
+        }}
       />
     </>
   );

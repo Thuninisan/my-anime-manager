@@ -214,7 +214,7 @@ async def _generate_metadata(
     show_dir = season_dir.parent
 
     # ── TMDB: fetch the single target season ──────────────────────
-    target_tmdb_season = tmdb_season or bgm_season
+    target_tmdb_season = tmdb_season if tmdb_season is not None else 1
     print(f"         📡 获取 TMDB S{target_tmdb_season} 集数数据 (tmdb_id={tmdb_id})...")
     try:
         resp = await tmdb_get_season(tmdb_id, target_tmdb_season)

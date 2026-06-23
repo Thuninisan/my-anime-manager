@@ -94,8 +94,9 @@ async def fetch_and_parse_rss(
 
         torrent_elem = item_elem.find("mikan:torrent", ns)
         if torrent_elem is not None:
-            if torrent_elem.findtext("mikan:link", "", ns):
-                torrent_url = torrent_elem.findtext("mikan:link", "", ns)
+            # Note: <mikan:link> is an episode *page* URL, not a .torrent file.
+            # The real download URL is in <enclosure url="...">, so we don't
+            # override torrent_url from mikan:link here.
             if torrent_elem.findtext("mikan:contentLength", "", ns) and size_bytes == 0:
                 try:
                     size_bytes = int(torrent_elem.findtext("mikan:contentLength", "", ns))
