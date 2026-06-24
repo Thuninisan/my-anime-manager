@@ -8,6 +8,7 @@ from .. import config
 from ..clients import mikan as mikan_client
 from ..data import get_mikan_id, get_bangumi_name, get_rss_settings, is_downloaded
 from ..vendor.anitopy import parse as anitopy_parse
+from ..utils.http_retry import USER_AGENT
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -66,7 +67,10 @@ async def fetch_and_parse_rss(
     if config.PROXY_HOST:
         proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
 
-    async with httpx.AsyncClient(proxy=proxy, timeout=30.0, follow_redirects=True) as client:
+    headers = {"User-Agent": USER_AGENT}
+    async with httpx.AsyncClient(
+        proxy=proxy, timeout=30.0, follow_redirects=True, headers=headers,
+    ) as client:
         resp = await client.get(rss_url)
         resp.raise_for_status()
 

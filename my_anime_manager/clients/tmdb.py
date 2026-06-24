@@ -1,106 +1,75 @@
-"""TMDB API client using httpx."""
-
-from urllib.parse import quote
+"""TMDB API client — all requests go through the shared retry wrapper."""
 
 import httpx
 
 from .. import config
+from ..utils.http_retry import fetch_with_retry
 
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original"
+_BASE = "https://api.themoviedb.org/3"
+
+# Common query params for every TMDB API call.
+_BASE_PARAMS = {"api_key": config.TMDB_API_KEY, "language": "zh-CN"}
 
 
-def _get_client() -> httpx.AsyncClient:
-    """Create a configured TMDB httpx client."""
-    proxy = None
-    if config.PROXY_HOST:
-        proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
-
-    return httpx.AsyncClient(
-        base_url="https://api.themoviedb.org/3",
-        params={"api_key": config.TMDB_API_KEY, "language": "zh-CN"},
-        proxy=proxy,
+async def _tmdb_request(
+    path: str,
+    *,
+    params: dict | None = None,
+    label: str = "",
+) -> httpx.Response:
+    """Make a TMDB API request with automatic retry on transient errors."""
+    merged = dict(_BASE_PARAMS)
+    if params:
+        merged.update(params)
+    return await fetch_with_retry(
+        f"{_BASE}{path}",
+        params=merged,
         timeout=30.0,
+        label=label,
     )
 
 
 async def search_tv(query: str) -> httpx.Response:
-    """Search for TV shows.
-
-    Args:
-        query: Search keyword
-
-    Returns:
-        httpx Response object
-    """
-    async with _get_client() as client:
-        return await client.get("/search/tv", params={"query": query})
+    """Search for TV shows."""
+    return await _tmdb_request(
+        "/search/tv", params={"query": query}, label=f"TMDB search"
+    )
 
 
 async def get_tv_detail(tv_id: int) -> httpx.Response:
-    """Get TV show details.
-
-    Args:
-        tv_id: TMDB show ID
-
-    Returns:
-        httpx Response object
-    """
-    async with _get_client() as client:
-        return await client.get(f"/tv/{tv_id}")
+    """Get TV show details."""
+    return await _tmdb_request(f"/tv/{tv_id}", label=f"TMDB tv/{tv_id}")
 
 
 async def get_season_detail(tv_id: int, season_num: int) -> httpx.Response:
-    """Get season details.
-
-    Args:
-        tv_id: TMDB show ID
-        season_num: Season number
-
-    Returns:
-        httpx Response object
-    """
-    async with _get_client() as client:
-        return await client.get(f"/tv/{tv_id}/season/{season_num}")
+    """Get season details."""
+    return await _tmdb_request(
+        f"/tv/{tv_id}/season/{season_num}",
+        label=f"TMDB S{season_num}",
+    )
 
 
 async def get_episode_group_detail(group_id: str) -> httpx.Response:
-    """Get episode group details.
-
-    Args:
-        group_id: Episode group ID
-
-    Returns:
-        httpx Response object
-    """
-    async with _get_client() as client:
-        return await client.get(f"/tv/episode_group/{group_id}")
+    """Get episode group details."""
+    return await _tmdb_request(
+        f"/tv/episode_group/{group_id}",
+        label=f"TMDB ep_group",
+    )
 
 
 async def get_alternative_titles(tv_id: int) -> httpx.Response:
-    """Get all alternative titles for a TV show.
-
-    Args:
-        tv_id: TMDB show ID
-
-    Returns:
-        httpx Response object with 'results' list of {iso_3166_1, title, type}
-    """
-    async with _get_client() as client:
-        return await client.get(f"/tv/{tv_id}/alternative_titles")
+    """Get all alternative titles for a TV show."""
+    return await _tmdb_request(
+        f"/tv/{tv_id}/alternative_titles",
+        label=f"TMDB alt_titles",
+    )
 
 
 async def get_tv_images(tv_id: int, languages: str = "ja,zh,null") -> httpx.Response:
-    """Get TV show images (backdrops, posters, logos).
-
-    Args:
-        tv_id: TMDB show ID
-        languages: Language preferences, e.g. 'ja,zh,null'
-
-    Returns:
-        httpx Response object
-    """
-    async with _get_client() as client:
-        return await client.get(
-            f"/tv/{tv_id}/images",
-            params={"include_image_language": languages},
-        )
+    """Get TV show images (backdrops, posters, logos)."""
+    return await _tmdb_request(
+        f"/tv/{tv_id}/images",
+        params={"include_image_language": languages},
+        label=f"TMDB images",
+    )

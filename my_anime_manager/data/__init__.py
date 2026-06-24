@@ -279,6 +279,56 @@ def clear_download_history(bangumi_id: int) -> int:
     return count
 
 
+# ── Failure count tracking ───────────────────────────────────────────
+# When a .torrent download fails repeatedly we persist a fail_count so
+# the downloader can eventually give up instead of retrying forever.
+
+MAX_FAIL_COUNT = 5
+
+
+def get_fail_count(bangumi_id: int, ep_num: int) -> int:
+    """Return the consecutive failure count for an episode, or 0."""
+    hist = _load_hist()
+    episodes = hist.get("episodes", {})
+    entry = episodes.get(str(bangumi_id), {}).get(str(ep_num))
+    return entry.get("fail_count", 0) if entry else 0
+
+
+def increment_fail_count(bangumi_id: int, ep_num: int) -> int:
+    """Increment the failure count for an episode and return the new value.
+
+    If no history entry exists yet a minimal stub is created (without the
+    fields that ``mark_downloaded`` would normally fill in — the stub only
+    carries ``fail_count`` so the filter can skip the item).
+    """
+    hist = _load_hist()
+    episodes: dict[str, dict] = hist.setdefault("episodes", {})
+    bgm_key = str(bangumi_id)
+    ep_key = str(ep_num)
+    episodes.setdefault(bgm_key, {})
+    entry = episodes[bgm_key].setdefault(ep_key, {
+        "rss_url": "",
+        "guid": "",
+        "source": "",
+        "pub_date": "",
+        "info_hash": "",
+        "at": "",
+    })
+    entry["fail_count"] = entry.get("fail_count", 0) + 1
+    _save_hist(hist)
+    return entry["fail_count"]
+
+
+def reset_fail_count(bangumi_id: int, ep_num: int) -> None:
+    """Clear the failure count for an episode (called after a successful download)."""
+    hist = _load_hist()
+    episodes = hist.get("episodes", {})
+    entry = episodes.get(str(bangumi_id), {}).get(str(ep_num))
+    if entry and "fail_count" in entry:
+        del entry["fail_count"]
+        _save_hist(hist)
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Global RSS settings (exclude patterns, etc.)
 # ═══════════════════════════════════════════════════════════════════════

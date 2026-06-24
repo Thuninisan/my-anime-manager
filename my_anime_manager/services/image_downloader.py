@@ -2,20 +2,15 @@
 
 from pathlib import Path
 
-import httpx
-
 from ..clients.tmdb import TMDB_IMAGE_BASE, get_tv_images
-from .. import config
-
-
-def _get_proxy() -> str | None:
-    if config.PROXY_HOST:
-        return f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
-    return None
+from ..utils.http_retry import fetch_with_retry
 
 
 async def _download_image(url: str, file_path_no_ext: str) -> str | None:
     """Download an image and save it, detecting extension from Content-Type.
+
+    Uses the shared retry wrapper so transient network errors are
+    automatically retried with exponential backoff.
 
     Args:
         url: Image URL
@@ -36,9 +31,7 @@ async def _download_image(url: str, file_path_no_ext: str) -> str | None:
         return str(existing[0])
 
     try:
-        async with httpx.AsyncClient(proxy=_get_proxy(), timeout=30.0) as client:
-            res = await client.get(url)
-            res.raise_for_status()
+        res = await fetch_with_retry(url, timeout=30.0, label="图片")
 
         # Infer extension from Content-Type
         content_type = res.headers.get("content-type", "")

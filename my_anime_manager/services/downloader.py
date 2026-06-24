@@ -18,11 +18,13 @@ from ..data import (
     list_subscriptions, mark_downloaded, get_episode_source,
     get_episode_pub_date, remove_episode_record,
     get_all_episodes,
+    get_fail_count, increment_fail_count, reset_fail_count, MAX_FAIL_COUNT,
 )
 from . import rss as rss_service, tmdb as tmdb_service, bangumi as bangumi_service
 from .nfo_generator import generate_episode_nfo, generate_tv_show_nfo, generate_season_nfo
 from .image_downloader import download_episode_thumb, download_show_images, download_season_poster
 from ..utils.torrent_hash import compute_info_hash
+from ..utils.http_retry import USER_AGENT
 
 # Worker state
 _worker_task: asyncio.Task | None = None
@@ -187,6 +189,93 @@ async def enrich_subscription(bangumi_id: int) -> dict | None:
         print(f"   ⚠️ enrich_subscription 失败: {e}")
         traceback.print_exc()
         return None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# .torrent download helper — retry with exponential backoff
+# ═══════════════════════════════════════════════════════════════════════
+
+async def _download_torrent_file(torrent_url: str, max_retries: int = 3) -> bytes:
+    """Download a .torrent file with exponential-backoff retry.
+
+    Only retries *transient* errors (timeout, connection, 5xx).
+    Permanent errors (4xx, invalid URL, HTML response) are raised
+    immediately without retry.
+    """
+    proxy = None
+    if config.PROXY_HOST:
+        proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
+
+    # Shared User-Agent from http_retry module
+    headers = {"User-Agent": USER_AGENT}
+
+    last_error: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with httpx.AsyncClient(
+                proxy=proxy, timeout=60.0, follow_redirects=True,
+                headers=headers,
+            ) as client:
+                resp = await client.get(torrent_url)
+                resp.raise_for_status()
+
+                # Detect HTML error pages served with 200 OK
+                content_type = resp.headers.get("content-type", "")
+                if "text/html" in content_type and len(resp.content) < 2048:
+                    raise httpx.HTTPStatusError(
+                        "Server returned HTML instead of a torrent file (likely an error page)",
+                        request=resp.request,
+                        response=resp,
+                    )
+
+                return resp.content
+
+        except (
+            httpx.TimeoutException,
+            httpx.ConnectError,
+            httpx.RemoteProtocolError,
+            httpx.PoolTimeout,
+            httpx.ReadTimeout,
+            httpx.WriteTimeout,
+        ) as e:
+            # Transient network errors — retry
+            last_error = e
+            if attempt < max_retries:
+                delay = 2 ** attempt  # 2s, 4s, 8s
+                print(
+                    f"         ⚠️ .torrent 下载失败 "
+                    f"(尝试 {attempt}/{max_retries})，"
+                    f"{delay}s 后重试: {type(e).__name__}: {e}"
+                )
+                await asyncio.sleep(delay)
+            else:
+                raise  # retries exhausted
+
+        except httpx.HTTPStatusError as e:
+            # HTTP-level errors — retry only on 5xx
+            if e.response.status_code >= 500:
+                last_error = e
+                if attempt < max_retries:
+                    delay = 2 ** attempt
+                    print(
+                        f"         ⚠️ 服务器错误 {e.response.status_code} "
+                        f"(尝试 {attempt}/{max_retries})，"
+                        f"{delay}s 后重试"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    raise
+            else:
+                raise  # 4xx — don't retry
+
+        except Exception:
+            # Unknown errors — don't retry
+            raise
+
+    # Should never reach here, but satisfy the type checker
+    assert last_error is not None
+    raise last_error
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -452,6 +541,19 @@ async def _fetch_passed_items(rss_url: str, filter_tags: list[str], bangumi_id: 
             continue
 
         sort = _match_rss_ep_to_sort(episodes, rss_ep)
+
+        # Skip episodes that have already failed too many times
+        fc = get_fail_count(bangumi_id, sort)
+        if fc >= MAX_FAIL_COUNT:
+            # Log once per poll cycle — the message is idempotent and short
+            if not hasattr(_fetch_passed_items, "_skip_logged"):
+                _fetch_passed_items._skip_logged = set()  # type: ignore[attr-defined]
+            skip_key = (bangumi_id, sort)
+            if skip_key not in _fetch_passed_items._skip_logged:  # type: ignore[attr-defined]
+                _fetch_passed_items._skip_logged.add(skip_key)  # type: ignore[attr-defined]
+                print(f"      ⏭️ EP{rss_ep:02d} (sort={sort}) 已连续失败 {fc} 次，跳过")
+            continue
+
         source = get_episode_source(bangumi_id, sort)
         item_pub_date = item.get("pub_date", "")
         if source == "primary":
@@ -525,19 +627,28 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
                     print(f"         ⚠️ 删除旧种子失败: {e}")
 
     # ── Download .torrent ──────────────────────────────────────────
-    proxy = None
-    if config.PROXY_HOST:
-        proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
     try:
-        async with httpx.AsyncClient(proxy=proxy, timeout=60.0, follow_redirects=True) as client:
-            resp = await client.get(torrent_url)
-            resp.raise_for_status()
+        torrent_content = await _download_torrent_file(torrent_url)
+    except httpx.HTTPStatusError as e:
+        status = e.response.status_code if hasattr(e.response, 'status_code') else '?'
+        print(f"      ❌ 下载 .torrent 失败 (HTTP {status}): {torrent_url[:80]}...")
+        # Track failure count so we can eventually give up on dead URLs
+        fail_count = increment_fail_count(bangumi_id, sort)
+        if fail_count >= MAX_FAIL_COUNT:
+            print(f"      🚫 已连续失败 {fail_count} 次，跳过此集（将不再重试）")
+        return False
     except Exception as e:
-        print(f"      ❌ 下载 .torrent 失败: {e}")
+        exc_name = type(e).__name__
+        print(f"      ❌ 下载 .torrent 失败 [{exc_name}]: {e}")
+        print(f"         URL: {torrent_url[:100]}...")
+        # Track failure count so we can eventually give up on dead URLs
+        fail_count = increment_fail_count(bangumi_id, sort)
+        if fail_count >= MAX_FAIL_COUNT:
+            print(f"      🚫 已连续失败 {fail_count} 次，跳过此集（将不再重试）")
         return False
 
     with tempfile.NamedTemporaryFile(suffix=".torrent", delete=False) as f:
-        f.write(resp.content)
+        f.write(torrent_content)
         tmp_path = f.name
 
     # ── Compute info-hash from the .torrent file ───────────────────
@@ -588,6 +699,9 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
 
     mark_downloaded(bangumi_id, sort, item.get("rss_url", ""), guid, source,
                     pub_date=item.get("pub_date", ""), info_hash=torrent_hash)
+
+    # Clear any previous failure count after a successful download
+    reset_fail_count(bangumi_id, sort)
 
     # Check if all episodes in the sort range are now downloaded
     await _check_completion(bangumi_id, sub)
