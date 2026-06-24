@@ -139,7 +139,7 @@ def add_subscription(
         "backup_subgroup_id": backup_subgroup_id,
         "backup_subgroup_name": backup_subgroup_name,
         "backup_filter_tags": backup_filter_tags or [],
-        "download_path": download_path or f"/{name}/Season {{season}}",
+        "download_path": download_path or f"/{{series_name}}/Season {{season}}",
         "active": 1,
         "created_at": now,
     }

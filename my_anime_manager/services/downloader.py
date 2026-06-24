@@ -175,13 +175,20 @@ async def enrich_subscription(bangumi_id: int) -> dict | None:
         bgm_sortrange = [min(sorts), max(sorts)] if sorts else [0, 0]
         print(f"   ✅ bgm_sortrange={bgm_sortrange}")
 
-        # 4. TMDB info from bangumi_mikan_map.json
+        # 4. Series name — first entry in chain (root of the series)
+        series_name = (
+            chain[0].get("name_cn") or chain[0].get("name") or ""
+        ).strip()
+        print(f"   ✅ series_name={series_name}")
+
+        # 5. TMDB info from bangumi_mikan_map.json
         tmdb_id = get_tmdb_id(bangumi_id)
         tmdb_season = get_tmdb_season(bangumi_id)
 
         return {
             "bgm_season": bgm_season,
             "bgm_sortrange": bgm_sortrange,
+            "series_name": series_name,
             "tmdb_id": tmdb_id or 0,
             "tmdb_season": tmdb_season,
         }
@@ -656,9 +663,14 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
 
     # ── Compute download paths ─────────────────────────────────────
     show_name = sub.get("name", str(bangumi_id))
+    # series_name is the root series name (chain[0].name_cn), set during enrichment.
+    # Fall back to show_name for old subscriptions that haven't been enriched yet.
+    series_name = sub.get("series_name") or show_name
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    sub_path_template = sub.get("download_path", f"/{show_name}/Season {{season}}")
-    sub_path = sub_path_template.format(show_name=show_name, season=bgm_season).strip("/")
+    sub_path_template = sub.get("download_path", f"/{series_name}/Season {{season}}")
+    sub_path = sub_path_template.format(
+        series_name=series_name, show_name=show_name, season=bgm_season
+    ).strip("/")
 
     # ── Add to qBittorrent ─────────────────────────────────────────
     # Pass the raw string (POSIX path) — don't let Path() convert to Windows style
