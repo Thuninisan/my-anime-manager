@@ -67,13 +67,6 @@ export default function FeedPreview({ items, selectedTags }: Props) {
 
   return (
     <div>
-      {/* Header */}
-      <div className="px-5 py-2 flex justify-between items-center border-b border-border">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-          Recent Entries ({marked.length} items)
-        </span>
-      </div>
-
       {/* Table */}
       <table className="w-full text-left border-collapse">
         <thead className="bg-muted/30">

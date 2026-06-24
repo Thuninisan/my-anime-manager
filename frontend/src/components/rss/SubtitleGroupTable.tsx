@@ -79,8 +79,8 @@ export default function SubtitleGroupTable({
               }`}
               onClick={() => onToggleFeed(g.rss_url)}
             >
-              {/* Left: chevron + name + RSS */}
-              <div className="flex items-center gap-4 min-w-0 flex-1">
+              {/* Left: chevron + name (RSS URL on hover) */}
+              <div className="flex items-center gap-4 min-w-0 flex-1 group">
                 {loading ? (
                   <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
                 ) : (
@@ -92,12 +92,12 @@ export default function SubtitleGroupTable({
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
                 )}
-                <div className="min-w-0">
+                <div className="min-w-0 py-0.5">
                   <h4 className={`text-sm font-semibold ${isExpanded ? 'text-primary' : 'text-foreground'}`}>
                     {g.name}
                   </h4>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[220px]">
+                  <div className="hidden group-hover:flex items-center gap-1 mt-0.5">
+                    <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[300px]">
                       {g.rss_url}
                     </span>
                     <CopyButton url={g.rss_url} />
@@ -109,7 +109,7 @@ export default function SubtitleGroupTable({
               <div className="flex items-center gap-3 shrink-0 ml-4" onClick={e => e.stopPropagation()}>
                 {/* Filter tags button */}
                   <button
-                    className={`text-[10px] px-2 py-1 rounded-full border transition cursor-pointer font-semibold ${
+                    className={`text-xs px-2.5 py-1.5 rounded-full border transition cursor-pointer font-semibold ${
                       boxOpen
                         ? 'bg-primary/10 border-primary/30 text-primary'
                         : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
@@ -123,26 +123,26 @@ export default function SubtitleGroupTable({
                 {subMode ? (
                   // Subscribed: show single role label with color distinction
                   subMode === 'primary' ? (
-                    <span className="text-[10px] px-2.5 py-1 rounded-full bg-primary/15 text-primary font-semibold">
+                    <span className="text-xs px-2.5 py-1.5 rounded-full bg-primary/15 text-primary font-semibold">
                       已订阅: 主
                     </span>
                   ) : (
-                    <span className="text-[10px] px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold">
+                    <span className="text-xs px-2.5 py-1.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold">
                       已订阅: 副
                     </span>
                   )
                 ) : subscribingId === g.subgroup_id ? (
                   // Subscribing: show spinner
-                  <span className="text-[10px] px-2.5 py-1 rounded-full bg-primary/10 text-primary font-semibold inline-flex items-center gap-1 cursor-default">
+                  <span className="text-xs px-2.5 py-1.5 rounded-full bg-primary/10 text-primary font-semibold inline-flex items-center gap-1 cursor-default">
                     订阅
-                    <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    <div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                   </span>
                 ) : (
                   // Not subscribed: dropdown
                   <DropdownMenuRoot>
-                    <DropdownMenuTrigger className="text-[10px] px-2.5 py-1 rounded-full bg-primary/10 text-primary font-semibold hover:bg-primary hover:text-primary-foreground">
+                    <DropdownMenuTrigger className="text-xs px-2.5 py-1.5 rounded-full bg-primary/10 text-primary font-semibold hover:bg-primary hover:text-primary-foreground">
                       订阅
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="ml-1">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="ml-1">
                         <polyline points="6 9 12 15 18 9" />
                       </svg>
                     </DropdownMenuTrigger>

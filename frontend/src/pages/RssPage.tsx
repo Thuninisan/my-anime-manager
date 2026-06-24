@@ -154,13 +154,21 @@ export default function RssPage() {
             {/* Footer */}
             <footer className="px-5 py-3 border-t border-border bg-muted/20 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-3">
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
-                  {result.groups.length} groups
-                </span>
-                <span className="text-muted-foreground/30">|</span>
-                <span className="text-[10px] text-primary font-semibold">
-                  {subscriptions.filter(s => s.active !== 0).length} active subscriptions
-                </span>
+                {(() => {
+                  const url = Object.keys(expanded).find(k => expanded[k] && expanded[k] !== null);
+                  const count = url && expanded[url] && expanded[url] !== null
+                    ? (expanded[url] as RssFeedResponse).items.filter(i => i.passed && !i.excluded).length
+                    : 0;
+                  return count > 0 ? (
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      Recent Entries ({count} items)
+                    </span>
+                  ) : (
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+                      {result.groups.length} groups
+                    </span>
+                  );
+                })()}
               </div>
               <button
                 className="bg-primary text-primary-foreground px-5 py-2 rounded-lg text-xs font-semibold hover:brightness-110 active:scale-95 transition-all cursor-pointer"
