@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { RssFeedResponse } from '@/types/preview';
 import * as rssApi from '@/api/rssApi';
-import { showError } from '@/lib/toast';
+import { showError, showLoadingToast, updateToast } from '@/lib/toast';
 import RssSearchBar from '@/components/rss/RssSearchBar';
 import SubtitleGroupTable from '@/components/rss/SubtitleGroupTable';
 import SubscriptionList from '@/components/rss/SubscriptionList';
@@ -22,6 +22,7 @@ export default function RssPage() {
   const [filterTags, setFilterTags] = useState<Record<number, string[]>>({});
   const [tagBoxOpen, setTagBoxOpen] = useState<Record<number, boolean>>({});
   const [unsubTarget, setUnsubTarget] = useState<import('@/types/preview').SubscriptionOut | null>(null);
+  const [subscribingId, setSubscribingId] = useState<number | null>(null);
 
   const handleSearch = () => search(bangumiId);
 
@@ -47,8 +48,18 @@ export default function RssPage() {
 
   const doSubscribe = async (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => {
     if (!result) return;
-    try { await subscribe(result, group, role, filterTags); }
-    catch (e) { showError(e); }
+    setSubscribingId(group.subgroup_id);
+    const toastId = showLoadingToast("订阅中...");
+    try {
+      await subscribe(result, group, role, filterTags, (msg) => {
+        updateToast(toastId, msg, "loading");
+      });
+      updateToast(toastId, `✅ ${group.name} 订阅完成`, "success");
+    } catch (e) {
+      updateToast(toastId, `❌ ${group.name}: ${e instanceof Error ? e.message : String(e)}`, "error");
+    } finally {
+      setSubscribingId(null);
+    }
   };
 
   const getSubMode = (subgroupId: number): 'primary' | 'backup' | null => {
@@ -136,6 +147,7 @@ export default function RssPage() {
                 onToggleTagBox={(id) => setTagBoxOpen(prev => ({ ...prev, [id]: !prev[id] }))}
                 onSubscribe={doSubscribe}
                 getSubMode={getSubMode}
+                subscribingId={subscribingId}
               />
             </div>
 

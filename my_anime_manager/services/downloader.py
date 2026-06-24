@@ -4,6 +4,7 @@ import asyncio
 import tempfile
 import traceback
 from pathlib import Path
+from typing import Any, Callable
 
 import httpx
 
@@ -135,25 +136,40 @@ def _match_rss_ep_to_sort(episodes: list[dict], rss_ep: int) -> int:
     return rss_ep
 
 
-async def enrich_subscription(bangumi_id: int) -> dict | None:
+async def enrich_subscription(
+    bangumi_id: int,
+    on_progress: Callable[[str], Any] | None = None,
+) -> dict | None:
     """Build chain + sort range + TMDB info for a subscription.
 
     Called once when a subscription is added (or lazily when an
     existing subscription is first downloaded).  Returns fields
     to write into subscriptions.json.
 
+    Args:
+        bangumi_id: Bangumi subject ID.
+        on_progress: Optional callback — when provided, progress messages
+            are sent to this callback instead of printed to stdout.
+            Used by the NDJSON streaming endpoint.
+
     Returns:
         dict with bgm_season, bgm_sortrange, tmdb_id, tmdb_season,
         or None on failure.
     """
+    def _emit(msg: str) -> None:
+        if on_progress:
+            on_progress(msg)
+        else:
+            print(msg)
+
     try:
-        print(f"   🔗 丰富化订阅信息 (bgm_id={bangumi_id})...")
+        _emit(f"🔗 丰富化订阅信息 (bgm_id={bangumi_id})...")
 
         # 1. Build Bangumi chain
         first_id = await bangumi_service.find_first_in_chain(bangumi_id)
         chain, _ = await bangumi_service.build_bangumi_chain(first_id)
         if not chain:
-            print(f"   ⚠️ 无法构建 Bangumi 链")
+            _emit(f"⚠️ 无法构建 Bangumi 链")
             return None
 
         # Cache chain under every subject ID in it
@@ -166,19 +182,19 @@ async def enrich_subscription(bangumi_id: int) -> dict | None:
             if entry["id"] == bangumi_id:
                 bgm_season = i + 1
                 break
-        print(f"   ✅ bgm_season={bgm_season}")
+        _emit(f"✅ bgm_season={bgm_season}")
 
         # 3. Get sort range
         eps = await _get_bangumi_episodes(bangumi_id)
         sorts = [e.get("sort") or e.get("ep", 0) for e in eps]
         bgm_sortrange = [min(sorts), max(sorts)] if sorts else [0, 0]
-        print(f"   ✅ bgm_sortrange={bgm_sortrange}")
+        _emit(f"✅ bgm_sortrange={bgm_sortrange}")
 
         # 4. Series name — first entry in chain (root of the series)
         series_name = (
             chain[0].get("name_cn") or chain[0].get("name") or ""
         ).strip()
-        print(f"   ✅ series_name={series_name}")
+        _emit(f"✅ series_name={series_name}")
 
         # 5. TMDB info from bangumi_mikan_map.json
         tmdb_id = get_tmdb_id(bangumi_id)
@@ -192,7 +208,7 @@ async def enrich_subscription(bangumi_id: int) -> dict | None:
             "tmdb_season": tmdb_season,
         }
     except Exception as e:
-        print(f"   ⚠️ enrich_subscription 失败: {e}")
+        _emit(f"⚠️ enrich_subscription 失败: {e}")
         traceback.print_exc()
         return None
 

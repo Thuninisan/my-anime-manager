@@ -19,6 +19,7 @@ interface Props {
   onToggleTagBox: (subgroupId: number) => void;
   onSubscribe: (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => void;
   getSubMode: (subgroupId: number) => 'primary' | 'backup' | null;
+  subscribingId: number | null;
 }
 
 function CopyButton({ url }: { url: string }) {
@@ -51,6 +52,7 @@ function CopyButton({ url }: { url: string }) {
 export default function SubtitleGroupTable({
   result, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe, getSubMode,
+  subscribingId,
 }: Props) {
   if (result.groups.length === 0) {
     return <p className="text-center py-6 text-muted-foreground text-sm">No subtitle groups found</p>;
@@ -119,8 +121,9 @@ export default function SubtitleGroupTable({
                   </button>
                 )}
 
-                {/* Subscribe buttons */}
+                {/* Subscribe buttons — three states */}
                 {subMode ? (
+                  // Subscribed: show role badges
                   <div className="flex gap-1.5">
                     <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold ${
                       subMode === 'primary'
@@ -137,7 +140,14 @@ export default function SubtitleGroupTable({
                       Backup
                     </span>
                   </div>
+                ) : subscribingId === g.subgroup_id ? (
+                  // Subscribing: show spinner
+                  <span className="text-[10px] px-2.5 py-1 rounded-full bg-primary/10 text-primary font-semibold inline-flex items-center gap-1 cursor-default">
+                    订阅
+                    <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                  </span>
                 ) : (
+                  // Not subscribed: dropdown
                   <DropdownMenuRoot>
                     <DropdownMenuTrigger className="text-[10px] px-2.5 py-1 rounded-full bg-primary/10 text-primary font-semibold hover:bg-primary hover:text-primary-foreground">
                       订阅

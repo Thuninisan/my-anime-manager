@@ -6,7 +6,7 @@ interface UseSubscriptionsReturn {
   subscriptions: SubscriptionOut[];
   loading: boolean;
   refresh: () => Promise<void>;
-  subscribe: (result: { bangumi_id: number; name: string }, group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup', filterTags: Record<number, string[]>) => Promise<void>;
+  subscribe: (result: { bangumi_id: number; name: string }, group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup', filterTags: Record<number, string[]>, onProgress?: (msg: string) => void) => Promise<void>;
   unsubscribe: (bangumiId: number, deleteFiles?: boolean) => Promise<void>;
   activate: (bangumiId: number) => Promise<void>;
 }
@@ -28,6 +28,7 @@ export function useSubscriptions(): UseSubscriptionsReturn {
     group: { name: string; subgroup_id: number; rss_url: string },
     role: 'primary' | 'backup',
     filterTags: Record<number, string[]>,
+    onProgress?: (msg: string) => void,
   ) => {
     const tags = filterTags[group.subgroup_id] || [];
     const existing = subscriptions.find(s => s.bangumi_id === result.bangumi_id);
@@ -52,7 +53,10 @@ export function useSubscriptions(): UseSubscriptionsReturn {
       };
     }
 
-    const sub = await rssApi.createSubscription(body);
+    const sub = onProgress
+      ? await rssApi.createSubscriptionWithProgress(body, onProgress)
+      : await rssApi.createSubscription(body);
+
     setSubscriptions(prev => {
       const idx = prev.findIndex(s => s.bangumi_id === result.bangumi_id);
       if (idx >= 0) { const next = [...prev]; next[idx] = sub; return next; }

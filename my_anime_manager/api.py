@@ -14,6 +14,7 @@ Usage:
 """
 
 import asyncio
+import json as _json
 import os
 import subprocess
 import sys
@@ -26,7 +27,7 @@ from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -668,26 +669,16 @@ async def create_subscription(body: SubscriptionIn):
         backup_filter_tags=body.backup_filter_tags,
         download_path=body.download_path,
     )
-    # Enrich with Bangumi chain metadata — skip if any existing
-    # subscription for this bangumi_id already has bgm_season cached.
-    need_enrich = "bgm_season" not in sub
-    if not need_enrich:
-        # Check sibling subscriptions for cached fields
-        all_subs = data.list_subscriptions()
-        for s in all_subs:
-            if s["bangumi_id"] == body.bangumi_id and "bgm_season" in s:
-                sub.update({k: s[k] for k in ("bgm_season", "bgm_sortrange", "tmdb_id", "tmdb_season") if k in s})
-                data.update_subscription(body.bangumi_id, {k: s[k] for k in ("bgm_season", "bgm_sortrange", "tmdb_id", "tmdb_season") if k in s})
-                need_enrich = False
-                break
-    if need_enrich:
-        try:
-            enriched = await downloader.enrich_subscription(body.bangumi_id)
-            if enriched:
-                data.update_subscription(body.bangumi_id, enriched)
-                sub.update(enriched)
-        except Exception:
-            pass  # Non-fatal: downloader will lazy-enrich on first poll
+    # Enrichment is done asynchronously via the enrich-stream endpoint.
+    # The subscription is returned immediately without enrichment data.
+    # If a sibling subscription already has cached bgm_season, copy it.
+    all_subs = data.list_subscriptions()
+    for s in all_subs:
+        if s["bangumi_id"] == body.bangumi_id and "bgm_season" in s:
+            cached = {k: s[k] for k in ("bgm_season", "bgm_sortrange", "tmdb_id", "tmdb_season", "series_name") if k in s}
+            data.update_subscription(body.bangumi_id, cached)
+            sub.update(cached)
+            break
 
     # Fetch Bangumi poster CDN URL (non-fatal: falls back to gradient placeholder)
     try:
@@ -699,6 +690,51 @@ async def create_subscription(body: SubscriptionIn):
         pass  # Non-fatal: frontend falls back to gradient placeholder
 
     return sub
+
+
+@app.post("/api/rss/subscriptions/{bangumi_id}/enrich-stream")
+async def enrich_subscription_stream(bangumi_id: int):
+    """Stream enrichment progress as NDJSON (one JSON object per line).
+
+    The client reads the response body line by line.  Each line is a
+    JSON object with ``type``:
+
+    - ``{"type": "step", "message": "✅ bgm_season=2"}`` — progress update
+    - ``{"type": "done", "result": {...}}`` — enrichment succeeded
+    - ``{"type": "error", "message": "..."}`` — enrichment failed
+    """
+
+    async def generate():
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def on_progress(msg: str):
+            queue.put_nowait({"type": "step", "message": msg})
+
+        async def run():
+            try:
+                result = await downloader.enrich_subscription(
+                    bangumi_id, on_progress=on_progress,
+                )
+                if result:
+                    data.update_subscription(bangumi_id, result)
+                queue.put_nowait({"type": "done", "result": result})
+            except Exception as exc:
+                queue.put_nowait({"type": "error", "message": str(exc)})
+
+        asyncio.create_task(run())
+
+        while True:
+            evt = await queue.get()
+            line = _json.dumps(evt, ensure_ascii=False) + "\n"
+            yield line.encode("utf-8")
+            if evt["type"] in ("done", "error"):
+                break
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.delete("/api/rss/subscriptions/{bangumi_id}")

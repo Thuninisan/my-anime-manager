@@ -57,6 +57,46 @@ export async function createSubscription(sub: SubscriptionIn): Promise<Subscript
   return res.json();
 }
 
+/** Subscribe and stream enrichment progress via NDJSON.
+ *  Returns the enriched SubscriptionOut on success. */
+export async function createSubscriptionWithProgress(
+  sub: SubscriptionIn,
+  onProgress: (msg: string) => void,
+): Promise<SubscriptionOut> {
+  // 1. Create subscription (fast, no enrichment)
+  const subRes = await createSubscription(sub);
+
+  // 2. Stream enrichment progress via NDJSON
+  const enrichRes = await fetch(
+    `${API_BASE}/subscriptions/${sub.bangumi_id}/enrich-stream`,
+    { method: "POST" },
+  );
+  if (!enrichRes.ok) throw new Error(`Enrich stream HTTP ${enrichRes.status}`);
+
+  const reader = enrichRes.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop()!; // keep incomplete last line
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const evt = JSON.parse(line);
+      if (evt.type === "step") onProgress(evt.message);
+      if (evt.type === "error") throw new Error(evt.message);
+      if (evt.type === "done") {
+        if (evt.result) Object.assign(subRes, evt.result);
+        return subRes;
+      }
+    }
+  }
+  throw new Error("Enrich stream ended without done event");
+}
+
 export async function deleteSubscription(bangumiId: number, deleteFiles?: boolean): Promise<void> {
   const url = deleteFiles
     ? `${API_BASE}/subscriptions/${bangumiId}?delete_files=true`
