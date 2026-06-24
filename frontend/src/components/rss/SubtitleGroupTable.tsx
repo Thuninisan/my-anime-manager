@@ -2,6 +2,10 @@ import { useState } from 'react';
 import type { BangumiRssResponse, RssFeedResponse, SubscriptionOut } from '@/types/preview';
 import TagFilterPanel from './TagFilterPanel';
 import FeedPreview from './FeedPreview';
+import {
+  DropdownMenuRoot, DropdownMenuTrigger,
+  DropdownMenuContent, DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 
 interface Props {
   result: BangumiRssResponse;
@@ -134,20 +138,22 @@ export default function SubtitleGroupTable({
                     </span>
                   </div>
                 ) : (
-                  <div className="flex gap-1.5">
-                    <button
-                      className="text-[10px] px-2.5 py-1 rounded-full bg-primary/10 text-primary font-semibold hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
-                      onClick={() => onSubscribe(g, 'primary')}
-                    >
-                      Primary
-                    </button>
-                    <button
-                      className="text-[10px] px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold hover:bg-amber-500 hover:text-white transition-colors cursor-pointer"
-                      onClick={() => onSubscribe(g, 'backup')}
-                    >
-                      Backup
-                    </button>
-                  </div>
+                  <DropdownMenuRoot>
+                    <DropdownMenuTrigger className="text-[10px] px-2.5 py-1 rounded-full bg-primary/10 text-primary font-semibold hover:bg-primary hover:text-primary-foreground">
+                      订阅
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="ml-1">
+                        <polyline points="6 9 12 15 18 9" />
+                      </svg>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-[140px]">
+                      <DropdownMenuItem onClick={() => onSubscribe(g, 'primary')}>
+                        作为主 RSS 订阅
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => onSubscribe(g, 'backup')}>
+                        作为副 RSS 订阅
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenuRoot>
                 )}
               </div>
             </div>
