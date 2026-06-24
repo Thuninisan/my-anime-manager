@@ -2,6 +2,12 @@ import type { BangumiRssResponse, RssDataStatus, RssFeedResponse, RssSettings, S
 
 const API_BASE = '/api/rss';
 
+export async function searchBangumi(query: string): Promise<{ bangumi_id: number; name: string }[]> {
+  const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function lookupBangumiRss(bangumiId: number): Promise<BangumiRssResponse> {
   const res = await fetch(`${API_BASE}/bangumi/${bangumiId}`);
   if (!res.ok) {

@@ -591,6 +591,12 @@ async def update_config(changes: dict[str, object]):
 
 # ── /api/rss/bangumi/{id} ──
 
+@app.get("/api/rss/search")
+async def search_bangumi(q: str):
+    """Search bangumi_mikan_map by name. Returns up to 20 matches."""
+    return data.search_by_name(q)
+
+
 @app.get("/api/rss/bangumi/{bangumi_id}", response_model=BangumiRssResponse)
 async def get_bangumi_rss(bangumi_id: int):
     """Look up Mikan subtitle groups and their RSS URLs for a Bangumi subject ID.

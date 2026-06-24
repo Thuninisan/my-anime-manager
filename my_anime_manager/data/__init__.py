@@ -66,6 +66,23 @@ def get_tmdb_season(bangumi_id: int) -> int | None:
     return entry.get("tmdb_season") if entry else None
 
 
+def search_by_name(query: str) -> list[dict]:
+    """Search bangumi_mikan_map by name. Returns up to 20 short matches."""
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    q = query.strip().lower()
+    if not q:
+        return []
+    results = []
+    for bid_str, entry in _bangumi_mikan_map.items():
+        name = entry.get("name", "")
+        if q in name.lower():
+            results.append({"bangumi_id": int(bid_str), "name": name})
+    results.sort(key=lambda r: len(r["name"]))  # shorter = closer match
+    return results[:20]
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # RSS Subscriptions
 # ═══════════════════════════════════════════════════════════════════════

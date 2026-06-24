@@ -25,7 +25,7 @@ export default function RssPage() {
   const [subscribingId, setSubscribingId] = useState<number | null>(null);
   const [excludePatterns, setExcludePatterns] = useState<Record<number, string[]>>({});
 
-  const handleSearch = () => search(bangumiId);
+  const handleSearch = (id: number) => search(String(id))
 
   const toggleFeed = async (rssUrl: string) => {
     if (expanded[rssUrl] !== undefined) {
