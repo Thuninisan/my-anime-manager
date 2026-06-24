@@ -79,8 +79,8 @@ export default function SubtitleGroupTable({
               }`}
               onClick={() => onToggleFeed(g.rss_url)}
             >
-              {/* Left: chevron + name (RSS URL on hover) */}
-              <div className="flex items-center gap-4 min-w-0 flex-1 group">
+              {/* Left: chevron + name + RSS */}
+              <div className="flex items-center gap-4 min-w-0 flex-1">
                 {loading ? (
                   <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
                 ) : (
@@ -92,12 +92,12 @@ export default function SubtitleGroupTable({
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
                 )}
-                <div className="min-w-0 py-0.5">
-                  <h4 className={`text-sm font-semibold ${isExpanded ? 'text-primary' : 'text-foreground'}`}>
+                <div className="min-w-0">
+                  <h4 className={`text-base font-semibold ${isExpanded ? 'text-primary' : 'text-foreground'}`}>
                     {g.name}
                   </h4>
-                  <div className="hidden group-hover:flex items-center gap-1 mt-0.5">
-                    <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[300px]">
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[220px]">
                       {g.rss_url}
                     </span>
                     <CopyButton url={g.rss_url} />
