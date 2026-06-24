@@ -52,9 +52,10 @@ function markOutdated(items: RssFeedItem[]): (RssFeedItem & { outdated: boolean 
 interface Props {
   items: RssFeedItem[];
   selectedTags: string[];
+  excludeKeywords?: string[];
 }
 
-export default function FeedPreview({ items, selectedTags }: Props) {
+export default function FeedPreview({ items, selectedTags, excludeKeywords = [] }: Props) {
   const [showAll, setShowAll] = useState(false);
 
   if (items.length === 0) {
@@ -80,7 +81,8 @@ export default function FeedPreview({ items, selectedTags }: Props) {
         <tbody className="divide-y divide-border/50">
           {visible.map((item, i) => {
             const hasEp = item.episode_number > 0;
-            const passed = !item.excluded && (selectedTags.length === 0 || selectedTags.every(t => item.tags.includes(t)));
+            const kwMatch = excludeKeywords.length === 0 || !excludeKeywords.some(k => (item.guid || item.title).includes(k));
+            const passed = !item.excluded && kwMatch && (selectedTags.length === 0 || selectedTags.every(t => item.tags.includes(t)));
             const dim = !passed || item.outdated || item.downloaded;
 
             return (

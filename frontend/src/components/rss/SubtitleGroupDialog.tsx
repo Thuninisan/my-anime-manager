@@ -14,8 +14,7 @@ interface Props {
   onToggleTag: (subgroupId: number, tag: string) => void;
   onToggleTagBox: (subgroupId: number) => void;
   onSubscribe: (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => void;
-  onExcludeChange: (subgroupId: number, patterns: string[], rssUrl: string) => void;
-  onExcludeBlur: (subgroupId: number, rssUrl: string) => void;
+  onExcludeChange: (subgroupId: number, patterns: string[]) => void;
   getSubMode: (subgroupId: number) => 'primary' | 'backup' | null;
   onClose: () => void;
 }
@@ -24,7 +23,7 @@ export default function SubtitleGroupDialog({
   result, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
   subscribingId, excludePatterns,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe,
-  onExcludeChange, onExcludeBlur,
+  onExcludeChange,
   getSubMode, onClose,
 }: Props) {
   return (
@@ -85,7 +84,6 @@ export default function SubtitleGroupDialog({
             subscribingId={subscribingId}
             excludePatterns={excludePatterns}
             onExcludeChange={onExcludeChange}
-            onExcludeBlur={onExcludeBlur}
           />
         </div>
 
@@ -99,12 +97,21 @@ export default function SubtitleGroupDialog({
               const url = Object.keys(expanded).find(k => expanded[k] && expanded[k] !== null);
               if (!url || !expanded[url] || expanded[url] === null) return null;
               const items = (expanded[url] as RssFeedResponse).items;
-              const passed = items.filter(i => i.passed && !i.excluded).length;
-              return passed > 0 ? (
+              // Find which subgroup this feed belongs to for filtering
+              const subgroupId = result.groups.find(g => g.rss_url === url)?.subgroup_id;
+              const tags = subgroupId ? (filterTags[subgroupId] || []) : [];
+              const keywords = subgroupId ? (excludePatterns[subgroupId] || []) : [];
+              const filtered = items.filter(i => {
+                if (i.excluded) return false;
+                if (keywords.length > 0 && keywords.some(k => (i.guid || i.title).includes(k))) return false;
+                if (tags.length > 0 && !tags.every(t => i.tags.includes(t))) return false;
+                return true;
+              });
+              return filtered.length > 0 ? (
                 <>
                   <span className="text-muted-foreground/30">|</span>
                   <span className="text-[10px] uppercase tracking-wider text-primary font-semibold">
-                    可用条目 ({passed}/{items.length})
+                    可用条目 ({filtered.length}/{items.length})
                   </span>
                 </>
               ) : null;

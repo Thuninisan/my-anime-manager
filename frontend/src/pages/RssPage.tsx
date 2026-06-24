@@ -47,21 +47,8 @@ export default function RssPage() {
     });
   };
 
-  const handleExcludeChange = async (subgroupId: number, patterns: string[], rssUrl: string) => {
+  const handleExcludeChange = (subgroupId: number, patterns: string[]) => {
     setExcludePatterns(prev => ({ ...prev, [subgroupId]: patterns }));
-  };
-
-  const handleExcludeBlur = async (subgroupId: number, rssUrl: string) => {
-    // Refetch feed on blur to recalculate status
-    setLoadingFeed(prev => ({ ...prev, [rssUrl]: true }));
-    try {
-      const feed = await rssApi.fetchRssFeed(rssUrl, {
-        tags: filterTags[subgroupId] || [],
-        excludePatterns: excludePatterns[subgroupId] || [],
-      });
-      setExpanded(prev => ({ ...prev, [rssUrl]: feed }));
-    } catch { /* keep old feed */ }
-    finally { setLoadingFeed(prev => { const n = { ...prev }; delete n[rssUrl]; return n; }); }
   };
 
   const doSubscribe = async (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => {
@@ -117,13 +104,13 @@ export default function RssPage() {
           filterTags={filterTags}
           tagBoxOpen={tagBoxOpen}
           subscribingId={subscribingId}
+          filterTags={filterTags}
           excludePatterns={excludePatterns}
           onToggleFeed={toggleFeed}
           onToggleTag={toggleTag}
           onToggleTagBox={(id) => setTagBoxOpen(prev => ({ ...prev, [id]: !prev[id] }))}
           onSubscribe={doSubscribe}
           onExcludeChange={handleExcludeChange}
-          onExcludeBlur={handleExcludeBlur}
           getSubMode={getSubMode}
           onClose={clearSearch}
         />

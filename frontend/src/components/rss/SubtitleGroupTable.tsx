@@ -21,8 +21,7 @@ interface Props {
   getSubMode: (subgroupId: number) => 'primary' | 'backup' | null;
   subscribingId: number | null;
   excludePatterns: Record<number, string[]>;
-  onExcludeChange: (subgroupId: number, patterns: string[], rssUrl: string) => void;
-  onExcludeBlur: (subgroupId: number, rssUrl: string) => void;
+  onExcludeChange: (subgroupId: number, patterns: string[]) => void;
 }
 
 function CopyButton({ url }: { url: string }) {
@@ -55,7 +54,7 @@ function CopyButton({ url }: { url: string }) {
 export default function SubtitleGroupTable({
   result, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe, getSubMode,
-  subscribingId, excludePatterns, onExcludeChange, onExcludeBlur,
+  subscribingId, excludePatterns, onExcludeChange,
 }: Props) {
   if (result.groups.length === 0) {
     return <p className="text-center py-6 text-muted-foreground text-sm">No subtitle groups found</p>;
@@ -120,10 +119,9 @@ export default function SubtitleGroupTable({
                     onChange={(e) => {
                       const raw = e.target.value;
                       const patterns = raw.split(',').map(s => s.trim()).filter(Boolean);
-                      onExcludeChange(g.subgroup_id, patterns, g.rss_url);
+                      onExcludeChange(g.subgroup_id, patterns);
                     }}
                     onClick={(e) => e.stopPropagation()}
-                    onBlur={() => onExcludeBlur(g.subgroup_id, g.rss_url)}
                   />
                 {/* Filter tags button */}
                   <button
@@ -194,7 +192,11 @@ export default function SubtitleGroupTable({
                 {feed === null ? (
                   <p className="py-6 text-center text-muted-foreground text-sm">Failed to load feed</p>
                 ) : (
-                  <FeedPreview items={feed.items} selectedTags={filterTags[g.subgroup_id] || []} />
+                  <FeedPreview
+                    items={feed.items}
+                    selectedTags={filterTags[g.subgroup_id] || []}
+                    excludeKeywords={excludePatterns[g.subgroup_id] || []}
+                  />
                 )}
               </div>
             )}
