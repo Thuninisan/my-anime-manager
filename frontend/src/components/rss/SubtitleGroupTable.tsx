@@ -130,7 +130,8 @@ export default function SubtitleGroupTable({
                     <span className="text-[10px] px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold">
                       已订阅: 副
                     </span>
-                  ) : subscribingId === g.subgroup_id ? (
+                  )
+                ) : subscribingId === g.subgroup_id ? (
                   // Subscribing: show spinner
                   <span className="text-[10px] px-2.5 py-1 rounded-full bg-primary/10 text-primary font-semibold inline-flex items-center gap-1 cursor-default">
                     订阅
