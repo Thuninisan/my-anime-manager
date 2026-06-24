@@ -108,9 +108,8 @@ export default function SubtitleGroupTable({
               {/* Right: filter + subscribe buttons */}
               <div className="flex items-center gap-3 shrink-0 ml-4" onClick={e => e.stopPropagation()}>
                 {/* Filter tags button */}
-                {!subMode && (
                   <button
-                    className={`text-[10px] px-2 py-1 rounded border transition cursor-pointer font-semibold ${
+                    className={`text-[10px] px-2 py-1 rounded-full border transition cursor-pointer font-semibold ${
                       boxOpen
                         ? 'bg-primary/10 border-primary/30 text-primary'
                         : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
@@ -119,28 +118,19 @@ export default function SubtitleGroupTable({
                   >
                     Tags{selectedTags.length > 0 ? ` (${selectedTags.length})` : ''}
                   </button>
-                )}
 
                 {/* Subscribe buttons — three states */}
                 {subMode ? (
-                  // Subscribed: show role badges
-                  <div className="flex gap-1.5">
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold ${
-                      subMode === 'primary'
-                        ? 'bg-primary/15 text-primary'
-                        : 'bg-muted text-muted-foreground'
-                    }`}>
-                      Primary
+                  // Subscribed: show single role label with color distinction
+                  subMode === 'primary' ? (
+                    <span className="text-[10px] px-2.5 py-1 rounded-full bg-primary/15 text-primary font-semibold">
+                      已订阅: 主
                     </span>
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold ${
-                      subMode === 'backup'
-                        ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
-                        : 'bg-muted text-muted-foreground'
-                    }`}>
-                      Backup
+                  ) : (
+                    <span className="text-[10px] px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold">
+                      已订阅: 副
                     </span>
-                  </div>
-                ) : subscribingId === g.subgroup_id ? (
+                  ) : subscribingId === g.subgroup_id ? (
                   // Subscribing: show spinner
                   <span className="text-[10px] px-2.5 py-1 rounded-full bg-primary/10 text-primary font-semibold inline-flex items-center gap-1 cursor-default">
                     订阅
@@ -169,7 +159,7 @@ export default function SubtitleGroupTable({
             </div>
 
             {/* ── Tag filter panel ── */}
-            {boxOpen && !subMode && (
+            {boxOpen && (
               <div className="px-5 py-2 bg-muted/20 border-b border-border">
                 <TagFilterPanel
                   selectedTags={selectedTags}
