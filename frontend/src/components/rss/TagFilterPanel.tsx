@@ -1,4 +1,4 @@
-const AVAILABLE_TAGS = ['简体', '繁体', '日语', '内封', '内嵌', '双语'];
+const AVAILABLE_TAGS = ['简体', '繁体', '日语', '内封', '内嵌', '双语', '1080p', '720p'];
 
 export const TAG_COLORS: Record<string, string> = {
   '简体': 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
@@ -7,6 +7,8 @@ export const TAG_COLORS: Record<string, string> = {
   '内封': 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
   '内嵌': 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
   '双语': 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400',
+  '1080p': 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  '720p': 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
 };
 
 interface Props {

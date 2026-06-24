@@ -27,6 +27,14 @@ def _derive_tags(parsed: dict) -> list[str]:
     if "内封" in subs_str: tags.append("内封")
     if "内嵌" in subs_str or "内挂" in subs_str: tags.append("内嵌")
     if "双语" in subs_str: tags.append("双语")
+    # Resolution tags — anitopy extracts video_resolution from filenames
+    # (e.g. "1080p", "1080", "720p", "720", "1920x1080")
+    res = parsed.get("video_resolution", "")
+    res_str = res if isinstance(res, str) else str(res)
+    if "1080" in res_str:
+        tags.append("1080p")
+    elif "720" in res_str:
+        tags.append("720p")
     return tags
 
 
