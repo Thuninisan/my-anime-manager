@@ -2,31 +2,10 @@
 
 from urllib.parse import parse_qs, urlparse
 
-import httpx
 from bs4 import BeautifulSoup
 
 from .. import config
-
-def _base_url() -> str:
-    return config.MIKAN_BASE_URL
-
-
-def _get_client() -> httpx.AsyncClient:
-    """Create a configured httpx client for Mikan."""
-    proxy = None
-    if config.PROXY_HOST:
-        proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
-
-    return httpx.AsyncClient(
-        base_url=_base_url(),
-        headers={
-            "User-Agent": config.BANGUMI_UA,
-            "Accept": "text/html,application/xhtml+xml",
-        },
-        proxy=proxy,
-        timeout=30.0,
-        follow_redirects=True,
-    )
+from ..utils.http_retry import fetch_with_retry
 
 
 async def get_subtitle_groups(mikan_id: int) -> list[dict]:
@@ -38,10 +17,15 @@ async def get_subtitle_groups(mikan_id: int) -> list[dict]:
     Returns:
         List of dicts with keys: name, subgroup_id, rss_url.
     """
-    base = _base_url()
-    async with _get_client() as client:
-        resp = await client.get(f"/Home/Bangumi/{mikan_id}")
-        resp.raise_for_status()
+    base = config.MIKAN_BASE_URL
+    url = f"{base}/Home/Bangumi/{mikan_id}"
+
+    resp = await fetch_with_retry(
+        url,
+        timeout=30.0,
+        headers={"Accept": "text/html,application/xhtml+xml"},
+        label=f"Mikan bangumi/{mikan_id}",
+    )
 
     soup = BeautifulSoup(resp.text, "html.parser")
     groups: dict[int, dict] = {}  # dedup by subgroup_id

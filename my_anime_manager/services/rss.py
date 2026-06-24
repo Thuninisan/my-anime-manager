@@ -2,13 +2,11 @@
 
 import xml.etree.ElementTree as ET
 
-import httpx
-
 from .. import config
 from ..clients import mikan as mikan_client
 from ..data import get_mikan_id, get_bangumi_name, get_rss_settings, is_downloaded
 from ..vendor.anitopy import parse as anitopy_parse
-from ..utils.http_retry import USER_AGENT
+from ..utils.http_retry import fetch_with_retry
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -71,16 +69,7 @@ async def lookup_bangumi_rss(bangumi_id: int) -> dict | None:
 async def fetch_and_parse_rss(
     rss_url: str, filter_tags: list[str] | None = None, bangumi_id: int | None = None
 ) -> dict:
-    proxy = None
-    if config.PROXY_HOST:
-        proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
-
-    headers = {"User-Agent": USER_AGENT}
-    async with httpx.AsyncClient(
-        proxy=proxy, timeout=30.0, follow_redirects=True, headers=headers,
-    ) as client:
-        resp = await client.get(rss_url)
-        resp.raise_for_status()
+    resp = await fetch_with_retry(rss_url, timeout=30.0, label="RSS")
 
     root = ET.fromstring(resp.text)
     channel = root.find("channel")

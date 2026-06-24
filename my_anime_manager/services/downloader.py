@@ -24,7 +24,6 @@ from . import rss as rss_service, tmdb as tmdb_service, bangumi as bangumi_servi
 from .nfo_generator import generate_episode_nfo, generate_tv_show_nfo, generate_season_nfo
 from .image_downloader import download_episode_thumb, download_show_images, download_season_poster
 from ..utils.torrent_hash import compute_info_hash
-from ..utils.http_retry import USER_AGENT
 
 # Worker state
 _worker_task: asyncio.Task | None = None
@@ -199,90 +198,30 @@ async def enrich_subscription(bangumi_id: int) -> dict | None:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# .torrent download helper — retry with exponential backoff
+# .torrent download helper — delegates retry to shared fetch_with_retry
 # ═══════════════════════════════════════════════════════════════════════
 
 async def _download_torrent_file(torrent_url: str, max_retries: int = 3) -> bytes:
-    """Download a .torrent file with exponential-backoff retry.
+    """Download a .torrent file.  Retry is handled by fetch_with_retry.
 
-    Only retries *transient* errors (timeout, connection, 5xx).
-    Permanent errors (4xx, invalid URL, HTML response) are raised
-    immediately without retry.
+    The only extra logic beyond fetch_with_retry is detecting HTML error
+    pages that are served with 200 OK (some CDNs do this).
     """
-    proxy = None
-    if config.PROXY_HOST:
-        proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
+    from ..utils.http_retry import fetch_with_retry as _fetch
 
-    # Shared User-Agent from http_retry module
-    headers = {"User-Agent": USER_AGENT}
+    resp = await _fetch(torrent_url, timeout=60.0, max_retries=max_retries,
+                        label="torrent")
 
-    last_error: Exception | None = None
+    # Detect HTML error pages served with 200 OK
+    content_type = resp.headers.get("content-type", "")
+    if "text/html" in content_type and len(resp.content) < 2048:
+        raise httpx.HTTPStatusError(
+            "Server returned HTML instead of a torrent file (likely an error page)",
+            request=resp.request,
+            response=resp,
+        )
 
-    for attempt in range(1, max_retries + 1):
-        try:
-            async with httpx.AsyncClient(
-                proxy=proxy, timeout=60.0, follow_redirects=True,
-                headers=headers,
-            ) as client:
-                resp = await client.get(torrent_url)
-                resp.raise_for_status()
-
-                # Detect HTML error pages served with 200 OK
-                content_type = resp.headers.get("content-type", "")
-                if "text/html" in content_type and len(resp.content) < 2048:
-                    raise httpx.HTTPStatusError(
-                        "Server returned HTML instead of a torrent file (likely an error page)",
-                        request=resp.request,
-                        response=resp,
-                    )
-
-                return resp.content
-
-        except (
-            httpx.TimeoutException,
-            httpx.ConnectError,
-            httpx.RemoteProtocolError,
-            httpx.PoolTimeout,
-            httpx.ReadTimeout,
-            httpx.WriteTimeout,
-        ) as e:
-            # Transient network errors — retry
-            last_error = e
-            if attempt < max_retries:
-                delay = 2 ** attempt  # 2s, 4s, 8s
-                print(
-                    f"         ⚠️ .torrent 下载失败 "
-                    f"(尝试 {attempt}/{max_retries})，"
-                    f"{delay}s 后重试: {type(e).__name__}: {e}"
-                )
-                await asyncio.sleep(delay)
-            else:
-                raise  # retries exhausted
-
-        except httpx.HTTPStatusError as e:
-            # HTTP-level errors — retry only on 5xx
-            if e.response.status_code >= 500:
-                last_error = e
-                if attempt < max_retries:
-                    delay = 2 ** attempt
-                    print(
-                        f"         ⚠️ 服务器错误 {e.response.status_code} "
-                        f"(尝试 {attempt}/{max_retries})，"
-                        f"{delay}s 后重试"
-                    )
-                    await asyncio.sleep(delay)
-                else:
-                    raise
-            else:
-                raise  # 4xx — don't retry
-
-        except Exception:
-            # Unknown errors — don't retry
-            raise
-
-    # Should never reach here, but satisfy the type checker
-    assert last_error is not None
-    raise last_error
+    return resp.content
 
 
 # ═══════════════════════════════════════════════════════════════════════
