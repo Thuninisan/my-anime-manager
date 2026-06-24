@@ -226,6 +226,8 @@ class SubscriptionIn(BaseModel):
     backup_filter_tags: list[str] = []
     download_path: str = ""
     active: int = 1
+    exclude_patterns: list[str] = []
+    backup_exclude_patterns: list[str] = []
 
 
 class SubscriptionOut(BaseModel):
@@ -239,6 +241,8 @@ class SubscriptionOut(BaseModel):
     backup_subgroup_id: int = 0
     backup_subgroup_name: str = ""
     backup_filter_tags: list[str] = []
+    exclude_patterns: list[str] = []
+    backup_exclude_patterns: list[str] = []
     created_at: str = ""
     updated_at: str = ""
     download_path: str = ""
@@ -668,6 +672,8 @@ async def create_subscription(body: SubscriptionIn):
         backup_subgroup_name=body.backup_subgroup_name,
         backup_filter_tags=body.backup_filter_tags,
         download_path=body.download_path,
+        exclude_patterns=body.exclude_patterns,
+        backup_exclude_patterns=body.backup_exclude_patterns,
     )
     # Enrichment is done asynchronously via the enrich-stream endpoint.
     # The subscription is returned immediately without enrichment data.
@@ -770,13 +776,16 @@ async def get_rss_feed(
     url: str,
     subscription_id: str | None = None,
     tags: str | None = None,
+    exclude_patterns: str = "",
 ):
     """Fetch and parse a Mikan RSS feed.
 
     If *subscription_id* is provided, uses that sub's filter tags.
     Otherwise *tags* can be passed directly (comma-separated) for preview.
+    *exclude_patterns* is comma-separated and merged with global settings.
     """
     filter_tags: list[str] | None = None
+    extra_exclude: list[str] | None = None
     if subscription_id:
         subs = data.list_subscriptions()
         for s in subs:
@@ -787,8 +796,12 @@ async def get_rss_feed(
         filter_tags = [t.strip() for t in tags.split(",") if t.strip()]
     if not filter_tags:
         filter_tags = None
+    if exclude_patterns:
+        extra_exclude = [p.strip() for p in exclude_patterns.split(",") if p.strip()]
     try:
-        return await rss_service.fetch_and_parse_rss(url, filter_tags)
+        return await rss_service.fetch_and_parse_rss(
+            url, filter_tags, extra_exclude_patterns=extra_exclude,
+        )
     except Exception as e:
         raise HTTPException(502, f"RSS 获取失败: {e}")
 

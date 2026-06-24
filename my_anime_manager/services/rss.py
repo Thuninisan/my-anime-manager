@@ -67,7 +67,10 @@ async def lookup_bangumi_rss(bangumi_id: int) -> dict | None:
 
 
 async def fetch_and_parse_rss(
-    rss_url: str, filter_tags: list[str] | None = None, bangumi_id: int | None = None
+    rss_url: str,
+    filter_tags: list[str] | None = None,
+    bangumi_id: int | None = None,
+    extra_exclude_patterns: list[str] | None = None,
 ) -> dict:
     resp = await fetch_with_retry(rss_url, timeout=30.0, label="RSS")
 
@@ -78,7 +81,11 @@ async def fetch_and_parse_rss(
     ns = {"mikan": "https://mikanani.me/0.1/"}
     items: list[dict] = []
     settings = get_rss_settings()
-    exclude_patterns = settings.get("exclude_patterns", [])
+    exclude_patterns = list(settings.get("exclude_patterns", []))
+    if extra_exclude_patterns:
+        exclude_patterns.extend(extra_exclude_patterns)
+    # Deduplicate
+    exclude_patterns = list(dict.fromkeys(exclude_patterns))
 
     for item_elem in root.iter("item"):
         guid_elem = item_elem.find("guid")

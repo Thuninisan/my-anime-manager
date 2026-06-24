@@ -6,7 +6,7 @@ interface UseSubscriptionsReturn {
   subscriptions: SubscriptionOut[];
   loading: boolean;
   refresh: () => Promise<void>;
-  subscribe: (result: { bangumi_id: number; name: string }, group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup', filterTags: Record<number, string[]>, onProgress?: (msg: string) => void) => Promise<void>;
+  subscribe: (result: { bangumi_id: number; name: string }, group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup', filterTags: Record<number, string[]>, excludePatterns?: Record<number, string[]>, onProgress?: (msg: string) => void) => Promise<void>;
   unsubscribe: (bangumiId: number, deleteFiles?: boolean) => Promise<void>;
   activate: (bangumiId: number) => Promise<void>;
 }
@@ -28,9 +28,11 @@ export function useSubscriptions(): UseSubscriptionsReturn {
     group: { name: string; subgroup_id: number; rss_url: string },
     role: 'primary' | 'backup',
     filterTags: Record<number, string[]>,
+    excludePatterns?: Record<number, string[]>,
     onProgress?: (msg: string) => void,
   ) => {
     const tags = filterTags[group.subgroup_id] || [];
+    const excludes = excludePatterns?.[group.subgroup_id] || [];
     const existing = subscriptions.find(s => s.bangumi_id === result.bangumi_id);
 
     let body: SubscriptionIn;
@@ -41,6 +43,8 @@ export function useSubscriptions(): UseSubscriptionsReturn {
         backup_rss_url: existing?.rss_url || '', backup_subgroup_id: existing?.subgroup_id || 0,
         backup_subgroup_name: existing?.subgroup_name || '', backup_filter_tags: existing?.filter_tags || [],
         download_path: existing?.download_path || '',
+        exclude_patterns: excludes,
+        backup_exclude_patterns: existing?.backup_exclude_patterns || [],
       };
     } else {
       body = {
@@ -50,6 +54,8 @@ export function useSubscriptions(): UseSubscriptionsReturn {
         backup_rss_url: group.rss_url, backup_subgroup_id: group.subgroup_id,
         backup_subgroup_name: group.name, backup_filter_tags: tags,
         download_path: existing?.download_path || '',
+        exclude_patterns: existing?.exclude_patterns || [],
+        backup_exclude_patterns: excludes,
       };
     }
 

@@ -106,6 +106,8 @@ def add_subscription(
     backup_subgroup_name: str = "",
     backup_filter_tags: list[str] | None = None,
     download_path: str = "",
+    exclude_patterns: list[str] | None = None,
+    backup_exclude_patterns: list[str] | None = None,
 ) -> dict:
     """Add or update a subscription by bangumi_id (simple upsert)."""
     subs = _load_subs()
@@ -122,6 +124,8 @@ def add_subscription(
             s["backup_subgroup_id"] = backup_subgroup_id
             s["backup_subgroup_name"] = backup_subgroup_name
             s["backup_filter_tags"] = backup_filter_tags or []
+            s["exclude_patterns"] = exclude_patterns or []
+            s["backup_exclude_patterns"] = backup_exclude_patterns or []
             if download_path:
                 s["download_path"] = download_path
             s["updated_at"] = now
@@ -140,6 +144,8 @@ def add_subscription(
         "backup_subgroup_name": backup_subgroup_name,
         "backup_filter_tags": backup_filter_tags or [],
         "download_path": download_path or f"/{{series_name}}/Season {{season}}",
+        "exclude_patterns": exclude_patterns or [],
+        "backup_exclude_patterns": backup_exclude_patterns or [],
         "active": 1,
         "created_at": now,
     }

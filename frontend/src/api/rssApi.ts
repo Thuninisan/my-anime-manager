@@ -174,11 +174,12 @@ export async function getDownloadHistory(bangumiId: number): Promise<import('../
 
 export async function fetchRssFeed(
   url: string,
-  opts?: { subscriptionId?: string; tags?: string[] },
+  opts?: { subscriptionId?: string; tags?: string[]; excludePatterns?: string[] },
 ): Promise<RssFeedResponse> {
   let apiUrl = `${API_BASE}/feed?url=${encodeURIComponent(url)}`;
   if (opts?.subscriptionId) apiUrl += `&subscription_id=${encodeURIComponent(opts.subscriptionId)}`;
   if (opts?.tags?.length) apiUrl += `&tags=${encodeURIComponent(opts.tags.join(','))}`;
+  if (opts?.excludePatterns?.length) apiUrl += `&exclude_patterns=${encodeURIComponent(opts.excludePatterns.join(','))}`;
   const res = await fetch(apiUrl);
   if (!res.ok) {
     const text = await res.text();

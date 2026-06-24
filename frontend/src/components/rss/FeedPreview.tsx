@@ -80,7 +80,7 @@ export default function FeedPreview({ items, selectedTags }: Props) {
         <tbody className="divide-y divide-border/50">
           {visible.map((item, i) => {
             const hasEp = item.episode_number > 0;
-            const passed = selectedTags.length === 0 || selectedTags.every(t => item.tags.includes(t));
+            const passed = !item.excluded && (selectedTags.length === 0 || selectedTags.every(t => item.tags.includes(t)));
             const dim = !passed || item.outdated || item.downloaded;
 
             return (

@@ -20,6 +20,9 @@ interface Props {
   onSubscribe: (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => void;
   getSubMode: (subgroupId: number) => 'primary' | 'backup' | null;
   subscribingId: number | null;
+  excludePatterns: Record<number, string[]>;
+  onExcludeChange: (subgroupId: number, patterns: string[], rssUrl: string) => void;
+  onExcludeBlur: (subgroupId: number, rssUrl: string) => void;
 }
 
 function CopyButton({ url }: { url: string }) {
@@ -52,7 +55,7 @@ function CopyButton({ url }: { url: string }) {
 export default function SubtitleGroupTable({
   result, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe, getSubMode,
-  subscribingId,
+  subscribingId, excludePatterns, onExcludeChange, onExcludeBlur,
 }: Props) {
   if (result.groups.length === 0) {
     return <p className="text-center py-6 text-muted-foreground text-sm">No subtitle groups found</p>;
@@ -107,6 +110,21 @@ export default function SubtitleGroupTable({
 
               {/* Right: filter + subscribe buttons */}
               <div className="flex items-center gap-3 shrink-0 ml-4" onClick={e => e.stopPropagation()}>
+                {/* Exclude patterns input */}
+                  <input
+                    className="text-xs px-2.5 py-1.5 rounded-full border border-border bg-background w-36
+                               placeholder:text-[10px] placeholder:text-muted-foreground
+                               focus:outline-none focus:border-primary/30"
+                    placeholder='输入排除关键词","分隔'
+                    value={(excludePatterns[g.subgroup_id] || []).join(',')}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      const patterns = raw.split(',').map(s => s.trim()).filter(Boolean);
+                      onExcludeChange(g.subgroup_id, patterns, g.rss_url);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    onBlur={() => onExcludeBlur(g.subgroup_id, g.rss_url)}
+                  />
                 {/* Filter tags button */}
                   <button
                     className={`text-xs px-2.5 py-1.5 rounded-full border transition cursor-pointer font-semibold ${
@@ -118,6 +136,7 @@ export default function SubtitleGroupTable({
                   >
                     Tags{selectedTags.length > 0 ? ` (${selectedTags.length})` : ''}
                   </button>
+                  
 
                 {/* Subscribe buttons — three states */}
                 {subMode ? (

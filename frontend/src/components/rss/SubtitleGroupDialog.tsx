@@ -9,18 +9,23 @@ interface Props {
   filterTags: Record<number, string[]>;
   tagBoxOpen: Record<number, boolean>;
   subscribingId: number | null;
+  excludePatterns: Record<number, string[]>;
   onToggleFeed: (url: string) => void;
   onToggleTag: (subgroupId: number, tag: string) => void;
   onToggleTagBox: (subgroupId: number) => void;
   onSubscribe: (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => void;
+  onExcludeChange: (subgroupId: number, patterns: string[], rssUrl: string) => void;
+  onExcludeBlur: (subgroupId: number, rssUrl: string) => void;
   getSubMode: (subgroupId: number) => 'primary' | 'backup' | null;
   onClose: () => void;
 }
 
 export default function SubtitleGroupDialog({
   result, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
-  subscribingId, onToggleFeed, onToggleTag, onToggleTagBox,
-  onSubscribe, getSubMode, onClose,
+  subscribingId, excludePatterns,
+  onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe,
+  onExcludeChange, onExcludeBlur,
+  getSubMode, onClose,
 }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4">
@@ -78,6 +83,9 @@ export default function SubtitleGroupDialog({
             onSubscribe={onSubscribe}
             getSubMode={getSubMode}
             subscribingId={subscribingId}
+            excludePatterns={excludePatterns}
+            onExcludeChange={onExcludeChange}
+            onExcludeBlur={onExcludeBlur}
           />
         </div>
 

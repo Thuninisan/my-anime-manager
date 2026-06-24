@@ -23,6 +23,7 @@ export default function RssPage() {
   const [tagBoxOpen, setTagBoxOpen] = useState<Record<number, boolean>>({});
   const [unsubTarget, setUnsubTarget] = useState<import('@/types/preview').SubscriptionOut | null>(null);
   const [subscribingId, setSubscribingId] = useState<number | null>(null);
+  const [excludePatterns, setExcludePatterns] = useState<Record<number, string[]>>({});
 
   const handleSearch = () => search(bangumiId);
 
@@ -46,12 +47,29 @@ export default function RssPage() {
     });
   };
 
+  const handleExcludeChange = async (subgroupId: number, patterns: string[], rssUrl: string) => {
+    setExcludePatterns(prev => ({ ...prev, [subgroupId]: patterns }));
+  };
+
+  const handleExcludeBlur = async (subgroupId: number, rssUrl: string) => {
+    // Refetch feed on blur to recalculate status
+    setLoadingFeed(prev => ({ ...prev, [rssUrl]: true }));
+    try {
+      const feed = await rssApi.fetchRssFeed(rssUrl, {
+        tags: filterTags[subgroupId] || [],
+        excludePatterns: excludePatterns[subgroupId] || [],
+      });
+      setExpanded(prev => ({ ...prev, [rssUrl]: feed }));
+    } catch { /* keep old feed */ }
+    finally { setLoadingFeed(prev => { const n = { ...prev }; delete n[rssUrl]; return n; }); }
+  };
+
   const doSubscribe = async (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => {
     if (!result) return;
     setSubscribingId(group.subgroup_id);
     const toastId = showLoadingToast("订阅中...");
     try {
-      await subscribe(result, group, role, filterTags, (msg) => {
+      await subscribe(result, group, role, filterTags, excludePatterns, (msg) => {
         updateToast(toastId, msg, "loading");
       });
       updateToast(toastId, `✅ ${group.name} 订阅完成`, "success");
@@ -99,10 +117,13 @@ export default function RssPage() {
           filterTags={filterTags}
           tagBoxOpen={tagBoxOpen}
           subscribingId={subscribingId}
+          excludePatterns={excludePatterns}
           onToggleFeed={toggleFeed}
           onToggleTag={toggleTag}
           onToggleTagBox={(id) => setTagBoxOpen(prev => ({ ...prev, [id]: !prev[id] }))}
           onSubscribe={doSubscribe}
+          onExcludeChange={handleExcludeChange}
+          onExcludeBlur={handleExcludeBlur}
           getSubMode={getSubMode}
           onClose={clearSearch}
         />

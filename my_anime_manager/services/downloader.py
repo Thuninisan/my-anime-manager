@@ -444,7 +444,11 @@ async def _process_subscription(sub: dict):
     name = sub.get("name", str(bangumi_id))
 
     # 1. Try primary RSS
-    primary_items = await _fetch_passed_items(sub["rss_url"], filter_tags, bangumi_id)
+    primary_exclude = sub.get("exclude_patterns") or []
+    primary_items = await _fetch_passed_items(
+        sub["rss_url"], filter_tags, bangumi_id,
+        extra_exclude_patterns=primary_exclude,
+    )
     new_downloads = 0
     for item in primary_items:
         if await _download_item(item, bangumi_id, "primary", sub):
@@ -454,7 +458,11 @@ async def _process_subscription(sub: dict):
     backup_url = sub.get("backup_rss_url", "")
     if new_downloads == 0 and backup_url:
         backup_tags = sub.get("backup_filter_tags") or filter_tags
-        backup_items = await _fetch_passed_items(backup_url, backup_tags, bangumi_id)
+        backup_exclude = sub.get("backup_exclude_patterns") or []
+        backup_items = await _fetch_passed_items(
+            backup_url, backup_tags, bangumi_id,
+            extra_exclude_patterns=backup_exclude,
+        )
         for item in backup_items:
             if await _download_item(item, bangumi_id, "backup", sub):
                 new_downloads += 1
@@ -479,14 +487,20 @@ async def _check_completion(bangumi_id: int, sub: dict):
         print(f"   🏁 {sub.get('name', bangumi_id)}: 全部 {len(expected)} 集已下载，停止轮询")
 
 
-async def _fetch_passed_items(rss_url: str, filter_tags: list[str], bangumi_id: int) -> list[dict]:
+async def _fetch_passed_items(
+    rss_url: str, filter_tags: list[str], bangumi_id: int,
+    extra_exclude_patterns: list[str] | None = None,
+) -> list[dict]:
     """Fetch RSS and return items that pass filter AND aren't downloaded yet.
 
     Uses Bangumi sort (not raw RSS episode number) for dedup, so the
     dedup key matches what ``mark_downloaded`` writes.
     """
     try:
-        feed = await rss_service.fetch_and_parse_rss(rss_url, filter_tags, bangumi_id)
+        feed = await rss_service.fetch_and_parse_rss(
+            rss_url, filter_tags, bangumi_id,
+            extra_exclude_patterns=extra_exclude_patterns,
+        )
     except Exception as e:
         print(f"   ⚠️ RSS 获取失败: {e}")
         return []

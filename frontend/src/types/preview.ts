@@ -124,6 +124,8 @@ export interface SubscriptionIn {
   backup_subgroup_name?: string;
   backup_filter_tags?: string[];
   download_path?: string;
+  exclude_patterns?: string[];
+  backup_exclude_patterns?: string[];
 }
 
 export interface RssFeedItem {
@@ -136,6 +138,7 @@ export interface RssFeedItem {
   tags: string[];
   passed: boolean;
   excluded: boolean;
+  episode_number: number;
 }
 
 export interface RssSettings {
@@ -158,6 +161,8 @@ export interface SubscriptionOut {
   backup_subgroup_id: number;
   backup_subgroup_name: string;
   backup_filter_tags: string[];
+  exclude_patterns?: string[];
+  backup_exclude_patterns?: string[];
   created_at: string;
   updated_at: string;
   download_path?: string;
