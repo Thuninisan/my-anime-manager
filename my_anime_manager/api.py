@@ -37,6 +37,7 @@ from .services import rss as rss_service
 from .services import downloader
 from .services import image_downloader as image_service
 from .clients.qbittorrent import login as qb_login, get_torrents_by_hashes, delete_torrent
+from .clients import bangumi as bgm_client
 from . import data
 
 app = FastAPI(
@@ -595,6 +596,25 @@ async def update_config(changes: dict[str, object]):
 async def search_bangumi(q: str):
     """Search bangumi_mikan_map by name. Returns up to 20 matches."""
     return data.search_by_name(q)
+
+
+@app.get("/api/rss/bangumi/{bangumi_id}/meta")
+async def get_bangumi_meta(bangumi_id: int):
+    """Fetch Bangumi subject metadata (air_date, eps, rating, series_name).
+    Independent from the main RSS lookup — called in parallel by the frontend.
+    """
+    try:
+        subject = await bgm_client.get_subject(bangumi_id)
+        series_name = subject.get("name_cn") or subject.get("name", "")
+        return {
+            "air_date": subject.get("date", "") or "",
+            "eps": subject.get("eps") or subject.get("total_episodes") or 0,
+            "rating": (subject.get("rating") or {}).get("score", 0) or 0,
+            "rating_total": (subject.get("rating") or {}).get("total", 0) or 0,
+            "series_name": series_name,
+        }
+    except Exception as e:
+        raise HTTPException(502, f"Bangumi API 失败: {e}")
 
 
 @app.get("/api/rss/bangumi/{bangumi_id}", response_model=BangumiRssResponse)

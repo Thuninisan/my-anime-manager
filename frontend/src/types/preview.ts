@@ -99,6 +99,14 @@ export interface RssSubtitleGroup {
   rss_url: string;
 }
 
+export interface BangumiMeta {
+  air_date: string;
+  eps: number;
+  rating: number;
+  rating_total: number;
+  series_name: string;
+}
+
 export interface BangumiRssResponse {
   bangumi_id: number;
   name: string;

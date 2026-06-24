@@ -13,7 +13,7 @@ import { useDownloadHistory } from '@/hooks/useDownloadHistory';
 
 export default function RssPage() {
   const [bangumiId, setBangumiId] = useState('');
-  const { result, searching, error: searchError, search, clear: clearSearch } = useRssSearch();
+  const { result, meta, searching, error: searchError, search, clear: clearSearch } = useRssSearch();
   const { subscriptions, loading: subLoading, subscribe, unsubscribe, activate } = useSubscriptions();
   const { open: historyOpen, data: historyData, loading: historyLoading, subscription: historySub, openHistory, closeHistory } = useDownloadHistory();
 
@@ -98,6 +98,7 @@ export default function RssPage() {
       {result && (
         <SubtitleGroupDialog
           result={result}
+          meta={meta}
           subscriptions={subscriptions}
           expanded={expanded}
           loadingFeed={loadingFeed}

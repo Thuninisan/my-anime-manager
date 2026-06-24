@@ -1,8 +1,9 @@
-import type { BangumiRssResponse, RssFeedResponse, SubscriptionOut } from '@/types/preview';
+import type { BangumiMeta, BangumiRssResponse, RssFeedResponse, SubscriptionOut } from '@/types/preview';
 import SubtitleGroupTable from './SubtitleGroupTable';
 
 interface Props {
   result: BangumiRssResponse;
+  meta: BangumiMeta | null;
   subscriptions: SubscriptionOut[];
   expanded: Record<string, RssFeedResponse | null>;
   loadingFeed: Record<string, boolean>;
@@ -20,7 +21,7 @@ interface Props {
 }
 
 export default function SubtitleGroupDialog({
-  result, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
+  result, meta, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
   subscribingId, excludePatterns,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe,
   onExcludeChange,
@@ -46,6 +47,30 @@ export default function SubtitleGroupDialog({
                   </span>
                   <span className="text-xs text-muted-foreground">{result.groups.length} groups available</span>
                 </div>
+                {meta && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {meta.air_date && (
+                      <span className="text-[10px] bg-muted px-2 py-0.5 rounded text-muted-foreground">
+                        {meta.air_date}
+                      </span>
+                    )}
+                    {meta.eps > 0 && (
+                      <span className="text-[10px] bg-muted px-2 py-0.5 rounded text-muted-foreground">
+                        {meta.eps} 集
+                      </span>
+                    )}
+                    {meta.rating > 0 && (
+                      <span className="text-[10px] bg-muted px-2 py-0.5 rounded text-muted-foreground">
+                        ★ {meta.rating.toFixed(1)}{meta.rating_total > 0 ? ` (${meta.rating_total})` : ''}
+                      </span>
+                    )}
+                    {meta.series_name && meta.series_name !== result.name && (
+                      <span className="text-[10px] bg-muted px-2 py-0.5 rounded text-muted-foreground">
+                        {meta.series_name}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
             {/* Global RSS */}

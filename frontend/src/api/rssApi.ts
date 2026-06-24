@@ -8,6 +8,12 @@ export async function searchBangumi(query: string): Promise<{ bangumi_id: number
   return res.json();
 }
 
+export async function getBangumiMeta(bangumiId: number): Promise<import('@/types/preview').BangumiMeta> {
+  const res = await fetch(`${API_BASE}/bangumi/${bangumiId}/meta`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function lookupBangumiRss(bangumiId: number): Promise<BangumiRssResponse> {
   const res = await fetch(`${API_BASE}/bangumi/${bangumiId}`);
   if (!res.ok) {
