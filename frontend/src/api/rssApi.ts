@@ -193,6 +193,25 @@ export async function checkQbit(): Promise<{ ok: boolean; url: string; version: 
   return res.json();
 }
 
+export async function deleteEpisodeHistory(bangumiId: number, sort: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+export async function updateEpisodeHistory(bangumiId: number, sort: number, fields: Record<string, unknown>): Promise<void> {
+  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+export async function addEpisodeHistory(bangumiId: number, sort: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}`, { method: 'POST' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
 export async function getDownloadHistory(bangumiId: number): Promise<import('../types/preview').DownloadHistoryResponse> {
   const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}/history`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

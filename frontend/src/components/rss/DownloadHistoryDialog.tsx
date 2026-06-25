@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { DownloadHistoryResponse, SubscriptionOut } from '@/types/preview';
-import { updateSubscription, deleteSubscriptionRss } from '@/api/rssApi';
+import { updateSubscription, deleteSubscriptionRss, deleteEpisodeHistory, updateEpisodeHistory, addEpisodeHistory } from '@/api/rssApi';
 
 interface Props {
   open: boolean;
@@ -8,6 +8,7 @@ interface Props {
   loading: boolean;
   subscription: SubscriptionOut | null;
   onClose: () => void;
+  onRefresh: () => void;
 }
 
 /* ── Status helpers ─────────────────────────────────────────────── */
@@ -55,7 +56,7 @@ function Row({ label, value, mono }: { label: string; value: string; mono?: bool
 
 /* ── Component ──────────────────────────────────────────────────── */
 
-export default function DownloadHistoryDialog({ open, data, loading, subscription, onClose }: Props) {
+export default function DownloadHistoryDialog({ open, data, loading, subscription, onClose, onRefresh }: Props) {
   if (!open) return null;
 
   // Local mutable copy of subscription (synced from prop)
@@ -114,6 +115,23 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
     setDeleteType(null);
   };
 
+  // Episode action handlers
+  const handleEditEpisode = async (sort: number, currentSource: string) => {
+    if (!data) return;
+    const newSource = currentSource === 'primary' ? 'backup' : 'primary';
+    try { await updateEpisodeHistory(data.bangumi_id, sort, { source: newSource }); onRefresh(); } catch { /* */ }
+  };
+
+  const handleDeleteEpisode = async (sort: number) => {
+    if (!data) return;
+    try { await deleteEpisodeHistory(data.bangumi_id, sort); onRefresh(); } catch { /* */ }
+  };
+
+  const handleAddEpisode = async (sort: number) => {
+    if (!data) return;
+    try { await addEpisodeHistory(data.bangumi_id, sort); onRefresh(); } catch { /* */ }
+  };
+
   const totalEps = data
     ? data.bgm_sortrange[1] - data.bgm_sortrange[0] + 1
     : 0;
@@ -125,7 +143,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
-      <div className="bg-card w-full max-w-5xl h-[85vh] rounded-xl shadow-2xl overflow-hidden flex flex-col md:flex-row">
+      <div className="bg-card w-full max-w-6xl h-[85vh] rounded-xl shadow-2xl overflow-hidden flex flex-col md:flex-row">
         {/* ═══════════════════ Left Sidebar ═══════════════════ */}
         <aside className="w-full md:w-72 bg-muted/40 border-r border-border flex flex-col shrink-0">
           {/* Poster */}
@@ -347,6 +365,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
                     <th className="px-5 py-3 font-semibold">Status</th>
                     <th className="px-5 py-3 font-semibold w-48">Progress</th>
                     <th className="px-5 py-3 font-semibold">Source</th>
+                    <th className="px-5 py-3 font-semibold w-24">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
@@ -395,6 +414,24 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
                             {e.source === 'primary' ? 'Primary' : 'Backup'}
                           </span>
                         </td>
+                        <td className="px-5 py-3">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              className="text-[10px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+                              onClick={() => handleEditEpisode(e.sort, e.source)}
+                              title="Toggle source primary/backup"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              className="text-[10px] px-2 py-0.5 rounded border border-destructive/30 text-destructive hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer"
+                              onClick={() => handleDeleteEpisode(e.sort)}
+                              title="Remove from history"
+                            >
+                              Del
+                            </button>
+                          </div>
+                        </td>
                       </tr>
                     );
                   })}
@@ -419,6 +456,15 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
                       </td>
                       <td className="px-5 py-3">
                         <span className="text-[11px] text-muted-foreground/50">N/A</span>
+                      </td>
+                      <td className="px-5 py-3">
+                        <button
+                          className="text-[10px] px-2 py-0.5 rounded border border-primary/30 text-primary hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
+                          onClick={() => handleAddEpisode(sort)}
+                          title="Mark as downloaded manually"
+                        >
+                          Add
+                        </button>
                       </td>
                     </tr>
                   ))}

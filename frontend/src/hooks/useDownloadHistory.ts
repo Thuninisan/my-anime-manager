@@ -10,6 +10,7 @@ interface UseDownloadHistoryReturn {
   subscription: SubscriptionOut | null;
   openHistory: (id: number, sub: SubscriptionOut) => Promise<void>;
   closeHistory: () => void;
+  refreshHistory: () => void;
 }
 
 export function useDownloadHistory(): UseDownloadHistoryReturn {
@@ -29,24 +30,12 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
     setSubscription(null);
   }, []);
 
-  const openHistory = useCallback(async (id: number, sub: SubscriptionOut) => {
-    // Close any existing stream first
+  const startStream = useCallback((id: number) => {
     streamCtrl.current?.abort();
-
     setLoading(true);
-    setOpen(true);
-    setData(null);
-    setBangumiId(id);
-    setSubscription(sub);
-
     streamCtrl.current = getDownloadHistoryStream(
       id,
-      // onData — first frame with full payload
-      (initial) => {
-        setData(initial);
-        setLoading(false);
-      },
-      // onUpdate — periodic qBittorrent status updates
+      (initial) => { setData(initial); setLoading(false); },
       (episodes) => {
         setData((prev) => {
           if (!prev) return prev;
@@ -57,12 +46,21 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
           return { ...prev, episodes: updated };
         });
       },
-      // onError — silently ignore (keep stale data if available)
-      (_err) => {
-        if (!streamCtrl.current) return; // already closed
-      },
+      (_err) => { if (!streamCtrl.current) return; },
     );
   }, []);
 
-  return { open, data, loading, bangumiId, subscription, openHistory, closeHistory };
+  const openHistory = useCallback(async (id: number, sub: SubscriptionOut) => {
+    setOpen(true);
+    setData(null);
+    setBangumiId(id);
+    setSubscription(sub);
+    startStream(id);
+  }, [startStream]);
+
+  const refreshHistory = useCallback(() => {
+    if (bangumiId) startStream(bangumiId);
+  }, [bangumiId, startStream]);
+
+  return { open, data, loading, bangumiId, subscription, openHistory, closeHistory, refreshHistory };
 }

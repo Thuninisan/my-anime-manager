@@ -1100,6 +1100,44 @@ async def delete_subscription_rss(bangumi_id: int, type: str = "primary"):
     return {"ok": True, "deleted": False}
 
 
+# ── /api/rss/download-history/{bangumi_id}/{sort} ──
+
+@app.delete("/api/rss/download-history/{bangumi_id}/{sort}")
+async def delete_episode_history(bangumi_id: int, sort: int):
+    """Remove a single episode from download history."""
+    ok = data.remove_episode_record(bangumi_id, sort)
+    if not ok:
+        raise HTTPException(404, "记录不存在")
+    return {"ok": True}
+
+
+@app.patch("/api/rss/download-history/{bangumi_id}/{sort}")
+async def update_episode_history(bangumi_id: int, sort: int, fields: dict[str, object] = {}):
+    """Update an episode record (e.g. toggle source)."""
+    ep = data.get_all_episodes(bangumi_id).get(str(sort))
+    if not ep:
+        raise HTTPException(404, "记录不存在")
+    data.mark_downloaded(
+        bangumi_id, sort,
+        rss_url=str(fields.get("rss_url", ep.get("rss_url", ""))),
+        guid=str(fields.get("guid", ep.get("guid", ""))),
+        source=str(fields.get("source", ep.get("source", ""))),
+        pub_date=str(fields.get("pub_date", ep.get("pub_date", ""))),
+        info_hash=str(fields.get("info_hash", ep.get("info_hash", ""))),
+    )
+    return {"ok": True}
+
+
+@app.post("/api/rss/download-history/{bangumi_id}/{sort}")
+async def add_episode_history(bangumi_id: int, sort: int):
+    """Manually mark a missing episode as downloaded (source='manual')."""
+    data.mark_downloaded(
+        bangumi_id, sort,
+        rss_url="", guid="", source="manual", pub_date="", info_hash="",
+    )
+    return {"ok": True}
+
+
 # ── /api/rss/settings ──
 
 @app.get("/api/rss/settings")
