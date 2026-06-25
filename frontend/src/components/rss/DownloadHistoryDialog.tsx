@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { DownloadHistoryResponse, SubscriptionOut } from '@/types/preview';
-import { updateSubscription, deleteSubscriptionRss, deleteEpisodeHistory, updateEpisodeHistory, addEpisodeHistory } from '@/api/rssApi';
+import { updateSubscription, deleteSubscriptionRss, deleteEpisodeHistory, updateEpisodeHistory, addEpisodeWithTorrent } from '@/api/rssApi';
 
 interface Props {
   open: boolean;
@@ -127,9 +127,21 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
     try { await deleteEpisodeHistory(data.bangumi_id, sort); onRefresh(); } catch { /* */ }
   };
 
-  const handleAddEpisode = async (sort: number) => {
-    if (!data) return;
-    try { await addEpisodeHistory(data.bangumi_id, sort); onRefresh(); } catch { /* */ }
+  // Hidden file input for .torrent upload on Add
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const addingSortRef = useRef<number | null>(null);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const sort = addingSortRef.current;
+    if (!file || sort == null || !data) return;
+    try {
+      await addEpisodeWithTorrent(data.bangumi_id, sort, file);
+      onRefresh();
+    } catch { /* */ }
+    // Reset input so same file can be selected again
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    addingSortRef.current = null;
   };
 
   const totalEps = data
@@ -460,8 +472,8 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
                       <td className="px-5 py-3">
                         <button
                           className="text-[10px] px-2 py-0.5 rounded border border-primary/30 text-primary hover:bg-primary hover:text-primary-foreground transition-colors cursor-pointer"
-                          onClick={() => handleAddEpisode(sort)}
-                          title="Mark as downloaded manually"
+                          onClick={() => { addingSortRef.current = sort; fileInputRef.current?.click(); }}
+                          title="Upload .torrent to add episode"
                         >
                           Add
                         </button>
@@ -520,6 +532,14 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
           </div>
         </div>
       )}
+      {/* Hidden file input for .torrent upload */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".torrent"
+        className="hidden"
+        onChange={handleFileChange}
+      />
     </div>
   );
 }

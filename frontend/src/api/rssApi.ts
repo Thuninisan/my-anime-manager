@@ -212,6 +212,26 @@ export async function addEpisodeHistory(bangumiId: number, sort: number): Promis
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
+export async function addEpisodeWithTorrent(
+  bangumiId: number,
+  sort: number,
+  file: File,
+): Promise<{ torrent_name: string; info_hash: string }> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}/upload`, {
+    method: 'POST',
+    body: fd,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try { const j = JSON.parse(text); msg = j.detail || text; } catch { /* */ }
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function getDownloadHistory(bangumiId: number): Promise<import('../types/preview').DownloadHistoryResponse> {
   const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}/history`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
