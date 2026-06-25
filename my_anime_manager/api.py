@@ -1115,7 +1115,24 @@ async def delete_subscription_rss(bangumi_id: int, type: str = "primary"):
 
 @app.delete("/api/rss/download-history/{bangumi_id}/{sort}")
 async def delete_episode_history(bangumi_id: int, sort: int):
-    """Remove a single episode from download history."""
+    """Remove a single episode from download history AND qBittorrent."""
+    # Get info_hash before removing the record
+    ep = data.get_all_episodes(bangumi_id).get(str(sort))
+    info_hash = ep.get("info_hash", "") if ep else ""
+
+    # Delete torrent from qBittorrent (with files)
+    if info_hash:
+        try:
+            qb = await qb_login(
+                config.QBITTORRENT_URL,
+                config.QBITTORRENT_USERNAME,
+                config.QBITTORRENT_PASSWORD,
+            )
+            await delete_torrent(qb, info_hash, delete_files=True)
+            logger.info("deleted torrent from qBittorrent: hash=%s... files=True", info_hash[:12])
+        except Exception:
+            logger.exception("qBittorrent delete failed for hash=%s...", info_hash[:12])
+
     ok = data.remove_episode_record(bangumi_id, sort)
     if not ok:
         raise HTTPException(404, "记录不存在")
