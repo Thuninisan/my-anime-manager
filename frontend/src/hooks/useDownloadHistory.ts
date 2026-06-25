@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import type { DownloadHistoryResponse, SubscriptionOut } from '@/types/preview';
-import * as rssApi from '@/api/rssApi';
+import { getDownloadHistoryStream } from '@/api/rssApi';
 
 interface UseDownloadHistoryReturn {
   open: boolean;
@@ -18,27 +18,51 @@ export function useDownloadHistory(): UseDownloadHistoryReturn {
   const [loading, setLoading] = useState(false);
   const [bangumiId, setBangumiId] = useState(0);
   const [subscription, setSubscription] = useState<SubscriptionOut | null>(null);
+  const streamCtrl = useRef<AbortController | null>(null);
 
-  const fetchHistory = useCallback(async (id: number) => {
-    try { setData(await rssApi.getDownloadHistory(id)); } catch { /* */ }
+  const closeHistory = useCallback(() => {
+    // Abort streaming connection
+    streamCtrl.current?.abort();
+    streamCtrl.current = null;
+    setOpen(false);
+    setBangumiId(0);
+    setSubscription(null);
   }, []);
 
   const openHistory = useCallback(async (id: number, sub: SubscriptionOut) => {
-    setLoading(true); setOpen(true); setData(null); setBangumiId(id); setSubscription(sub);
-    try { setData(await rssApi.getDownloadHistory(id)); } catch { /* */ }
-    finally { setLoading(false); }
-  }, []);
+    // Close any existing stream first
+    streamCtrl.current?.abort();
 
-  const closeHistory = useCallback(() => {
-    setOpen(false); setBangumiId(0); setSubscription(null);
-  }, []);
+    setLoading(true);
+    setOpen(true);
+    setData(null);
+    setBangumiId(id);
+    setSubscription(sub);
 
-  // Auto-refresh every 5s while dialog is open
-  useEffect(() => {
-    if (!open || !bangumiId) return;
-    const id = setInterval(() => fetchHistory(bangumiId), 5000);
-    return () => clearInterval(id);
-  }, [open, bangumiId, fetchHistory]);
+    streamCtrl.current = getDownloadHistoryStream(
+      id,
+      // onData — first frame with full payload
+      (initial) => {
+        setData(initial);
+        setLoading(false);
+      },
+      // onUpdate — periodic qBittorrent status updates
+      (episodes) => {
+        setData((prev) => {
+          if (!prev) return prev;
+          const updated = prev.episodes.map((e) => {
+            const upd = episodes.find((u) => u.sort === e.sort);
+            return upd ? { ...e, qbit: upd.qbit } : e;
+          });
+          return { ...prev, episodes: updated };
+        });
+      },
+      // onError — silently ignore (keep stale data if available)
+      (_err) => {
+        if (!streamCtrl.current) return; // already closed
+      },
+    );
+  }, []);
 
   return { open, data, loading, bangumiId, subscription, openHistory, closeHistory };
 }

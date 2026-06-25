@@ -184,6 +184,48 @@ export async function getDownloadHistory(bangumiId: number): Promise<import('../
   return res.json();
 }
 
+/** Stream download history with live qBittorrent updates via NDJSON.
+ *  Returns an AbortController — call .abort() to stop the stream. */
+export function getDownloadHistoryStream(
+  bangumiId: number,
+  onData: (data: import('../types/preview').DownloadHistoryResponse) => void,
+  onUpdate: (episodes: { sort: number; qbit: import('../types/preview').QbitTorrentInfo | null }[]) => void,
+  onError: (err: Error) => void,
+): AbortController {
+  const ctrl = new AbortController();
+
+  (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}/history-stream`, {
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop()!;
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const evt = JSON.parse(line);
+          if (evt.type === 'data') onData(evt);
+          else if (evt.type === 'update') onUpdate(evt.episodes);
+        }
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') onError(err);
+    }
+  })();
+
+  return ctrl;
+}
+
 export async function fetchRssFeed(
   url: string,
   opts?: { subscriptionId?: string; tags?: string[]; excludePatterns?: string[] },

@@ -942,6 +942,115 @@ async def subscription_history(bangumi_id: int):
     }
 
 
+@app.get("/api/rss/subscriptions/{bangumi_id}/history-stream")
+async def subscription_history_stream(bangumi_id: int):
+    """Stream download history + live qBittorrent updates as NDJSON.
+
+    Events:
+    - ``{"type": "data", ...}`` — full initial payload (subscription info,
+      download history with qBittorrent status)
+    - ``{"type": "update", "episodes": [...]}`` — periodic torrent status
+      updates (only ``sort`` and ``qbit`` fields per episode)
+    """
+
+    async def generate():
+        # ── Build initial data (same logic as /history) ──
+        subs = data.list_subscriptions()
+        sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+        name = sub["name"] if sub else str(bangumi_id)
+        bgm_season = sub.get("bgm_season", 1) if sub else 1
+        bgm_sortrange = sub.get("bgm_sortrange", [0, 0]) if sub else [0, 0]
+
+        episodes_raw = data.get_all_episodes(bangumi_id)
+        hashes = []
+        entries = []
+        for sort_str, ep in episodes_raw.items():
+            h = ep.get("info_hash", "")
+            entries.append({
+                "sort": int(sort_str),
+                "source": ep.get("source", ""),
+                "guid": ep.get("guid", ""),
+                "at": ep.get("at", ""),
+                "info_hash": h,
+            })
+            if h:
+                hashes.append(h)
+
+        async def _fetch_qbit() -> dict[str, dict]:
+            if not hashes:
+                return {}
+            try:
+                qb = await qb_login(
+                    config.QBITTORRENT_URL,
+                    config.QBITTORRENT_USERNAME,
+                    config.QBITTORRENT_PASSWORD,
+                )
+                return await get_torrents_by_hashes(qb, hashes)
+            except Exception:
+                return {}
+
+        # Merge qBittorrent into entries
+        def _merge_qbit(eps: list[dict], qbit: dict[str, dict]) -> None:
+            for e in eps:
+                h = e["info_hash"]
+                e["qbit"] = qbit.get(h) if h else None
+
+        qbit_info = await _fetch_qbit()
+        _merge_qbit(entries, qbit_info)
+
+        # Missing sorts
+        downloaded_sorts = {e["sort"] for e in entries}
+        missing = []
+        if bgm_sortrange[0] > 0:
+            for s in range(bgm_sortrange[0], bgm_sortrange[1] + 1):
+                if s not in downloaded_sorts:
+                    missing.append(s)
+
+        # Send initial data frame
+        line = _json.dumps({
+            "type": "data",
+            "bangumi_id": bangumi_id,
+            "name": name,
+            "bgm_season": bgm_season,
+            "bgm_sortrange": bgm_sortrange,
+            "episodes": entries,
+            "missing_sorts": missing,
+        }, ensure_ascii=False) + "\n"
+        yield line.encode("utf-8")
+
+        # ── Periodic qBittorrent updates ──
+        try:
+            while True:
+                await asyncio.sleep(5)
+
+                qbit_info = await _fetch_qbit()
+                # Build slim update: only sort + qbit per episode
+                updates = []
+                for e in entries:
+                    h = e["info_hash"]
+                    new_qbit = qbit_info.get(h) if h else None
+                    if new_qbit != e.get("qbit"):
+                        e["qbit"] = new_qbit
+                        updates.append({"sort": e["sort"], "qbit": new_qbit})
+
+                if updates:
+                    line = _json.dumps({
+                        "type": "update",
+                        "episodes": updates,
+                    }, ensure_ascii=False) + "\n"
+                    yield line.encode("utf-8")
+
+        except asyncio.CancelledError:
+            # Client disconnected — clean exit
+            pass
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.patch("/api/rss/subscriptions/{bangumi_id}/activate")
 async def activate_subscription(bangumi_id: int):
     """Re-activate a completed subscription (set active=1)."""
