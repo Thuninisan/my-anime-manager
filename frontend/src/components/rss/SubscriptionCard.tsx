@@ -43,10 +43,12 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
           </div>
         )}
 
-        {/* Rating badge */}
-        <div className="absolute top-3 left-3 bg-secondary text-white text-[10px] font-bold px-2 py-1 rounded-full glass-effect">
-          BGM {s.bangumi_id}
-        </div>
+        {/* Rating badge — only shown when rating > 0 */}
+        {(s.bgm_rating != null && s.bgm_rating > 0) && (
+          <div className="absolute top-3 left-3 bg-secondary text-white text-[10px] font-bold px-2 py-1 rounded-full glass-effect">
+            BGM {s.bgm_rating.toFixed(1)} / 10
+          </div>
+        )}
 
         {/* Gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60" />

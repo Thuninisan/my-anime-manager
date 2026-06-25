@@ -80,9 +80,11 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
                   </div>
                 </div>
               )}
-              <div className="absolute top-3 left-3 bg-secondary text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm">
-                BGM {data?.bangumi_id || subscription?.bangumi_id}
-              </div>
+              {(subscription?.bgm_rating != null && subscription.bgm_rating > 0) && (
+                <div className="absolute top-3 left-3 bg-secondary text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm">
+                  BGM {subscription.bgm_rating.toFixed(1)} / 10
+                </div>
+              )}
             </div>
           </div>
 
@@ -112,6 +114,18 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
                 <div>
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground block">Filter</span>
                   <span className="text-sm font-semibold text-foreground">{subscription.filter_tags.join(', ')}</span>
+                </div>
+              )}
+              {subscription?.bgm_rating != null && subscription.bgm_rating > 0 && (
+                <div>
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground block">Rating</span>
+                  <span className="text-sm font-semibold text-foreground">
+                    {subscription.bgm_rating.toFixed(1)}
+                    <span className="text-muted-foreground font-normal"> / 10</span>
+                    <span className="text-muted-foreground font-normal text-xs ml-1">
+                      ({subscription.bgm_rating_total?.toLocaleString() ?? 0} votes)
+                    </span>
+                  </span>
                 </div>
               )}
             </div>

@@ -190,6 +190,19 @@ async def enrich_subscription(
         bgm_sortrange = [min(sorts), max(sorts)] if sorts else [0, 0]
         _emit(f"✅ bgm_sortrange={bgm_sortrange}")
 
+        # 3.5. Get rating from subject API (non-fatal: defaults to 0 on failure)
+        bgm_rating = 0.0
+        bgm_rating_total = 0
+        try:
+            subject_data = await get_subject(bangumi_id)
+            rating = subject_data.get("rating")
+            if rating and isinstance(rating, dict):
+                bgm_rating = float(rating.get("score") or 0)
+                bgm_rating_total = int(rating.get("total") or 0)
+            _emit(f"✅ bgm_rating={bgm_rating} (total={bgm_rating_total})")
+        except Exception:
+            _emit("⚠️ Failed to fetch Bangumi rating (non-fatal)")
+
         # 4. Series name — first entry in chain (root of the series)
         series_name = (
             chain[0].get("name_cn") or chain[0].get("name") or ""
@@ -206,6 +219,8 @@ async def enrich_subscription(
             "series_name": series_name,
             "tmdb_id": tmdb_id or 0,
             "tmdb_season": tmdb_season,
+            "bgm_rating": bgm_rating,
+            "bgm_rating_total": bgm_rating_total,
         }
     except Exception as e:
         _emit(f"⚠️ enrich_subscription 失败: {e}")

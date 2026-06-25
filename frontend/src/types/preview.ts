@@ -105,6 +105,7 @@ export interface BangumiMeta {
   rating: number;
   rating_total: number;
   series_name: string;
+  poster_url: string;
 }
 
 export interface BangumiRssResponse {
@@ -178,6 +179,9 @@ export interface SubscriptionOut {
   // Pre-computed season metadata (from Bangumi chain)
   bgm_season?: number;
   bgm_sortrange?: number[];
+  // Bangumi rating (from subject API)
+  bgm_rating?: number;
+  bgm_rating_total?: number;
   tmdb_id?: number;
   tmdb_season?: number | null;
   // Poster image URL (served from backend /posters/ static mount)

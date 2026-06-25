@@ -251,6 +251,9 @@ class SubscriptionOut(BaseModel):
     # Pre-computed season metadata (from Bangumi chain)
     bgm_season: int = 1
     bgm_sortrange: list[int] = []
+    # Bangumi rating (from subject API)
+    bgm_rating: float = 0.0
+    bgm_rating_total: int = 0
     tmdb_id: int = 0
     tmdb_season: int | None = None
     # Poster image URL (Bangumi CDN URL, frontend loads directly)
@@ -606,12 +609,15 @@ async def get_bangumi_meta(bangumi_id: int):
     try:
         subject = await bgm_client.get_subject(bangumi_id)
         series_name = subject.get("name_cn") or subject.get("name", "")
+        images = subject.get("images") or {}
+        poster_url = (images.get("small") or images.get("grid") or images.get("medium") or "")
         return {
             "air_date": subject.get("date", "") or "",
             "eps": subject.get("eps") or subject.get("total_episodes") or 0,
             "rating": (subject.get("rating") or {}).get("score", 0) or 0,
             "rating_total": (subject.get("rating") or {}).get("total", 0) or 0,
             "series_name": series_name,
+            "poster_url": poster_url,
         }
     except Exception as e:
         raise HTTPException(502, f"Bangumi API 失败: {e}")
@@ -707,7 +713,7 @@ async def create_subscription(body: SubscriptionIn):
     all_subs = data.list_subscriptions()
     for s in all_subs:
         if s["bangumi_id"] == body.bangumi_id and "bgm_season" in s:
-            cached = {k: s[k] for k in ("bgm_season", "bgm_sortrange", "tmdb_id", "tmdb_season", "series_name") if k in s}
+            cached = {k: s[k] for k in ("bgm_season", "bgm_sortrange", "tmdb_id", "tmdb_season", "series_name", "bgm_rating", "bgm_rating_total") if k in s}
             data.update_subscription(body.bangumi_id, cached)
             sub.update(cached)
             break
