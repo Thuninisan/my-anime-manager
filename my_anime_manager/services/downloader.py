@@ -1,6 +1,7 @@
 """RSS download worker — poll subscriptions, download new episodes via qBittorrent."""
 
 import asyncio
+import logging
 import tempfile
 import traceback
 from pathlib import Path
@@ -25,6 +26,8 @@ from . import rss as rss_service, tmdb as tmdb_service, bangumi as bangumi_servi
 from .nfo_generator import generate_episode_nfo, generate_tv_show_nfo, generate_season_nfo
 from .image_downloader import download_episode_thumb, download_show_images, download_season_poster
 from ..utils.torrent_hash import compute_info_hash
+
+logger = logging.getLogger(__name__)
 
 # Worker state
 _worker_task: asyncio.Task | None = None
@@ -259,7 +262,7 @@ async def _download_torrent_file(torrent_url: str, max_retries: int = 3) -> byte
 # NFO & file structure generation
 # ═══════════════════════════════════════════════════════════════════════
 
-async def _generate_metadata(
+async def generate_metadata(
     qb_client, info_hash: str,
     bangumi_id: int, sort: int, bgm_subject_id: int,
     tmdb_id: int, show_name: str, old_torrent_path: str, guid: str,
@@ -281,12 +284,12 @@ async def _generate_metadata(
 
     # ── TMDB: fetch the single target season ──────────────────────
     target_tmdb_season = tmdb_season if tmdb_season is not None else 1
-    print(f"         📡 获取 TMDB S{target_tmdb_season} 集数数据 (tmdb_id={tmdb_id})...")
+    logger.info("fetching TMDB S%d (tmdb_id=%d)", target_tmdb_season, tmdb_id)
     try:
         resp = await tmdb_get_season(tmdb_id, target_tmdb_season)
         season_data = resp.json()
-    except Exception as e:
-        print(f"         ⚠️ TMDB season API 失败: {e}")
+    except Exception:
+        logger.exception("TMDB season API failed")
         return
 
     # Build tmdb_ep dict from the matching episode (by sort)
@@ -316,7 +319,7 @@ async def _generate_metadata(
             break
 
     if not tmdb_ep:
-        print(f"         ⚠️ TMDB S{target_tmdb_season} 中未找到 sort={sort} 的剧集，跳过 NFO 生成")
+        logger.warning("TMDB S%d missing episode sort=%d, skipping NFO", target_tmdb_season, sort)
         return
 
     # ── Season directory ──────────────────────────────────────────
@@ -352,7 +355,7 @@ async def _generate_metadata(
         thumb_path=Path(thumb_path).name if thumb_path else "",
         output_dir=str(season_dir),
     )
-    print(f"         📄 {ep_path}")
+    logger.info("episode NFO: %s", ep_path)
 
     # ── Show-level NFO + images (only once) ───────────────────────
     tvshow_nfo = show_dir / "tvshow.nfo"
@@ -371,10 +374,10 @@ async def _generate_metadata(
                 status=detail.get("status", ""),
                 output_dir=str(show_dir),
             )
-            print(f"         📄 tvshow.nfo")
+            logger.info("tvshow.nfo generated")
             await download_show_images(tmdb_id, str(show_dir))
-        except Exception as e:
-            print(f"         ⚠️ tvshow.nfo 失败: {e}")
+        except Exception:
+            logger.exception("tvshow.nfo failed")
 
     # ── Season NFO ────────────────────────────────────────────────
     season_nfo = season_dir / "season.nfo"
@@ -383,7 +386,7 @@ async def _generate_metadata(
             subject = await get_subject(bgm_subject_id)
             poster = await download_season_poster(subject, str(show_dir), bgm_season)
             if poster:
-                print(f"         🖼️ Season {bgm_season} poster")
+                logger.info("Season %d poster downloaded", bgm_season)
             generate_season_nfo(
                 title=subject.get("name_cn") or subject.get("name", ""),
                 original_title=subject.get("name", ""),
@@ -393,18 +396,18 @@ async def _generate_metadata(
                 bangumi_id=bgm_subject_id,
                 output_dir=str(season_dir),
             )
-            print(f"         📄 Season {bgm_season}/season.nfo")
-        except Exception as e:
-            print(f"         ⚠️ season.nfo 失败: {e}")
+            logger.info("Season %d season.nfo generated", bgm_season)
+        except Exception:
+            logger.exception("season.nfo failed")
 
     # ── Rename in qBittorrent ─────────────────────────────────────
     ext = Path(old_torrent_path).suffix
     new_path = f"{sub_path}/{show_name} {sort:02d}{ext}"
     try:
         await rename_file(qb_client, info_hash, old_torrent_path, new_path)
-        print(f"         📂 {old_torrent_path} → {new_path}")
-    except Exception as e:
-        print(f"         ⚠️ 重命名失败: {e}")
+        logger.info("renamed: %s → %s", old_torrent_path, new_path)
+    except Exception:
+        logger.exception("rename failed")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -675,7 +678,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
             from ..clients.qbittorrent import get_torrent_files
             files = await get_torrent_files(qb, info_hash)
             old_path = files[0]["name"] if files else guid
-            await _generate_metadata(
+            await generate_metadata(
                 qb, info_hash, bangumi_id, sort,
                 bgm_subject_id, tmdb_id, show_name,
                 old_path, guid,

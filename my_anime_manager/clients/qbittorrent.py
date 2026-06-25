@@ -5,10 +5,13 @@ connections never block the event loop and Ctrl+C works immediately.
 """
 
 import asyncio
+import logging
 from pathlib import Path
 
 import qbittorrentapi
 from qbittorrentapi import LoginFailed, Conflict409Error
+
+logger = logging.getLogger(__name__)
 
 # Seconds before giving up on a qBittorrent connection (connect + read).
 _QB_TIMEOUT = 8
@@ -163,7 +166,7 @@ async def rename_file(
             )
             return True
         except Conflict409Error:
-            print(f"   ⚠️ 文件重命名冲突: {old_path} → {new_path}")
+            logger.warning("rename conflict: %s → %s", old_path, new_path)
             return False
 
     return await asyncio.to_thread(_do_rename)
@@ -254,5 +257,5 @@ async def get_torrents_by_hashes(
     try:
         return await asyncio.to_thread(_do_get)
     except Exception as e:
-        print(f"   ⚠️ qBittorrent get_torrents_by_hashes 失败: {e}")
+        logger.warning("get_torrents_by_hashes failed: %s", e)
         return {}

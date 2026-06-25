@@ -15,6 +15,7 @@ Usage:
 
 import asyncio
 import json as _json
+import logging
 import os
 import subprocess
 import sys
@@ -36,9 +37,19 @@ from .services.batch_service import build_preview, execute_confirm, process_torr
 from .services import rss as rss_service
 from .services import downloader
 from .services import image_downloader as image_service
-from .clients.qbittorrent import login as qb_login, get_torrents_by_hashes, delete_torrent
+from .clients.qbittorrent import login as qb_login, get_torrents_by_hashes, delete_torrent, add_torrent, resume_torrent, get_torrent_files
+from .utils.torrent_hash import compute_info_hash
+from .utils.torrent_file_reader import read_torrent_file_list
+import bencodepy
 from .clients import bangumi as bgm_client
 from . import data
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)-5s [%(name)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="My Anime Manager",
@@ -1136,6 +1147,137 @@ async def add_episode_history(bangumi_id: int, sort: int):
         rss_url="", guid="", source="manual", pub_date="", info_hash="",
     )
     return {"ok": True}
+
+
+@app.post("/api/rss/download-history/{bangumi_id}/{sort}/upload")
+async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = File(...)):
+    """Upload a .torrent file to manually add a missing episode.
+
+    1. Parse torrent → extract name + info_hash
+    2. Determine save path from subscription (same logic as RSS downloader)
+    3. Add to qBittorrent (paused)
+    4. Record in download_history.json (source='add')
+    """
+    if not file.filename or not file.filename.lower().endswith(".torrent"):
+        raise HTTPException(400, "Only .torrent files are accepted")
+
+    # ── Read subscription ──
+    subs = data.list_subscriptions()
+    sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+    if not sub:
+        raise HTTPException(404, "订阅不存在")
+    show_name = sub.get("name", str(bangumi_id))
+    series_name = sub.get("series_name") or show_name
+    bgm_season = sub.get("bgm_season", 1)
+    tmdb_id = sub.get("tmdb_id", 0)
+    tmdb_season = sub.get("tmdb_season")
+    rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
+    sub_path_template = sub.get("download_path") or "/{series_name}/Season {season}"
+    sub_path = sub_path_template.format(
+        series_name=series_name, show_name=show_name, season=bgm_season,
+    ).strip("/")
+
+    # ── Save .torrent to temp file ──
+    tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
+    torrent_name = ""
+    info_hash = ""
+    try:
+        contents = await file.read()
+        tmp.write(contents)
+        tmp.close()
+
+        # ── Bencode parse → torrent name + info_hash ──
+        with open(tmp.name, "rb") as f:
+            meta = bencodepy.decode(f.read())
+        info = meta[b"info"]
+        torrent_name = info[b"name"].decode("utf-8", errors="replace")
+        info_hash = compute_info_hash(tmp.name)
+        logger.info("parsed torrent: name=%s hash=%s...", torrent_name, info_hash[:12])
+
+        # ── Validate: exactly 1 video file ──
+        VIDEO_EXTS = {".mkv", ".mp4", ".mka", ".avi", ".mov", ".ts", ".wmv", ".flv", ".webm"}
+        file_list = read_torrent_file_list(tmp.name)
+        logger.debug("torrent contains %d files", len(file_list))
+        video_files = [
+            f for f in file_list
+            if Path(f["name"]).suffix.lower() in VIDEO_EXTS
+        ]
+        if len(video_files) != 1:
+            logger.warning("rejected: %d video files (expected 1)", len(video_files))
+            raise HTTPException(
+                400,
+                f"种子中视频文件数量不为1 (found {len(video_files)})，请上传单集种子",
+            )
+
+        # ── Add to qBittorrent (paused) ──
+        logger.info("adding to qBittorrent: save_path=%s", rss_base)
+        try:
+            qb = await qb_login(
+                config.QBITTORRENT_URL,
+                config.QBITTORRENT_USERNAME,
+                config.QBITTORRENT_PASSWORD,
+            )
+            add_hash = await add_torrent(qb, tmp.name, rss_base, torrent_name)
+            logger.info("added torrent hash=%s...", add_hash[:12])
+        except Exception as e:
+            logger.exception("qBittorrent add failed")
+            raise HTTPException(500, f"qBittorrent 添加失败: {e}")
+
+        # ── Generate metadata + rename (same flow as RSS downloader) ──
+        if tmdb_id:
+            logger.info("generating metadata (tmdb_id=%d, season=%d)", tmdb_id, bgm_season)
+            try:
+                files = await get_torrent_files(qb, add_hash)
+                old_path = files[0]["name"] if files else torrent_name
+                await downloader.generate_metadata(
+                    qb, add_hash, bangumi_id, sort,
+                    bangumi_id,
+                    tmdb_id, show_name,
+                    old_path, torrent_name,
+                    bgm_season=bgm_season,
+                    tmdb_season=tmdb_season,
+                    base_path=rss_base,
+                    sub_path=sub_path,
+                )
+                logger.info("metadata generated")
+            except Exception as e:
+                logger.exception("NFO generation failed")
+        else:
+            logger.info("skipping metadata (no tmdb_id)")
+
+        # ── Resume download ──
+        logger.info("resuming torrent")
+        try:
+            await resume_torrent(qb, add_hash)
+            logger.info("torrent resumed")
+        except Exception:
+            logger.warning("resume failed (non-fatal)", exc_info=True)
+
+        # ── Record in download history ──
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        data.mark_downloaded(
+            bangumi_id, sort,
+            rss_url="",
+            guid=torrent_name,
+            source="add",
+            pub_date=now,
+            info_hash=info_hash,
+        )
+        logger.info("recorded in history (source=add, guid=%s)", torrent_name[:60])
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("unhandled error in upload")
+        raise HTTPException(500, f"上传失败: {e}")
+
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+    return {"ok": True, "torrent_name": torrent_name, "info_hash": info_hash}
 
 
 # ── /api/rss/settings ──
