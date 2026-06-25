@@ -172,6 +172,21 @@ export async function activateSubscription(bangumiId: number): Promise<void> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
+export async function updateSubscription(bangumiId: number, fields: Record<string, unknown>): Promise<void> {
+  const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(fields),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+export async function deleteSubscriptionRss(bangumiId: number, type: 'primary' | 'backup'): Promise<{ deleted: boolean }> {
+  const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}/rss?type=${type}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function checkQbit(): Promise<{ ok: boolean; url: string; version: string; error: string }> {
   const res = await fetch(`${API_BASE}/downloader/qbit-check`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

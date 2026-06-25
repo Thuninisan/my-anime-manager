@@ -1,4 +1,6 @@
+import { useState, useEffect, useRef } from 'react';
 import type { DownloadHistoryResponse, SubscriptionOut } from '@/types/preview';
+import { updateSubscription, deleteSubscriptionRss } from '@/api/rssApi';
 
 interface Props {
   open: boolean;
@@ -38,17 +40,86 @@ function formatSpeed(bytesPerSec: number | undefined): string {
   return formatBytes(bytesPerSec) + '/s';
 }
 
+/* ── Metadata row helper ────────────────────────────────────────── */
+
+function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex justify-between items-baseline gap-2">
+      <span className="text-[10px] text-muted-foreground shrink-0">{label}</span>
+      <span className={`text-xs font-medium text-foreground text-right truncate ${mono ? 'font-mono text-[10px]' : ''}`} title={value}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 /* ── Component ──────────────────────────────────────────────────── */
 
 export default function DownloadHistoryDialog({ open, data, loading, subscription, onClose }: Props) {
   if (!open) return null;
+
+  // Local mutable copy of subscription (synced from prop)
+  const [sub, setSub] = useState<SubscriptionOut | null>(subscription);
+  const prevSub = useRef(subscription);
+  if (subscription !== prevSub.current) {
+    prevSub.current = subscription;
+    // schedule sync — useEffect would cause a flash, useState initial is fine
+  }
+  useEffect(() => { setSub(subscription); }, [subscription]);
+
+  // Edit state
+  const [editingCard, setEditingCard] = useState<'primary' | 'backup' | null>(null);
+  const [editingExclude, setEditingExclude] = useState('');
+  const idRef = useRef<number | null>(null);
+  useEffect(() => { if (sub) idRef.current = sub.bangumi_id; }, [sub]);
+
+  // Delete confirmation state
+  const [deleteType, setDeleteType] = useState<'primary' | 'backup' | null>(null);
+
+  const startEdit = (type: 'primary' | 'backup') => {
+    setEditingCard(type);
+    const patterns = type === 'primary' ? sub?.exclude_patterns : sub?.backup_exclude_patterns;
+    setEditingExclude(patterns?.join(', ') ?? '');
+  };
+
+  const saveExclude = async () => {
+    if (!idRef.current || !sub) { setEditingCard(null); return; }
+    const type = editingCard!;
+    const patterns = editingExclude.split(',').map(s => s.trim()).filter(Boolean);
+    const field = type === 'primary' ? 'exclude_patterns' : 'backup_exclude_patterns';
+    try {
+      await updateSubscription(idRef.current, { [field]: patterns });
+      setSub(prev => prev ? { ...prev, [field]: patterns } : prev);
+    } catch { /* silently ignore */ }
+    setEditingCard(null);
+  };
+
+  const handleDelete = async () => {
+    if (!idRef.current || !deleteType) return;
+    try {
+      const { deleted } = await deleteSubscriptionRss(idRef.current, deleteType);
+      if (deleted) {
+        // Entire subscription deleted — close the dialog
+        setDeleteType(null);
+        onClose();
+        return;
+      }
+      // Update local sub state by clearing the deleted RSS fields
+      if (deleteType === 'primary') {
+        setSub(prev => prev ? { ...prev, rss_url: '', subgroup_id: 0, subgroup_name: '', filter_tags: [], exclude_patterns: [] } : prev);
+      } else {
+        setSub(prev => prev ? { ...prev, backup_rss_url: '', backup_subgroup_id: 0, backup_subgroup_name: '', backup_filter_tags: [], backup_exclude_patterns: [] } : prev);
+      }
+    } catch { /* silently ignore */ }
+    setDeleteType(null);
+  };
 
   const totalEps = data
     ? data.bgm_sortrange[1] - data.bgm_sortrange[0] + 1
     : 0;
   const downloaded = data ? data.episodes.length : 0;
   const missing = data?.missing_sorts || [];
-  const isActive = subscription?.active !== 0;
+  const isActive = sub?.active !== 0;
   const sortedEps = data ? [...data.episodes].sort((a, b) => a.sort - b.sort) : [];
   const totalSize = sortedEps.reduce((sum, e) => sum + (e.qbit?.size || 0), 0);
 
@@ -60,41 +131,41 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
           {/* Poster */}
           <div className="p-5">
             <div className="relative aspect-[3/4] rounded-lg overflow-hidden shadow-sm">
-              {subscription?.poster_url ? (
+              {sub?.poster_url ? (
                 <img
-                  src={subscription.poster_url}
-                  alt={subscription.name}
+                  src={sub.poster_url}
+                  alt={sub.name}
                   className="w-full h-full object-cover"
                 />
               ) : (
                 <div
                   className="w-full h-full"
                   style={{
-                    background: `linear-gradient(135deg, hsl(${(subscription?.bangumi_id || 1) * 137 % 360},45%,35%), hsl(${((subscription?.bangumi_id || 1) * 137 + 40) % 360},35%,20%))`,
+                    background: `linear-gradient(135deg, hsl(${(sub?.bangumi_id || 1) * 137 % 360},45%,35%), hsl(${((sub?.bangumi_id || 1) * 137 + 40) % 360},35%,20%))`,
                   }}
                 >
                   <div className="absolute inset-0 flex items-center justify-center">
                     <span className="text-4xl font-bold text-white/25">
-                      {(subscription?.name || data?.name || '?')[0]}
+                      {(sub?.name || data?.name || '?')[0]}
                     </span>
                   </div>
                 </div>
               )}
-              {(subscription?.bgm_rating != null && subscription.bgm_rating > 0) && (
+              {(sub?.bgm_rating != null && sub.bgm_rating > 0) && (
                 <div className="absolute top-3 left-3 bg-secondary text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm">
-                  BGM {subscription.bgm_rating.toFixed(1)} / 10
+                  BGM {sub.bgm_rating.toFixed(1)} / 10
                 </div>
               )}
             </div>
           </div>
 
           {/* Metadata */}
-          <div className="px-5 pb-5 flex-1">
+          <div className="px-5 pb-5 flex-1 overflow-y-auto">
             <h2 className="text-lg font-bold text-foreground leading-tight">
-              {subscription?.name || data?.name || '...'}
+              {sub?.name || data?.name || '...'}
             </h2>
             <p className="text-sm text-muted-foreground mt-1">
-              Season {data?.bgm_season || subscription?.bgm_season || '?'}
+              Season {data?.bgm_season || sub?.bgm_season || '?'}
             </p>
 
             <div className="mt-5 space-y-3">
@@ -104,38 +175,116 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
                   {isActive ? 'Ongoing' : 'Completed'}
                 </span>
               </div>
-              {subscription?.subgroup_name && (
-                <div>
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground block">Sub Group</span>
-                  <span className="text-sm font-semibold text-foreground">{subscription.subgroup_name}</span>
+
+              {/* ── Primary RSS card ── */}
+              <div className="relative group bg-muted/30 rounded-lg p-3 space-y-1.5">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Primary RSS</div>
+                <Row label="Sub Group" value={sub?.subgroup_name || '—'} />
+                <Row label="Tags" value={sub?.filter_tags?.length ? sub.filter_tags.join(', ') : '无'} />
+                {editingCard === 'primary' ? (
+                  <div className="flex justify-between items-baseline gap-2">
+                    <span className="text-[10px] text-muted-foreground shrink-0">Exclude</span>
+                    <input
+                      value={editingExclude}
+                      onChange={e => setEditingExclude(e.target.value)}
+                      onBlur={saveExclude}
+                      onKeyDown={e => { if (e.key === 'Enter') saveExclude(); }}
+                      className="text-xs bg-background border border-border rounded px-1.5 py-0.5 w-24 text-right focus:outline-none focus:border-primary"
+                      autoFocus
+                    />
+                  </div>
+                ) : (
+                  <Row label="Exclude" value={sub?.exclude_patterns?.length ? sub.exclude_patterns.join(', ') : '无'} />
+                )}
+                <Row label="RSS" value={sub?.rss_url || '—'} mono />
+
+                {/* Hover action overlay — hidden while editing */}
+                {editingCard !== 'primary' && (
+                  <div className="absolute inset-0 rounded-lg bg-primary/5 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                    <button
+                      className="bg-card text-foreground p-2.5 rounded-full shadow-md hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer"
+                      onClick={(e) => { e.stopPropagation(); startEdit('primary'); }}
+                      title="Edit exclude patterns"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                      </svg>
+                    </button>
+                    <button
+                      className="bg-card text-destructive p-2.5 rounded-full shadow-md hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer"
+                      onClick={(e) => { e.stopPropagation(); setDeleteType('primary'); }}
+                      title="Delete primary RSS"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Backup RSS card ── */}
+              {sub?.backup_subgroup_name && (
+                <div className="relative group bg-muted/30 rounded-lg p-3 space-y-1.5">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Backup RSS</div>
+                  <Row label="Sub Group" value={sub.backup_subgroup_name} />
+                  <Row label="Tags" value={sub?.backup_filter_tags?.length ? sub.backup_filter_tags.join(', ') : '无'} />
+                  {editingCard === 'backup' ? (
+                    <div className="flex justify-between items-baseline gap-2">
+                      <span className="text-[10px] text-muted-foreground shrink-0">Exclude</span>
+                      <input
+                        value={editingExclude}
+                        onChange={e => setEditingExclude(e.target.value)}
+                        onBlur={saveExclude}
+                        onKeyDown={e => { if (e.key === 'Enter') saveExclude(); }}
+                        className="text-xs bg-background border border-border rounded px-1.5 py-0.5 w-24 text-right focus:outline-none focus:border-primary"
+                        autoFocus
+                      />
+                    </div>
+                  ) : (
+                    <Row label="Exclude" value={sub?.backup_exclude_patterns?.length ? sub.backup_exclude_patterns.join(', ') : '无'} />
+                  )}
+                  <Row label="RSS" value={sub.backup_rss_url || '—'} mono />
+
+                  {/* Hover action overlay — hidden while editing */}
+                  {editingCard !== 'backup' && (
+                    <div className="absolute inset-0 rounded-lg bg-primary/5 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                      <button
+                        className="bg-card text-foreground p-2.5 rounded-full shadow-md hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer"
+                        onClick={(e) => { e.stopPropagation(); startEdit('backup'); }}
+                        title="Edit backup exclude patterns"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>
+                        </svg>
+                      </button>
+                      <button
+                        className="bg-card text-destructive p-2.5 rounded-full shadow-md hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer"
+                        onClick={(e) => { e.stopPropagation(); setDeleteType('backup'); }}
+                        title="Delete backup RSS"
+                      >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+                        </svg>
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
-              {subscription?.filter_tags && subscription.filter_tags.length > 0 && (
-                <div>
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground block">Filter</span>
-                  <span className="text-sm font-semibold text-foreground">{subscription.filter_tags.join(', ')}</span>
-                </div>
-              )}
-              {subscription?.bgm_rating != null && subscription.bgm_rating > 0 && (
+
+              {sub?.bgm_rating != null && sub.bgm_rating > 0 && (
                 <div>
                   <span className="text-[10px] uppercase tracking-wider text-muted-foreground block">Rating</span>
                   <span className="text-sm font-semibold text-foreground">
-                    {subscription.bgm_rating.toFixed(1)}
+                    {sub.bgm_rating.toFixed(1)}
                     <span className="text-muted-foreground font-normal"> / 10</span>
                     <span className="text-muted-foreground font-normal text-xs ml-1">
-                      ({subscription.bgm_rating_total?.toLocaleString() ?? 0} votes)
+                      ({sub.bgm_rating_total?.toLocaleString() ?? 0} votes)
                     </span>
                   </span>
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Sidebar actions */}
-          <div className="p-5 border-t border-border space-y-2">
-            <button className="w-full py-2 px-4 border border-border text-muted-foreground rounded-lg text-xs font-medium hover:bg-muted transition-colors">
-              Edit Subscription
-            </button>
           </div>
         </aside>
 
@@ -294,6 +443,37 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
           )}
         </section>
       </div>
+
+      {/* ── Delete confirmation dialog ── */}
+      {deleteType && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 rounded-xl" onClick={() => setDeleteType(null)}>
+          <div className="bg-card rounded-xl p-6 shadow-2xl max-w-sm mx-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-foreground">
+              Delete {deleteType === 'primary' ? 'Primary' : 'Backup'} RSS?
+            </h3>
+            <p className="text-sm text-muted-foreground mt-2">
+              {deleteType === 'primary'
+                ? 'This will clear the primary RSS subscription (subgroup, tags, and exclude patterns).'
+                : 'This will clear the backup RSS subscription.'}
+              {' '}If this is the only RSS source, the entire subscription will be removed.
+            </p>
+            <div className="flex gap-3 mt-5 justify-end">
+              <button
+                className="px-4 py-2 border border-border text-muted-foreground rounded-lg text-sm font-medium hover:bg-muted transition-colors cursor-pointer"
+                onClick={() => setDeleteType(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-2 bg-destructive text-destructive-foreground rounded-lg text-sm font-semibold hover:bg-destructive/90 transition-colors cursor-pointer"
+                onClick={handleDelete}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

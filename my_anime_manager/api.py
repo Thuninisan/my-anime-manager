@@ -1060,6 +1060,46 @@ async def activate_subscription(bangumi_id: int):
     return {"ok": True}
 
 
+@app.patch("/api/rss/subscriptions/{bangumi_id}")
+async def update_subscription_fields(bangumi_id: int, fields: dict[str, object]):
+    """Update specific fields of a subscription (e.g. exclude_patterns)."""
+    ok = data.update_subscription(bangumi_id, fields)
+    if not ok:
+        raise HTTPException(404, "订阅不存在")
+    return {"ok": True}
+
+
+@app.delete("/api/rss/subscriptions/{bangumi_id}/rss")
+async def delete_subscription_rss(bangumi_id: int, type: str = "primary"):
+    """Clear primary or backup RSS from a subscription.
+
+    If no RSS remains after clearing, the entire subscription is deleted.
+    """
+    subs = data.list_subscriptions()
+    sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+    if not sub:
+        raise HTTPException(404, "订阅不存在")
+
+    if type == "primary":
+        fields = {"rss_url": "", "subgroup_id": 0, "subgroup_name": "",
+                   "filter_tags": [], "exclude_patterns": []}
+    else:
+        fields = {"backup_rss_url": "", "backup_subgroup_id": 0,
+                   "backup_subgroup_name": "", "backup_filter_tags": [],
+                   "backup_exclude_patterns": []}
+
+    data.update_subscription(bangumi_id, fields)
+
+    # Reload and check if any RSS remains
+    subs = data.list_subscriptions()
+    sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+    if sub and not sub.get("rss_url") and not sub.get("backup_rss_url"):
+        data.remove_subscription(bangumi_id)
+        return {"ok": True, "deleted": True}
+
+    return {"ok": True, "deleted": False}
+
+
 # ── /api/rss/settings ──
 
 @app.get("/api/rss/settings")
