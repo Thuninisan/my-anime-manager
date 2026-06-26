@@ -18,6 +18,7 @@ interface Props {
   onExcludeChange: (subgroupId: number, patterns: string[]) => void;
   getSubMode: (subgroupId: number) => 'primary' | 'backup' | null;
   takenRoles: { primary: boolean; backup: boolean };
+  onDeleteRss: (type: 'primary' | 'backup') => void;
   onClose: () => void;
 }
 
@@ -26,7 +27,7 @@ export default function SubtitleGroupDialog({
   subscribingId, excludePatterns,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe,
   onExcludeChange,
-  getSubMode, takenRoles, onClose,
+  getSubMode, takenRoles, onDeleteRss, onClose,
 }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4">
@@ -115,7 +116,7 @@ export default function SubtitleGroupDialog({
         </header>
 
         {/* Scrollable group list */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto relative">
           <SubtitleGroupTable
             result={result}
             subscriptions={subscriptions}
@@ -129,6 +130,7 @@ export default function SubtitleGroupDialog({
             onSubscribe={onSubscribe}
             getSubMode={getSubMode}
             takenRoles={takenRoles}
+            onDeleteRss={onDeleteRss}
             subscribingId={subscribingId}
             excludePatterns={excludePatterns}
             onExcludeChange={onExcludeChange}

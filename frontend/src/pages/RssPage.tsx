@@ -14,7 +14,7 @@ import { useDownloadHistory } from '@/hooks/useDownloadHistory';
 export default function RssPage() {
   const [bangumiId, setBangumiId] = useState('');
   const { result, meta, searching, error: searchError, search, clear: clearSearch } = useRssSearch();
-  const { subscriptions, loading: subLoading, subscribe, unsubscribe, activate } = useSubscriptions();
+  const { subscriptions, loading: subLoading, subscribe, unsubscribe, activate, refresh: refreshSubs } = useSubscriptions();
   const { open: historyOpen, data: historyData, loading: historyLoading, subscription: historySub, openHistory, closeHistory, refreshHistory } = useDownloadHistory();
 
   const [expanded, setExpanded] = useState<Record<string, RssFeedResponse | null>>({});
@@ -65,6 +65,14 @@ export default function RssPage() {
     } finally {
       setSubscribingId(null);
     }
+  };
+
+  const handleDeleteGroupRss = async (type: 'primary' | 'backup') => {
+    if (!result) return;
+    try {
+      await rssApi.deleteSubscriptionRss(result.bangumi_id, type);
+      await refreshSubs();
+    } catch { /* */ }
   };
 
   const getSubMode = (subgroupId: number): 'primary' | 'backup' | null => {
@@ -126,6 +134,7 @@ export default function RssPage() {
           onExcludeChange={handleExcludeChange}
           getSubMode={getSubMode}
           takenRoles={takenRoles}
+          onDeleteRss={handleDeleteGroupRss}
           onClose={clearSearch}
         />
       )}

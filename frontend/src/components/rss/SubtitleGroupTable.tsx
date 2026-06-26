@@ -20,6 +20,7 @@ interface Props {
   onSubscribe: (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => void;
   getSubMode: (subgroupId: number) => 'primary' | 'backup' | null;
   takenRoles: { primary: boolean; backup: boolean };
+  onDeleteRss: (type: 'primary' | 'backup') => void;
   subscribingId: number | null;
   excludePatterns: Record<number, string[]>;
   onExcludeChange: (subgroupId: number, patterns: string[]) => void;
@@ -29,7 +30,7 @@ function CopyButton({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
-    navigator.clipboard.writeText(url).catch(() => {});
+    navigator.clipboard.writeText(url).catch(() => { });
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -55,62 +56,64 @@ function CopyButton({ url }: { url: string }) {
 export default function SubtitleGroupTable({
   result, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe, getSubMode,
-  takenRoles, subscribingId, excludePatterns, onExcludeChange,
+  takenRoles, onDeleteRss, subscribingId, excludePatterns, onExcludeChange,
 }: Props) {
+  const [deleteTarget, setDeleteTarget] = useState<'primary' | 'backup' | null>(null);
+
   if (result.groups.length === 0) {
     return <p className="text-center py-6 text-muted-foreground text-sm">No subtitle groups found</p>;
   }
 
   return (
-    <div className="divide-y divide-border">
-      {result.groups.map(g => {
-        const feed = expanded[g.rss_url];
-        const loading = loadingFeed[g.rss_url] || false;
-        const subMode = getSubMode(g.subgroup_id);
-        const selectedTags = filterTags[g.subgroup_id] || [];
-        const boxOpen = tagBoxOpen[g.subgroup_id] || false;
-        const isExpanded = feed !== undefined;
+    <>
+      <div className="divide-y divide-border">
+        {result.groups.map(g => {
+          const feed = expanded[g.rss_url];
+          const loading = loadingFeed[g.rss_url] || false;
+          const subMode = getSubMode(g.subgroup_id);
+          const selectedTags = filterTags[g.subgroup_id] || [];
+          const boxOpen = tagBoxOpen[g.subgroup_id] || false;
+          const isExpanded = feed !== undefined;
 
-        return (
-          <div key={g.subgroup_id}>
-            {/* ── Group header row ── */}
-            <div
-              className={`flex items-center justify-between px-5 py-3 cursor-pointer transition-colors ${
-                isExpanded
-                  ? 'bg-muted/30 border-b border-border'
-                  : 'hover:bg-muted/20'
-              }`}
-              onClick={() => onToggleFeed(g.rss_url)}
-            >
-              {/* Left: chevron + name + RSS */}
-              <div className="flex items-center gap-4 min-w-0 flex-1">
-                {loading ? (
-                  <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
-                ) : (
-                  <svg
-                    width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                    className={`shrink-0 transition-transform duration-300 ${isExpanded ? 'text-primary rotate-180' : 'text-muted-foreground'}`}
-                  >
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                )}
-                <div className="min-w-0">
-                  <h4 className={`text-base font-semibold ${isExpanded ? 'text-primary' : 'text-foreground'}`}>
-                    {g.name}
-                  </h4>
-                  <div className="flex items-center gap-1 mt-0.5">
-                    <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[220px]">
-                      {g.rss_url}
-                    </span>
-                    <CopyButton url={g.rss_url} />
+          return (
+            <div key={g.subgroup_id}>
+              {/* ── Group header row ── */}
+              <div
+                className={`flex items-center justify-between px-5 py-3 cursor-pointer transition-colors ${isExpanded
+                    ? 'bg-muted/30 border-b border-border'
+                    : 'hover:bg-muted/20'
+                  }`}
+                onClick={() => onToggleFeed(g.rss_url)}
+              >
+                {/* Left: chevron + name + RSS */}
+                <div className="flex items-center gap-4 min-w-0 flex-1">
+                  {loading ? (
+                    <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
+                  ) : (
+                    <svg
+                      width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                      className={`shrink-0 transition-transform duration-300 ${isExpanded ? 'text-primary rotate-180' : 'text-muted-foreground'}`}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  )}
+                  <div className="min-w-0">
+                    <h4 className={`text-base font-semibold ${isExpanded ? 'text-primary' : 'text-foreground'}`}>
+                      {g.name}
+                    </h4>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="text-[11px] text-muted-foreground font-mono truncate max-w-[220px]">
+                        {g.rss_url}
+                      </span>
+                      <CopyButton url={g.rss_url} />
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Right: filter + subscribe buttons */}
-              <div className="flex items-center gap-3 shrink-0 ml-4" onClick={e => e.stopPropagation()}>
-                {/* Exclude patterns input */}
+                {/* Right: filter + subscribe buttons */}
+                <div className="flex items-center gap-3 shrink-0 ml-4" onClick={e => e.stopPropagation()}>
+                  {/* Exclude patterns input */}
                   <input
                     className="text-xs px-2.5 py-1.5 rounded-full border border-border bg-background w-36
                                placeholder:text-[10px] placeholder:text-muted-foreground
@@ -124,97 +127,129 @@ export default function SubtitleGroupTable({
                     }}
                     onClick={(e) => e.stopPropagation()}
                   />
-                {/* Filter tags button */}
+                  {/* Filter tags button */}
                   <button
-                    className={`text-xs px-2.5 py-1.5 rounded-full border transition cursor-pointer font-semibold ${
-                      boxOpen
+                    className={`text-xs px-2.5 py-1.5 rounded-full border transition cursor-pointer font-semibold ${boxOpen
                         ? 'bg-primary/10 border-primary/30 text-primary'
                         : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30'
-                    }`}
+                      }`}
                     onClick={() => onToggleTagBox(g.subgroup_id)}
                   >
                     Tags{selectedTags.length > 0 ? ` (${selectedTags.length})` : ''}
                   </button>
-                  
 
-                {/* Subscribe buttons — three states */}
-                {subMode ? (
-                  // Subscribed: show single role label with color distinction
-                  subMode === 'primary' ? (
-                    <span className="text-xs px-2.5 py-1.5 rounded-full bg-primary/15 text-primary font-semibold">
-                      已订阅: 主
+
+                  {/* Subscribe buttons — three states */}
+                  {subMode ? (
+                    // Subscribed: badge with hover → delete
+                    <span
+                      className={`text-xs px-2.5 py-1.5 rounded-full font-semibold cursor-pointer group/badge transition-colors ${subMode === 'primary'
+                          ? 'bg-primary/15 text-primary hover:bg-destructive hover:text-destructive-foreground'
+                          : 'bg-amber-500/15 text-amber-600 dark:text-amber-400 hover:bg-destructive hover:text-destructive-foreground'
+                        }`}
+                      onClick={() => setDeleteTarget(subMode)}
+                      title="点击删除此订阅"
+                    >
+                      <span className="group-hover/badge:hidden">
+                        {subMode === 'primary' ? '已订阅: 主' : '已订阅: 副'}
+                      </span>
+                      <span className="hidden group-hover/badge:inline">删除</span>
+                    </span>
+                  ) : subscribingId === g.subgroup_id ? (
+                    // Subscribing: show spinner
+                    <span className="text-xs px-2.5 py-1.5 rounded-full bg-primary/10 text-primary font-semibold inline-flex items-center gap-1 cursor-default">
+                      订阅
+                      <div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                    </span>
+                  ) : takenRoles.primary && takenRoles.backup ? (
+                    // Both roles already taken by other subgroups
+                    <span className="text-xs px-2.5 py-1.5 rounded-full bg-muted text-muted-foreground font-semibold cursor-default">
+                      已满
                     </span>
                   ) : (
-                    <span className="text-xs px-2.5 py-1.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold">
-                      已订阅: 副
-                    </span>
-                  )
-                ) : subscribingId === g.subgroup_id ? (
-                  // Subscribing: show spinner
-                  <span className="text-xs px-2.5 py-1.5 rounded-full bg-primary/10 text-primary font-semibold inline-flex items-center gap-1 cursor-default">
-                    订阅
-                    <div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                  </span>
-                ) : takenRoles.primary && takenRoles.backup ? (
-                  // Both roles already taken by other subgroups
-                  <span className="text-xs px-2.5 py-1.5 rounded-full bg-muted text-muted-foreground font-semibold cursor-default">
-                    已满
-                  </span>
-                ) : (
-                  // Not subscribed: dropdown with taken roles disabled
-                  <DropdownMenuRoot>
-                    <DropdownMenuTrigger className="text-xs px-2.5 py-1.5 rounded-full bg-primary/10 text-primary font-semibold hover:bg-primary hover:text-primary-foreground">
-                      订阅
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="ml-1">
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="min-w-[140px]">
-                      <DropdownMenuItem
-                        onClick={() => onSubscribe(g, 'primary')}
-                        disabled={takenRoles.primary}
-                      >
-                        作为主 RSS 订阅
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => onSubscribe(g, 'backup')}
-                        disabled={takenRoles.backup}
-                      >
-                        作为副 RSS 订阅
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenuRoot>
-                )}
+                    // Not subscribed: dropdown with taken roles disabled
+                    <DropdownMenuRoot>
+                      <DropdownMenuTrigger className="text-xs px-2.5 py-1.5 rounded-full bg-primary/10 text-primary font-semibold hover:bg-primary hover:text-primary-foreground">
+                        订阅
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="ml-1">
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="min-w-[140px]">
+                        <DropdownMenuItem
+                          onClick={() => onSubscribe(g, 'primary')}
+                          disabled={takenRoles.primary}
+                        >
+                          作为主 RSS 订阅
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => onSubscribe(g, 'backup')}
+                          disabled={takenRoles.backup}
+                        >
+                          作为副 RSS 订阅
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenuRoot>
+                  )}
+                </div>
               </div>
-            </div>
 
-            {/* ── Tag filter panel ── */}
-            {boxOpen && (
-              <div className="px-5 py-2 bg-muted/20 border-b border-border">
-                <TagFilterPanel
-                  selectedTags={selectedTags}
-                  onToggleTag={(tag) => onToggleTag(g.subgroup_id, tag)}
-                />
-              </div>
-            )}
-
-            {/* ── Expanded feed ── */}
-            {isExpanded && (
-              <div className="bg-muted/10">
-                {feed === null ? (
-                  <p className="py-6 text-center text-muted-foreground text-sm">Failed to load feed</p>
-                ) : (
-                  <FeedPreview
-                    items={feed.items}
-                    selectedTags={filterTags[g.subgroup_id] || []}
-                    excludeKeywords={excludePatterns[g.subgroup_id] || []}
+              {/* ── Tag filter panel ── */}
+              {boxOpen && (
+                <div className="px-5 py-2 bg-muted/20 border-b border-border">
+                  <TagFilterPanel
+                    selectedTags={selectedTags}
+                    onToggleTag={(tag) => onToggleTag(g.subgroup_id, tag)}
                   />
-                )}
-              </div>
-            )}
+                </div>
+              )}
+
+              {/* ── Expanded feed ── */}
+              {isExpanded && (
+                <div className="bg-muted/10">
+                  {feed === null ? (
+                    <p className="py-6 text-center text-muted-foreground text-sm">Failed to load feed</p>
+                  ) : (
+                    <FeedPreview
+                      items={feed.items}
+                      selectedTags={filterTags[g.subgroup_id] || []}
+                      excludeKeywords={excludePatterns[g.subgroup_id] || []}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Delete confirmation dialog */}
+      {deleteTarget && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/50 rounded-xl" onClick={() => setDeleteTarget(null)}>
+          <div className="bg-card rounded-xl p-6 shadow-2xl max-w-sm mx-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-foreground">
+              删除{deleteTarget === 'primary' ? '主' : '副'} RSS 订阅？
+            </h3>
+            <p className="text-sm text-muted-foreground mt-2">
+              {deleteTarget === 'primary'
+                ? '将清除主 RSS 的 subgroup、标签和排除模式。'
+                : '将清除副 RSS 的 subgroup、标签和排除模式。'}
+              {' '}如果这是唯一的 RSS 源，整个订阅将被移除。
+            </p>
+            <div className="flex gap-3 mt-5 justify-end">
+              <button
+                className="px-4 py-2 border border-border text-muted-foreground rounded-lg text-sm font-medium hover:bg-muted transition-colors cursor-pointer"
+                onClick={() => setDeleteTarget(null)}
+              >取消</button>
+              <button
+                className="px-4 py-2 bg-destructive text-destructive-foreground rounded-lg text-sm font-semibold hover:bg-destructive/90 transition-colors cursor-pointer"
+                onClick={() => { onDeleteRss(deleteTarget); setDeleteTarget(null); }}
+              >删除</button>
+            </div>
           </div>
-        );
-      })}
-    </div>
+        </div>
+      )}
+    </>
+
   );
 }
