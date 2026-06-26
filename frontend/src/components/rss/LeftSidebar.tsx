@@ -71,13 +71,37 @@ export default function LeftSidebar({
         </h2>
         <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
           Season {data?.bgm_season || sub?.bgm_season || '?'}
-          <span className="text-muted-foreground/40">·</span>
-          <span className={`font-medium ${isActive ? 'text-accent' : 'text-muted-foreground'}`}>
-            {isActive ? 'Ongoing' : 'Completed'}
-          </span>
+          {sub?.backup_subgroup_name && (
+            <>
+              <span className="text-muted-foreground/40">·</span>
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                isActive
+                  ? 'bg-amber-500/10 text-amber-600'
+                  : 'bg-emerald-500/10 text-emerald-600'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                {isActive ? 'Ongoing' : 'Completed'}
+              </span>
+            </>
+          )}
         </p>
 
-        <div className="mt-4 space-y-2.5">
+        {/* Status card — only when single RSS (backup absent, more room) */}
+        {!sub?.backup_subgroup_name && (
+          <div className="mt-3 my-4">
+            <span className="text-[13px] uppercase tracking-wider text-muted-foreground font-semibold block mb-1.5">Status</span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold ${
+              isActive
+                ? 'bg-amber-500/10 text-amber-600'
+                : 'bg-emerald-500/10 text-emerald-600'
+            }`}>
+              <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+              {isActive ? 'Ongoing' : 'Completed'}
+            </span>
+          </div>
+        )}
+
+        <div className={sub?.backup_subgroup_name ? 'mt-4 space-y-2.5' : 'mt-4 space-y-2.5'}>
           {/* ── Primary RSS card ── */}
           <div className="relative group bg-muted/30 rounded-lg p-3 space-y-1.5">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Primary RSS</div>
@@ -124,7 +148,7 @@ export default function LeftSidebar({
 
           {/* ── Backup RSS card ── */}
           {sub?.backup_subgroup_name && (
-            <div className="relative group bg-muted/30 rounded-lg p-3 space-y-1.5">
+            <div className="relative group bg-muted/30 rounded-lg p-3 space-y-1">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Backup RSS</div>
               <Row label="Sub Group" value={sub.backup_subgroup_name} />
               <Row label="Tags" value={sub?.backup_filter_tags?.length ? sub.backup_filter_tags.join(', ') : '无'} />
@@ -172,7 +196,7 @@ export default function LeftSidebar({
       </div>
 
       {/* Edit TMDB — fixed at bottom */}
-      <div className="p-4 border-t border-border shrink-0">
+      <div className="p-3 border-t border-border shrink-0">
         <button className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 transition-colors rounded-full text-sm font-bold cursor-pointer">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>

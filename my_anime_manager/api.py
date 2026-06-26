@@ -742,6 +742,22 @@ async def create_subscription(body: SubscriptionIn):
     return sub
 
 
+ENRICH_FIELDS = ("bgm_season", "bgm_sortrange", "series_name", "tmdb_id", "tmdb_season", "bgm_rating", "bgm_rating_total")
+
+
+def _get_cached_enrichment(bangumi_id: int) -> dict | None:
+    """Return cached enrichment fields if this bangumi_id already has them.
+
+    When a subscription already has enrichment data (e.g. from a sibling
+    primary/backup subscription), we can skip the full Bangumi API chain.
+    """
+    subs = data.list_subscriptions()
+    for s in subs:
+        if s["bangumi_id"] == bangumi_id and "bgm_season" in s:
+            return {k: s[k] for k in ENRICH_FIELDS if k in s}
+    return None
+
+
 @app.post("/api/rss/subscriptions/{bangumi_id}/enrich-stream")
 async def enrich_subscription_stream(bangumi_id: int):
     """Stream enrichment progress as NDJSON (one JSON object per line).
@@ -755,6 +771,15 @@ async def enrich_subscription_stream(bangumi_id: int):
     """
 
     async def generate():
+        # Check for cached enrichment — if this bangumi_id already has
+        # enrichment data from a sibling subscription, return it immediately
+        # instead of re-running the full Bangumi API chain.
+        cached = _get_cached_enrichment(bangumi_id)
+        if cached:
+            yield (_json.dumps({"type": "step", "message": "Using cached enrichment"}, ensure_ascii=False) + "\n").encode("utf-8")
+            yield (_json.dumps({"type": "done", "result": cached}, ensure_ascii=False) + "\n").encode("utf-8")
+            return
+
         queue: asyncio.Queue = asyncio.Queue()
 
         def on_progress(msg: str):
