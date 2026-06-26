@@ -106,14 +106,15 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
   const openTmdbDropdown = (sort: number, entry: { tmdb_ep?: number | null; tmdb_season?: number | null }) => {
     setExpandedSort(sort === expandedSort ? null : sort);
 
-    // Smart defaults: existing override → subscription default → first season/match
+    // Smart defaults: existing override → TMDB match → subscription default → bare fallback
     let season = entry.tmdb_season != null ? String(entry.tmdb_season) : '';
     let ep = entry.tmdb_ep != null ? String(entry.tmdb_ep) : '';
 
     if (tmdbSeasonMap) {
-      const keys = Object.keys(tmdbSeasonMap).sort((a, b) => Number(a) - Number(b));
+      // Filter out S00 (Specials) from default candidates
+      const seasonKeys = Object.keys(tmdbSeasonMap).filter(k => k !== '0').sort((a, b) => Number(a) - Number(b));
       if (!season) {
-        season = sub?.tmdb_season != null ? String(sub.tmdb_season) : (keys[0] || '');
+        season = sub?.tmdb_season != null ? String(sub.tmdb_season) : (seasonKeys[0] || '');
       }
       if (season && tmdbSeasonMap[season] && !ep) {
         const seasonEps = tmdbSeasonMap[season].episodes;
@@ -124,6 +125,11 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
         }
       }
     }
+
+    // Fallback defaults — applies regardless of whether TMDB data is available,
+    // uses the same values shown as input placeholders
+    if (!season) season = String(sub?.tmdb_season ?? 1);
+    if (!ep) ep = String(sort);
 
     setTmdbForm({ ep, season });
   };
