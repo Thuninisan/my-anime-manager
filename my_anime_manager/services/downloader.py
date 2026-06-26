@@ -14,6 +14,7 @@ from ..clients.qbittorrent import login as qb_login, add_torrent, resume_torrent
 from ..clients.qbittorrent import (
     login as qb_login, add_torrent, rename_file, resume_torrent,
 )
+from ..clients import bangumi as bgm_client
 from ..clients.bangumi import get_episodes as bgm_get_episodes, get_subject
 from ..data import (
     get_tmdb_id, get_tmdb_season, get_bangumi_name,
@@ -22,7 +23,7 @@ from ..data import (
     get_all_episodes,
     get_fail_count, increment_fail_count, reset_fail_count, MAX_FAIL_COUNT,
 )
-from . import rss as rss_service, tmdb as tmdb_service, bangumi as bangumi_service
+from . import rss as rss_service, tmdb as tmdb_service
 from .nfo_generator import generate_episode_nfo, generate_tv_show_nfo, generate_season_nfo
 from .image_downloader import download_episode_thumb, download_show_images, download_season_poster
 from ..utils.torrent_hash import compute_info_hash
@@ -106,7 +107,6 @@ async def check_qbit() -> dict:
 # ═══════════════════════════════════════════════════════════════════════
 
 _bgm_ep_cache: dict[int, list[dict]] = {}  # subject_id → episodes
-_bgm_chain_cache: dict[int, list[dict]] = {}  # subject_id → chain
 
 
 async def _get_bangumi_episodes(subject_id: int) -> list[dict]:
@@ -143,7 +143,11 @@ async def enrich_subscription(
     bangumi_id: int,
     on_progress: Callable[[str], Any] | None = None,
 ) -> dict | None:
-    """Build chain + sort range + TMDB info for a subscription.
+    """Enrich a subscription with Bangumi season info, sort range, rating.
+
+    Backtracks prequel relations to determine bgm_season (position in the
+    series) without a full forward chain traversal — saves ~14 API calls
+    per enrichment.
 
     Called once when a subscription is added (or lazily when an
     existing subscription is first downloaded).  Returns fields
@@ -168,36 +172,71 @@ async def enrich_subscription(
     try:
         _emit(f"🔗 丰富化订阅信息 (bgm_id={bangumi_id})...")
 
-        # 1. Build Bangumi chain
-        first_id = await bangumi_service.find_first_in_chain(bangumi_id)
-        chain, _ = await bangumi_service.build_bangumi_chain(first_id)
-        if not chain:
-            _emit(f"⚠️ 无法构建 Bangumi 链")
-            return None
+        # 1. Backtrack prequels to find root + count depth → bgm_season
+        # No need for full forward chain traversal — depth from root
+        # gives us the season number directly, saving ~14 API calls per
+        # enrichment compared to build_bangumi_chain().
+        visited: set[int] = set()
+        current_id = bangumi_id
+        depth = 0  # number of prequel steps back to root
+        root_name = ""
+        root_id = bangumi_id
+        root_subject = None
 
-        # Cache chain under every subject ID in it
-        for entry in chain:
-            _bgm_chain_cache[entry["id"]] = chain
+        for _ in range(30):
+            visited.add(current_id)
+            try:
+                relations = await bgm_client.get_relations(current_id)
+            except Exception:
+                _emit("⚠️ 获取 Bangumi 关系失败")
+                return None
 
-        # 2. Find position in chain → bgm_season
-        bgm_season = 1
-        for i, entry in enumerate(chain):
-            if entry["id"] == bangumi_id:
-                bgm_season = i + 1
+            prequel = next(
+                (r for r in relations if r.get("relation") == "前传"), None
+            )
+            if not prequel or prequel["id"] in visited:
+                # Reached root — fetch its name for series_name
+                root_id = current_id
+                try:
+                    root_subject = await get_subject(root_id)
+                    root_name = (
+                        root_subject.get("name_cn") or root_subject.get("name") or ""
+                    ).strip()
+                except Exception:
+                    root_name = ""
+                _emit(
+                    f"   🔗 回溯前传: {prequel.get('name_cn') or prequel['name']} "
+                    f"(id: {prequel['id']})"
+                ) if prequel else None
                 break
-        _emit(f"✅ bgm_season={bgm_season}")
 
-        # 3. Get sort range
+            _emit(
+                f"   🔗 回溯前传: {prequel.get('name_cn') or prequel['name']} "
+                f"(id: {prequel['id']})"
+            )
+            depth += 1
+            current_id = prequel["id"]
+
+        bgm_season = depth + 1
+        _emit(f"✅ bgm_season={bgm_season}")
+        series_name = root_name
+        _emit(f"✅ series_name={series_name}")
+
+        # 2. Get sort range
         eps = await _get_bangumi_episodes(bangumi_id)
         sorts = [e.get("sort") or e.get("ep", 0) for e in eps]
         bgm_sortrange = [min(sorts), max(sorts)] if sorts else [0, 0]
         _emit(f"✅ bgm_sortrange={bgm_sortrange}")
 
-        # 3.5. Get rating from subject API (non-fatal: defaults to 0 on failure)
+        # 3. Get rating from subject API (non-fatal: defaults to 0 on failure)
         bgm_rating = 0.0
         bgm_rating_total = 0
         try:
-            subject_data = await get_subject(bangumi_id)
+            # reuse root_subject if it's the same as bangumi_id, else fetch
+            if bangumi_id == root_id:
+                subject_data = root_subject
+            else:
+                subject_data = await get_subject(bangumi_id)
             rating = subject_data.get("rating")
             if rating and isinstance(rating, dict):
                 bgm_rating = float(rating.get("score") or 0)
@@ -206,13 +245,7 @@ async def enrich_subscription(
         except Exception:
             _emit("⚠️ Failed to fetch Bangumi rating (non-fatal)")
 
-        # 4. Series name — first entry in chain (root of the series)
-        series_name = (
-            chain[0].get("name_cn") or chain[0].get("name") or ""
-        ).strip()
-        _emit(f"✅ series_name={series_name}")
-
-        # 5. TMDB info from bangumi_mikan_map.json
+        # 4. TMDB info from bangumi_mikan_map.json
         tmdb_id = get_tmdb_id(bangumi_id)
         tmdb_season = get_tmdb_season(bangumi_id)
 
@@ -282,8 +315,15 @@ async def generate_metadata(
     season_dir = Path(base_path) / sub_path if base_path else Path(config.QBITTORRENT_SAVE_PATH) / show_name / f"Season {bgm_season}"
     show_dir = season_dir.parent
 
+    # ── Read override from download history ────────────────────────
+    from ..data import get_all_episodes
+    overrides = get_all_episodes(bangumi_id).get(str(sort), {})
+    override_tmdb_ep = overrides.get("tmdb_ep")       # None if not set
+    override_tmdb_season = overrides.get("tmdb_season")  # None if not set
+
     # ── TMDB: fetch the single target season ──────────────────────
-    target_tmdb_season = tmdb_season if tmdb_season is not None else 1
+    target_tmdb_season = override_tmdb_season or tmdb_season or 1
+    target_ep_num = override_tmdb_ep or sort
     logger.info("fetching TMDB S%d (tmdb_id=%d)", target_tmdb_season, tmdb_id)
     try:
         resp = await tmdb_get_season(tmdb_id, target_tmdb_season)
@@ -292,10 +332,10 @@ async def generate_metadata(
         logger.exception("TMDB season API failed")
         return
 
-    # Build tmdb_ep dict from the matching episode (by sort)
+    # Build tmdb_ep dict from the matching episode
     tmdb_ep = None
     for ep in (season_data.get("episodes") or []):
-        if ep.get("episode_number") == sort:
+        if ep.get("episode_number") == target_ep_num:
             # Extract crew
             directors = [c["name"] for c in ep.get("crew", []) if c.get("job") == "Director"]
             writers = [c["name"] for c in ep.get("crew", []) if c.get("job") == "Writer"]
@@ -465,7 +505,7 @@ async def _process_subscription(sub: dict):
     primary_exclude = sub.get("exclude_patterns") or []
     primary_items = await _fetch_passed_items(
         sub["rss_url"], filter_tags, bangumi_id,
-        extra_exclude_patterns=primary_exclude,
+        extra_exclude_patterns=primary_exclude, source="primary",
     )
     new_downloads = 0
     for item in primary_items:
@@ -479,7 +519,7 @@ async def _process_subscription(sub: dict):
         backup_exclude = sub.get("backup_exclude_patterns") or []
         backup_items = await _fetch_passed_items(
             backup_url, backup_tags, bangumi_id,
-            extra_exclude_patterns=backup_exclude,
+            extra_exclude_patterns=backup_exclude, source="backup",
         )
         for item in backup_items:
             if await _download_item(item, bangumi_id, "backup", sub):
@@ -508,11 +548,16 @@ async def _check_completion(bangumi_id: int, sub: dict):
 async def _fetch_passed_items(
     rss_url: str, filter_tags: list[str], bangumi_id: int,
     extra_exclude_patterns: list[str] | None = None,
+    source: str = "primary",
 ) -> list[dict]:
     """Fetch RSS and return items that pass filter AND aren't downloaded yet.
 
     Uses Bangumi sort (not raw RSS episode number) for dedup, so the
     dedup key matches what ``mark_downloaded`` writes.
+
+    *source* is the RSS feed type ("primary" or "backup").  It is used
+    together with the existing download's source to enforce priority:
+    add < backup < primary < edit — higher priority replaces lower.
     """
     try:
         feed = await rss_service.fetch_and_parse_rss(
@@ -548,19 +593,27 @@ async def _fetch_passed_items(
                 print(f"      ⏭️ EP{rss_ep:02d} (sort={sort}) 已连续失败 {fc} 次，跳过")
             continue
 
-        source = get_episode_source(bangumi_id, sort)
+        existing_source = get_episode_source(bangumi_id, sort)
         item_pub_date = item.get("pub_date", "")
-        if source == "primary":
-            # Same sort already downloaded via primary — check for v2 replacement
-            existing_pub = get_episode_pub_date(bangumi_id, sort)
-            if item_pub_date and existing_pub:
-                if item_pub_date > existing_pub:
-                    # Newer pub_date → v2/修正版, allow replacement
-                    print(f"      🔄 EP{rss_ep:02d} v2 detected: {item_pub_date} > {existing_pub}")
+
+        if existing_source:
+            PRIORITY = {"add": 0, "backup": 1, "primary": 2, "edit": 3}
+            feed_prio = PRIORITY.get(source, -1)
+            exist_prio = PRIORITY.get(existing_source, -1)
+
+            if feed_prio < exist_prio:
+                # Lower-priority feed cannot replace higher-priority existing
+                continue
+            elif feed_prio == exist_prio:
+                # Same source — only replace if v2 (newer pub_date)
+                existing_pub = get_episode_pub_date(bangumi_id, sort)
+                if item_pub_date and existing_pub and item_pub_date > existing_pub:
+                    logger.info("EP%02d v2 detected [%s]: %s > %s",
+                                rss_ep, source, item_pub_date, existing_pub)
                 else:
-                    continue  # older or same date, skip
-            else:
-                continue  # can't compare pub_date, skip (treat as same version)
+                    continue
+            # feed_prio > exist_prio → higher priority replaces lower, allow
+
         candidates.append(item)
     return candidates
 
