@@ -161,7 +161,7 @@ async def enrich_subscription(
 
     Returns:
         dict with bgm_season, bgm_sortrange, tmdb_id, tmdb_season,
-        or None on failure.
+        bgm_rating, air_date — or None on failure.
     """
     def _emit(msg: str) -> None:
         if on_progress:
@@ -228,9 +228,10 @@ async def enrich_subscription(
         bgm_sortrange = [min(sorts), max(sorts)] if sorts else [0, 0]
         _emit(f"✅ bgm_sortrange={bgm_sortrange}")
 
-        # 3. Get rating from subject API (non-fatal: defaults to 0 on failure)
+        # 3. Get rating + air_date from subject API (non-fatal)
         bgm_rating = 0.0
         bgm_rating_total = 0
+        air_date = ""
         try:
             # reuse root_subject if it's the same as bangumi_id, else fetch
             if bangumi_id == root_id:
@@ -241,9 +242,12 @@ async def enrich_subscription(
             if rating and isinstance(rating, dict):
                 bgm_rating = float(rating.get("score") or 0)
                 bgm_rating_total = int(rating.get("total") or 0)
+            air_date = (subject_data.get("date") or "").strip()
             _emit(f"✅ bgm_rating={bgm_rating} (total={bgm_rating_total})")
+            if air_date:
+                _emit(f"✅ air_date={air_date}")
         except Exception:
-            _emit("⚠️ Failed to fetch Bangumi rating (non-fatal)")
+            _emit("⚠️ Failed to fetch Bangumi rating/air_date (non-fatal)")
 
         # 4. TMDB info from bangumi_mikan_map.json
         tmdb_id = get_tmdb_id(bangumi_id)
@@ -257,6 +261,7 @@ async def enrich_subscription(
             "tmdb_season": tmdb_season,
             "bgm_rating": bgm_rating,
             "bgm_rating_total": bgm_rating_total,
+            "air_date": air_date,
         }
     except Exception as e:
         _emit(f"⚠️ enrich_subscription 失败: {e}")
@@ -501,11 +506,15 @@ async def _process_subscription(sub: dict):
     filter_tags = sub.get("filter_tags") or []
     name = sub.get("name", str(bangumi_id))
 
+    bgm_sortrange = sub.get("bgm_sortrange")
+    air_date = sub.get("air_date", "")
+
     # 1. Try primary RSS
     primary_exclude = sub.get("exclude_patterns") or []
     primary_items = await _fetch_passed_items(
         sub["rss_url"], filter_tags, bangumi_id,
         extra_exclude_patterns=primary_exclude, source="primary",
+        bgm_sortrange=bgm_sortrange, air_date=air_date,
     )
     new_downloads = 0
     for item in primary_items:
@@ -520,6 +529,7 @@ async def _process_subscription(sub: dict):
         backup_items = await _fetch_passed_items(
             backup_url, backup_tags, bangumi_id,
             extra_exclude_patterns=backup_exclude, source="backup",
+            bgm_sortrange=bgm_sortrange, air_date=air_date,
         )
         for item in backup_items:
             if await _download_item(item, bangumi_id, "backup", sub):
@@ -549,8 +559,18 @@ async def _fetch_passed_items(
     rss_url: str, filter_tags: list[str], bangumi_id: int,
     extra_exclude_patterns: list[str] | None = None,
     source: str = "primary",
+    bgm_sortrange: list[int] | None = None,
+    air_date: str = "",
 ) -> list[dict]:
     """Fetch RSS and return items that pass filter AND aren't downloaded yet.
+
+    Boundary constraints:
+    - Items are sorted by pub_date (earliest first) so older episodes
+      are processed before newer ones.
+    - Items with pub_date earlier than *air_date* (show premiere date)
+      are silently skipped.
+    - Once all sorts in *bgm_sortrange* are covered (already downloaded
+      + current candidates), remaining items are skipped.
 
     Uses Bangumi sort (not raw RSS episode number) for dedup, so the
     dedup key matches what ``mark_downloaded`` writes.
@@ -571,6 +591,25 @@ async def _fetch_passed_items(
     # Pre-fetch episodes (cached) so we can match rss_ep → sort for dedup
     episodes = await _get_bangumi_episodes(bangumi_id)
 
+    # ── Sort RSS items by pub_date (earliest first) ──
+    feed["items"].sort(key=lambda item: item.get("pub_date") or "9999")
+
+    # ── Track covered sorts (already downloaded) for sortrange limit ──
+    downloaded_sorts: set[int] = set()
+    for ep_sort_str in get_all_episodes(bangumi_id):
+        try:
+            downloaded_sorts.add(int(ep_sort_str))
+        except (ValueError, TypeError):
+            pass
+    covered: set[int] = set(downloaded_sorts)
+
+    # ── Log initial range state ──
+    if bgm_sortrange and bgm_sortrange[0] > 0:
+        needed = set(range(bgm_sortrange[0], bgm_sortrange[1] + 1))
+        missing = needed - covered
+        logger.debug("sortrange %s:已下载%d 缺失%d",
+                     bgm_sortrange, len(covered & needed), len(missing))
+
     candidates = []
     for item in feed["items"]:
         if not item["passed"] or item["excluded"]:
@@ -579,12 +618,32 @@ async def _fetch_passed_items(
         if not rss_ep:
             continue
 
-        sort = _match_rss_ep_to_sort(episodes, rss_ep)
+        # ── Time filter: skip items published before show premiere ──
+        item_pub_date = item.get("pub_date", "")
+        if air_date and item_pub_date and item_pub_date < air_date:
+            continue
+
+        # ── Assign sort: sequential fill of bgm_sortrange ──
+        # Use anitopy's episode_number only for dedup; the actual sort
+        # is assigned positionally — first undownloaded slot in sortrange.
+        sort = 0
+        if bgm_sortrange and bgm_sortrange[0] > 0:
+            for s in range(bgm_sortrange[0], bgm_sortrange[1] + 1):
+                if s not in covered:
+                    sort = s
+                    break
+        if sort == 0:
+            # Fallback: no sortrange or range is full — use legacy matching
+            sort = _match_rss_ep_to_sort(episodes, rss_ep)
+        item["sort"] = sort
+
+        # ── Sort-range duplicate filter ──
+        if sort in covered:
+            continue
 
         # Skip episodes that have already failed too many times
         fc = get_fail_count(bangumi_id, sort)
         if fc >= MAX_FAIL_COUNT:
-            # Log once per poll cycle — the message is idempotent and short
             if not hasattr(_fetch_passed_items, "_skip_logged"):
                 _fetch_passed_items._skip_logged = set()  # type: ignore[attr-defined]
             skip_key = (bangumi_id, sort)
@@ -594,7 +653,6 @@ async def _fetch_passed_items(
             continue
 
         existing_source = get_episode_source(bangumi_id, sort)
-        item_pub_date = item.get("pub_date", "")
 
         if existing_source:
             PRIORITY = {"add": 0, "backup": 1, "primary": 2, "edit": 3}
@@ -602,19 +660,24 @@ async def _fetch_passed_items(
             exist_prio = PRIORITY.get(existing_source, -1)
 
             if feed_prio < exist_prio:
-                # Lower-priority feed cannot replace higher-priority existing
                 continue
             elif feed_prio == exist_prio:
-                # Same source — only replace if v2 (newer pub_date)
                 existing_pub = get_episode_pub_date(bangumi_id, sort)
                 if item_pub_date and existing_pub and item_pub_date > existing_pub:
                     logger.info("EP%02d v2 detected [%s]: %s > %s",
                                 rss_ep, source, item_pub_date, existing_pub)
                 else:
                     continue
-            # feed_prio > exist_prio → higher priority replaces lower, allow
 
         candidates.append(item)
+        covered.add(sort)
+
+        # ── Stop when sortrange is fully covered ──
+        if bgm_sortrange and bgm_sortrange[0] > 0:
+            needed = set(range(bgm_sortrange[0], bgm_sortrange[1] + 1))
+            if needed.issubset(covered):
+                break
+
     return candidates
 
 
@@ -646,8 +709,12 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     tmdb_season = sub.get("tmdb_season")
 
     # ── Match RSS episode to Bangumi sort ──────────────────────────
-    episodes = await _get_bangumi_episodes(bgm_subject_id)
-    sort = _match_rss_ep_to_sort(episodes, rss_ep_num)
+    # Prefer the sort already assigned by _fetch_passed_items (sequential
+    # fill of bgm_sortrange); fall back to legacy matching.
+    sort = item.get("sort") or 0
+    if not sort:
+        episodes = await _get_bangumi_episodes(bgm_subject_id)
+        sort = _match_rss_ep_to_sort(episodes, rss_ep_num)
     if sort != rss_ep_num:
         print(f"         📐 rss_ep={rss_ep_num} → sort={sort}")
     bgm_sortrange = sub.get("bgm_sortrange", [0, 0])
