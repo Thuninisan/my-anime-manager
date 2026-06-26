@@ -1,4 +1,4 @@
-import type { BangumiRssResponse, RssDataStatus, RssFeedResponse, RssSettings, SubscriptionIn, SubscriptionOut } from '../types/preview';
+import type { BangumiRssResponse, RssDataStatus, RssFeedResponse, RssSettings, SeasonInfo, SubscriptionIn, SubscriptionOut } from '../types/preview';
 
 const API_BASE = '/api/rss';
 
@@ -232,6 +232,26 @@ export async function addEpisodeWithTorrent(
   return res.json();
 }
 
+export async function replaceEpisodeWithTorrent(
+  bangumiId: number,
+  sort: number,
+  file: File,
+): Promise<{ torrent_name: string; info_hash: string }> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}/replace`, {
+    method: 'POST',
+    body: fd,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try { const j = JSON.parse(text); msg = j.detail || text; } catch { /* */ }
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function getDownloadHistory(bangumiId: number): Promise<import('../types/preview').DownloadHistoryResponse> {
   const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}/history`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -278,6 +298,12 @@ export function getDownloadHistoryStream(
   })();
 
   return ctrl;
+}
+
+export async function getTmdbSeasonMap(tmdbId: number): Promise<Record<string, SeasonInfo>> {
+  const res = await fetch(`/api/rss/tmdb/${tmdbId}/seasons`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
 export async function fetchRssFeed(

@@ -198,9 +198,9 @@ async def get_subscription_poster_url(
     if not subject.get("images"):
         return None
 
-    # Bangumi images priority: large > common > medium
+    # Bangumi images priority: common > medium > large
     imgs = subject["images"]
-    return imgs.get("large") or imgs.get("common") or imgs.get("medium") or None
+    return imgs.get("common") or imgs.get("medium") or imgs.get("large") or None
 
 
 async def download_season_poster(

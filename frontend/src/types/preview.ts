@@ -92,6 +92,23 @@ export interface ConfirmResponse {
   error: string;
 }
 
+/* TMDB season/episode info for download history dropdowns */
+
+export interface TmdbEpisodeInfo {
+  epNum: number;
+  name: string;
+  tmdbId: number;
+  overview: string;
+  airDate: string;
+  runtime: number;
+  stillPath: string;
+}
+
+export interface SeasonInfo {
+  name: string;
+  episodes: TmdbEpisodeInfo[];
+}
+
 /* RSS */
 export interface RssSubtitleGroup {
   name: string;
@@ -209,6 +226,8 @@ export interface EpisodeHistoryEntry {
   guid: string;
   at: string;
   info_hash: string;
+  tmdb_ep?: number | null;
+  tmdb_season?: number | null;
   qbit: QbitTorrentInfo | null;
 }
 

@@ -1,54 +1,31 @@
 [
   {
-    "name": "冰之城墙",
-    "rss_url": "https://mikanani.me/RSS/Bangumi?bangumiId=3898&subgroupid=203",
-    "bangumi_id": 535669,
-    "subgroup_id": 203,
-    "subgroup_name": "桜都字幕组",
-    "filter_tags": [
-      "内封"
-    ],
+    "name": "Re：从零开始的异世界生活 第三季 袭击篇",
+    "rss_url": "https://mikanani.me/RSS/Bangumi?bangumiId=3464&subgroupid=583",
+    "bangumi_id": 425998,
+    "subgroup_id": 583,
+    "subgroup_name": "ANi",
+    "filter_tags": [],
     "backup_rss_url": "",
     "backup_subgroup_id": 0,
     "backup_subgroup_name": "",
     "backup_filter_tags": [],
-    "download_path": "/冰之城墙/Season {season}",
-    "active": 1,
-    "created_at": "2026-06-23T15:44:45",
-    "bgm_season": 1,
+    "download_path": "/{series_name}/Season {season}",
+    "exclude_patterns": [],
+    "backup_exclude_patterns": [],
+    "active": 0,
+    "created_at": "2026-06-26T14:54:24",
+    "poster_url": "https://lain.bgm.tv/r/400/pic/cover/l/26/d6/425998_dnzr8.jpg",
+    "updated_at": "2026-06-26T15:26:31",
+    "bgm_season": 4,
     "bgm_sortrange": [
-      1,
-      14
+      51,
+      58
     ],
-    "tmdb_id": 283428,
+    "series_name": "Re：从零开始的异世界生活",
+    "tmdb_id": 65942,
     "tmdb_season": null,
-    "updated_at": "2026-06-23T15:44:51",
-    "poster_url": "https://lain.bgm.tv/pic/cover/l/93/8f/535669_4zoHG.jpg"
-  },
-  {
-    "name": "地狱乐 第二季",
-    "rss_url": "https://mikanani.me/RSS/Bangumi?bangumiId=3846&subgroupid=382",
-    "bangumi_id": 443446,
-    "subgroup_id": 382,
-    "subgroup_name": "喵萌奶茶屋",
-    "filter_tags": [
-      "简体"
-    ],
-    "backup_rss_url": "",
-    "backup_subgroup_id": 0,
-    "backup_subgroup_name": "",
-    "backup_filter_tags": [],
-    "download_path": "/地狱乐 第二季/Season {season}",
-    "active": 1,
-    "created_at": "2026-06-23T21:32:25",
-    "bgm_season": 2,
-    "bgm_sortrange": [
-      14,
-      25
-    ],
-    "tmdb_id": 117465,
-    "tmdb_season": null,
-    "updated_at": "2026-06-23T21:32:34",
-    "poster_url": "https://lain.bgm.tv/pic/cover/l/f9/83/443446_S2n61.jpg"
+    "bgm_rating": 7.2,
+    "bgm_rating_total": 8370
   }
 ]

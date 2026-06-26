@@ -6,9 +6,12 @@ All persisted as JSON files under ``my_anime_manager/data/``.
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).parent
 
@@ -268,20 +271,52 @@ def mark_downloaded(
     pub_date: str = "",
     info_hash: str = "",
 ) -> None:
-    """Record a downloaded episode, overwriting any prior record for the same ep."""
+    """Record a downloaded episode, overwriting any prior record for the same ep.
+
+    Preserves existing ``tmdb_ep`` and ``tmdb_season`` override fields if present.
+    """
     hist = _load_hist()
     episodes: dict[str, dict] = hist.setdefault("episodes", {})
     bgm_key = str(bangumi_id)
     ep_key = str(ep_num)
-    episodes.setdefault(bgm_key, {})[ep_key] = {
+    # Preserve existing overrides
+    existing = episodes.setdefault(bgm_key, {}).get(ep_key, {})
+    episodes[bgm_key][ep_key] = {
         "rss_url": rss_url,
         "guid": guid,
         "source": source,
         "pub_date": pub_date,
         "info_hash": info_hash,
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "tmdb_ep": existing.get("tmdb_ep"),
+        "tmdb_season": existing.get("tmdb_season"),
     }
     _save_hist(hist)
+
+
+def set_episode_overrides(
+    bangumi_id: int, ep_num: int,
+    tmdb_ep: int | None = None,
+    tmdb_season: int | None = None,
+) -> bool:
+    """Set TMDB episode/season overrides for a downloaded episode.
+
+    Returns False if the episode record doesn't exist.
+    """
+    hist = _load_hist()
+    episodes: dict[str, dict] = hist.setdefault("episodes", {})
+    bgm_key = str(bangumi_id)
+    ep_key = str(ep_num)
+    if bgm_key not in episodes or ep_key not in episodes[bgm_key]:
+        return False
+    if tmdb_ep is not None:
+        episodes[bgm_key][ep_key]["tmdb_ep"] = tmdb_ep
+    if tmdb_season is not None:
+        episodes[bgm_key][ep_key]["tmdb_season"] = tmdb_season
+    _save_hist(hist)
+    logger.info("overrides set for bangumi=%d sort=%d: tmdb_ep=%s tmdb_season=%s",
+                bangumi_id, ep_num, tmdb_ep, tmdb_season)
+    return True
 
 
 def get_all_episodes(bangumi_id: int) -> dict[str, dict]:

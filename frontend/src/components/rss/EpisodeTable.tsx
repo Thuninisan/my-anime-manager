@@ -1,4 +1,4 @@
-import type { DownloadHistoryResponse, EpisodeHistoryEntry, SubscriptionOut } from '@/types/preview';
+import type { DownloadHistoryResponse, EpisodeHistoryEntry, SubscriptionOut, SeasonInfo } from '@/types/preview';
 
 /* ── Status helpers ─────────────────────────────────────────── */
 
@@ -53,6 +53,7 @@ interface Props {
   expandedSort: number | null;
   tmdbForm: { ep: string; season: string };
   setTmdbForm: React.Dispatch<React.SetStateAction<{ ep: string; season: string }>>;
+  tmdbSeasonMap: Record<string, SeasonInfo> | null;
   onOpenTmdb: (sort: number, entry: EpisodeHistoryEntry) => void;
   onSaveTmdb: (sort: number, regen: boolean) => void;
   onDeleteEpisode: (sort: number) => void;
@@ -61,7 +62,7 @@ interface Props {
 
 export default function EpisodeTable({
   data, loading, sub, fileInputRef, fileIntentRef,
-  expandedSort, tmdbForm, setTmdbForm, onOpenTmdb, onSaveTmdb, onDeleteEpisode, onClose,
+  expandedSort, tmdbForm, setTmdbForm, tmdbSeasonMap, onOpenTmdb, onSaveTmdb, onDeleteEpisode, onClose,
 }: Props) {
   if (loading) {
     return (
@@ -190,26 +191,79 @@ export default function EpisodeTable({
                     <td colSpan={6} className="px-5 py-2.5">
                       <div className="flex items-center gap-3 text-xs">
                         <span className="text-muted-foreground shrink-0">TMDB:</span>
-                        <label className="flex items-center gap-1">
-                          <span className="text-muted-foreground">S</span>
-                          <input value={tmdbForm.season}
-                            onChange={ev => setTmdbForm(p => ({ ...p, season: ev.target.value }))}
-                            placeholder={String(sub?.tmdb_season ?? 1)}
-                            className="w-10 text-xs bg-background border border-border rounded px-1.5 py-0.5 text-center focus:outline-none focus:border-primary"
-                          />
-                        </label>
-                        <label className="flex items-center gap-1">
-                          <span className="text-muted-foreground">EP</span>
-                          <input value={tmdbForm.ep}
-                            onChange={ev => setTmdbForm(p => ({ ...p, ep: ev.target.value }))}
-                            placeholder={String(e.sort)}
-                            className="w-10 text-xs bg-background border border-border rounded px-1.5 py-0.5 text-center focus:outline-none focus:border-primary"
-                          />
-                        </label>
-                        <span className="text-[10px] text-muted-foreground ml-1">
-                          {tmdbForm.season ? `S${tmdbForm.season}` : `S${sub?.tmdb_season ?? 1}`}
-                          {tmdbForm.ep ? `E${tmdbForm.ep}` : `E${e.sort}`}
-                        </span>
+
+                        {tmdbSeasonMap ? (
+                          <>
+                            {/* Season select — populated from TMDB */}
+                            <label className="flex items-center gap-1">
+                              <span className="text-muted-foreground">S</span>
+                              <select
+                                value={tmdbForm.season}
+                                onChange={ev => {
+                                  const newSeason = ev.target.value;
+                                  const firstEp = tmdbSeasonMap[newSeason]?.episodes?.[0]?.epNum;
+                                  setTmdbForm(p => ({
+                                    ...p,
+                                    season: newSeason,
+                                    ep: firstEp ? String(firstEp) : '',
+                                  }));
+                                }}
+                                className="max-w-[10rem] text-xs bg-background border border-border rounded px-1.5 py-0.5 cursor-pointer focus:outline-none focus:border-primary"
+                              >
+                                {Object.entries(tmdbSeasonMap).map(([sk, sv]) => (
+                                  <option key={sk} value={sk}>
+                                    {sk}: {sv.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            {/* Episode select — populated from chosen season */}
+                            <label className="flex items-center gap-1">
+                              <span className="text-muted-foreground">EP</span>
+                              <select
+                                value={tmdbForm.ep}
+                                onChange={ev => setTmdbForm(p => ({ ...p, ep: ev.target.value }))}
+                                className="max-w-[12rem] text-xs bg-background border border-border rounded px-1.5 py-0.5 cursor-pointer focus:outline-none focus:border-primary"
+                              >
+                                {(tmdbSeasonMap[tmdbForm.season]?.episodes ?? []).map(epInfo => (
+                                  <option key={epInfo.epNum} value={String(epInfo.epNum)}>
+                                    {epInfo.epNum}: {epInfo.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <span className="text-[10px] text-muted-foreground ml-1">
+                              S{tmdbForm.season || '?'}E{tmdbForm.ep || '?'}
+                            </span>
+                          </>
+                        ) : (
+                          /* Fallback: text inputs when TMDB data unavailable */
+                          <>
+                            <label className="flex items-center gap-1">
+                              <span className="text-muted-foreground">S</span>
+                              <input value={tmdbForm.season}
+                                onChange={ev => setTmdbForm(p => ({ ...p, season: ev.target.value }))}
+                                placeholder={String(sub?.tmdb_season ?? 1)}
+                                className="w-10 text-xs bg-background border border-border rounded px-1.5 py-0.5 text-center focus:outline-none focus:border-primary"
+                              />
+                            </label>
+                            <label className="flex items-center gap-1">
+                              <span className="text-muted-foreground">EP</span>
+                              <input value={tmdbForm.ep}
+                                onChange={ev => setTmdbForm(p => ({ ...p, ep: ev.target.value }))}
+                                placeholder={String(e.sort)}
+                                className="w-10 text-xs bg-background border border-border rounded px-1.5 py-0.5 text-center focus:outline-none focus:border-primary"
+                              />
+                            </label>
+                            <span className="text-[10px] text-muted-foreground ml-1">
+                              {tmdbForm.season ? `S${tmdbForm.season}` : `S${sub?.tmdb_season ?? 1}`}
+                              {tmdbForm.ep ? `E${tmdbForm.ep}` : `E${e.sort}`}
+                            </span>
+                          </>
+                        )}
+
                         <div className="flex gap-1.5 ml-auto">
                           <button
                             className="text-[10px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"

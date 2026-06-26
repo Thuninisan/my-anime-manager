@@ -36,6 +36,7 @@ from . import config
 from .services.batch_service import build_preview, execute_confirm, process_torrent
 from .services import rss as rss_service
 from .services import downloader
+from .services import tmdb as tmdb_service
 from .services import image_downloader as image_service
 from .clients.qbittorrent import login as qb_login, get_torrents_by_hashes, delete_torrent, add_torrent, resume_torrent, get_torrent_files
 from .utils.torrent_hash import compute_info_hash
@@ -45,7 +46,7 @@ from .clients import bangumi as bgm_client
 from . import data
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s %(levelname)-5s [%(name)s] %(message)s",
     datefmt="%H:%M:%S",
 )
@@ -953,6 +954,35 @@ async def subscription_history(bangumi_id: int):
     }
 
 
+@app.get("/api/rss/tmdb/{tmdb_id}/seasons")
+async def get_tmdb_seasons(tmdb_id: int) -> dict[str, SeasonInfo]:
+    """Fetch all TMDB seasons and episodes for a TV show.
+
+    Calls build_season_episode_map to get every season's episode list,
+    then converts to SeasonInfo / TmdbEpisodeInfo Pydantic models.
+    Returns an empty dict if TMDB has no data for this show.
+    """
+    season_map = await tmdb_service.build_season_episode_map(tmdb_id)
+    result: dict[str, SeasonInfo] = {}
+    for sk, sv in season_map.items():
+        episodes = [
+            TmdbEpisodeInfo(
+                epNum=e["epNum"],
+                name=e["name"],
+                tmdbId=e["tmdbId"],
+                overview=e.get("overview") or "",
+                airDate=e.get("airDate") or "",
+                runtime=e.get("runtime") or 0,
+                stillPath=e.get("stillPath") or "",
+            )
+            for e in sv.get("episodes", [])
+        ]
+        result[str(sk)] = SeasonInfo(
+            name=sv.get("name", f"Season {sk}"), episodes=episodes,
+        )
+    return result
+
+
 @app.get("/api/rss/subscriptions/{bangumi_id}/history-stream")
 async def subscription_history_stream(bangumi_id: int):
     """Stream download history + live qBittorrent updates as NDJSON.
@@ -983,6 +1013,8 @@ async def subscription_history_stream(bangumi_id: int):
                 "guid": ep.get("guid", ""),
                 "at": ep.get("at", ""),
                 "info_hash": h,
+                "tmdb_ep": ep.get("tmdb_ep"),
+                "tmdb_season": ep.get("tmdb_season"),
             })
             if h:
                 hashes.append(h)
@@ -1139,23 +1171,6 @@ async def delete_episode_history(bangumi_id: int, sort: int):
     return {"ok": True}
 
 
-@app.patch("/api/rss/download-history/{bangumi_id}/{sort}")
-async def update_episode_history(bangumi_id: int, sort: int, fields: dict[str, object] = {}):
-    """Update an episode record (e.g. toggle source)."""
-    ep = data.get_all_episodes(bangumi_id).get(str(sort))
-    if not ep:
-        raise HTTPException(404, "记录不存在")
-    data.mark_downloaded(
-        bangumi_id, sort,
-        rss_url=str(fields.get("rss_url", ep.get("rss_url", ""))),
-        guid=str(fields.get("guid", ep.get("guid", ""))),
-        source=str(fields.get("source", ep.get("source", ""))),
-        pub_date=str(fields.get("pub_date", ep.get("pub_date", ""))),
-        info_hash=str(fields.get("info_hash", ep.get("info_hash", ""))),
-    )
-    return {"ok": True}
-
-
 @app.post("/api/rss/download-history/{bangumi_id}/{sort}")
 async def add_episode_history(bangumi_id: int, sort: int):
     """Manually mark a missing episode as downloaded (source='manual')."""
@@ -1297,7 +1312,192 @@ async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = 
     return {"ok": True, "torrent_name": torrent_name, "info_hash": info_hash}
 
 
-# ── /api/rss/settings ──
+@app.post("/api/rss/download-history/{bangumi_id}/{sort}/replace")
+async def replace_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = File(...)):
+    """Replace an existing episode with a new .torrent file.
+
+    Deletes the old torrent from qBittorrent (with files), then follows
+    the same flow as upload.  Records with source="edit".
+    """
+    if not file.filename or not file.filename.lower().endswith(".torrent"):
+        raise HTTPException(400, "Only .torrent files are accepted")
+
+    # ── Delete old torrent ──
+    old_ep = data.get_all_episodes(bangumi_id).get(str(sort))
+    if old_ep and old_ep.get("info_hash"):
+        try:
+            qb = await qb_login(
+                config.QBITTORRENT_URL,
+                config.QBITTORRENT_USERNAME,
+                config.QBITTORRENT_PASSWORD,
+            )
+            await delete_torrent(qb, old_ep["info_hash"], delete_files=True)
+            logger.info("replace: deleted old torrent hash=%s...", old_ep["info_hash"][:12])
+        except Exception:
+            logger.exception("replace: delete old torrent failed, continuing")
+
+    # ── Read subscription ──
+    subs = data.list_subscriptions()
+    sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+    if not sub:
+        raise HTTPException(404, "订阅不存在")
+    show_name = sub.get("name", str(bangumi_id))
+    series_name = sub.get("series_name") or show_name
+    bgm_season = sub.get("bgm_season", 1)
+    tmdb_id = sub.get("tmdb_id", 0)
+    tmdb_season = sub.get("tmdb_season")
+    rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
+    sub_path_template = sub.get("download_path") or "/{series_name}/Season {season}"
+    sub_path = sub_path_template.format(
+        series_name=series_name, show_name=show_name, season=bgm_season,
+    ).strip("/")
+
+    # ── Save .torrent to temp file ──
+    tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
+    torrent_name = ""
+    info_hash = ""
+    try:
+        contents = await file.read()
+        tmp.write(contents)
+        tmp.close()
+
+        # ── Bencode parse → torrent name + info_hash ──
+        with open(tmp.name, "rb") as f:
+            meta = bencodepy.decode(f.read())
+        info = meta[b"info"]
+        torrent_name = info[b"name"].decode("utf-8", errors="replace")
+        info_hash = compute_info_hash(tmp.name)
+        logger.info("replace: parsed torrent name=%s hash=%s...", torrent_name, info_hash[:12])
+
+        # ── Validate: exactly 1 video file ──
+        VIDEO_EXTS = {".mkv", ".mp4", ".mka", ".avi", ".mov", ".ts", ".wmv", ".flv", ".webm"}
+        file_list = read_torrent_file_list(tmp.name)
+        video_files = [f for f in file_list if Path(f["name"]).suffix.lower() in VIDEO_EXTS]
+        if len(video_files) != 1:
+            raise HTTPException(400, f"种子中视频文件数量不为1 (found {len(video_files)})")
+
+        # ── Add to qBittorrent (paused) ──
+        try:
+            qb = await qb_login(
+                config.QBITTORRENT_URL,
+                config.QBITTORRENT_USERNAME,
+                config.QBITTORRENT_PASSWORD,
+            )
+            add_hash = await add_torrent(qb, tmp.name, rss_base, torrent_name)
+            logger.info("replace: added torrent hash=%s...", add_hash[:12])
+        except Exception as e:
+            raise HTTPException(500, f"qBittorrent 添加失败: {e}")
+
+        # ── Generate metadata + rename ──
+        if tmdb_id:
+            try:
+                files = await get_torrent_files(qb, add_hash)
+                old_path = files[0]["name"] if files else torrent_name
+                await downloader.generate_metadata(
+                    qb, add_hash, bangumi_id, sort,
+                    bangumi_id, tmdb_id, show_name,
+                    old_path, torrent_name,
+                    bgm_season=bgm_season, tmdb_season=tmdb_season,
+                    base_path=rss_base, sub_path=sub_path,
+                )
+                logger.info("replace: metadata generated")
+            except Exception as e:
+                logger.exception("replace: NFO generation failed")
+
+        # ── Resume download ──
+        try:
+            await resume_torrent(qb, add_hash)
+        except Exception:
+            pass
+
+        # ── Record in download history (source="edit") ──
+        now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        data.mark_downloaded(
+            bangumi_id, sort,
+            rss_url="",
+            guid=torrent_name,
+            source="edit",
+            pub_date=now,
+            info_hash=info_hash,
+        )
+        logger.info("replace: recorded (source=edit)")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("unhandled error in replace")
+        raise HTTPException(500, f"替换失败: {e}")
+
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+
+    return {"ok": True, "torrent_name": torrent_name, "info_hash": info_hash}
+
+
+@app.patch("/api/rss/download-history/{bangumi_id}/{sort}")
+async def update_episode_overrides(
+    bangumi_id: int, sort: int,
+    fields: dict[str, object] = {},
+    regen_nfo: bool = False,
+):
+    """Set TMDB overrides for an episode and optionally regenerate NFO.
+
+    Body: ``{"tmdb_ep": 13, "tmdb_season": 2}`` — one or both fields.
+    Query: ``?regen_nfo=true`` to regenerate NFO after setting overrides.
+    """
+    tmdb_ep = fields.get("tmdb_ep")
+    tmdb_season = fields.get("tmdb_season")
+    if tmdb_ep is None and tmdb_season is None:
+        raise HTTPException(400, "至少需要提供 tmdb_ep 或 tmdb_season")
+
+    ok = data.set_episode_overrides(
+        bangumi_id, sort,
+        tmdb_ep=int(tmdb_ep) if tmdb_ep is not None else None,
+        tmdb_season=int(tmdb_season) if tmdb_season is not None else None,
+    )
+    if not ok:
+        raise HTTPException(404, "该集的下载记录不存在")
+
+    # ── Optional NFO regeneration ──
+    if regen_nfo:
+        subs = data.list_subscriptions()
+        sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+        if sub:
+            ep = data.get_all_episodes(bangumi_id).get(str(sort), {})
+            info_hash = ep.get("info_hash", "")
+            if info_hash and sub.get("tmdb_id"):
+                try:
+                    show_name = sub.get("name", str(bangumi_id))
+                    series_name = sub.get("series_name") or show_name
+                    bgm_season = sub.get("bgm_season", 1)
+                    rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
+                    sub_path_template = sub.get("download_path") or "/{series_name}/Season {season}"
+                    sub_path = sub_path_template.format(
+                        series_name=series_name, show_name=show_name, season=bgm_season,
+                    ).strip("/")
+                    qb = await qb_login(
+                        config.QBITTORRENT_URL,
+                        config.QBITTORRENT_USERNAME,
+                        config.QBITTORRENT_PASSWORD,
+                    )
+                    files = await get_torrent_files(qb, info_hash)
+                    old_path = files[0]["name"] if files else ep.get("guid", "")
+                    await downloader.generate_metadata(
+                        qb, info_hash, bangumi_id, sort,
+                        bangumi_id, sub["tmdb_id"], show_name,
+                        old_path, ep.get("guid", ""),
+                        bgm_season=bgm_season,
+                        tmdb_season=sub.get("tmdb_season"),
+                        base_path=rss_base, sub_path=sub_path,
+                    )
+                    logger.info("overrides+PATCH: NFO regenerated for bangumi=%d sort=%d", bangumi_id, sort)
+                except Exception:
+                    logger.exception("overrides+PATCH: NFO regeneration failed")
+
+    return {"ok": True}
 
 @app.get("/api/rss/settings")
 async def get_rss_settings():
