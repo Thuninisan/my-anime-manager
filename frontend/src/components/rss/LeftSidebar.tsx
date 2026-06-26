@@ -171,18 +171,13 @@ export default function LeftSidebar({
           </div>
           )}
 
-          {sub?.bgm_rating != null && sub.bgm_rating > 0 && (
-            <div>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground block">Rating</span>
-              <span className="text-sm font-semibold text-foreground">
-                {sub.bgm_rating.toFixed(1)}
-                <span className="text-muted-foreground font-normal"> / 10</span>
-                <span className="text-muted-foreground font-normal text-xs ml-1">
-                  ({sub.bgm_rating_total?.toLocaleString() ?? 0} votes)
-                </span>
-              </span>
-            </div>
-          )}
+          {/* Edit TMDB button */}
+          <button className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-primary/10 text-primary hover:bg-primary/20 transition-colors rounded-full text-sm font-bold cursor-pointer mt-3">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+            </svg>
+            Edit TMDB
+          </button>
         </div>
       </div>
     </aside>
