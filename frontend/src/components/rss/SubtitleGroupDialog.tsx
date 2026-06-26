@@ -17,6 +17,7 @@ interface Props {
   onSubscribe: (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => void;
   onExcludeChange: (subgroupId: number, patterns: string[]) => void;
   getSubMode: (subgroupId: number) => 'primary' | 'backup' | null;
+  takenRoles: { primary: boolean; backup: boolean };
   onClose: () => void;
 }
 
@@ -25,7 +26,7 @@ export default function SubtitleGroupDialog({
   subscribingId, excludePatterns,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe,
   onExcludeChange,
-  getSubMode, onClose,
+  getSubMode, takenRoles, onClose,
 }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4">
@@ -127,6 +128,7 @@ export default function SubtitleGroupDialog({
             onToggleTagBox={onToggleTagBox}
             onSubscribe={onSubscribe}
             getSubMode={getSubMode}
+            takenRoles={takenRoles}
             subscribingId={subscribingId}
             excludePatterns={excludePatterns}
             onExcludeChange={onExcludeChange}

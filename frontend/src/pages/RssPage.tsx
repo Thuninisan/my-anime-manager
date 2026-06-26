@@ -77,6 +77,18 @@ export default function RssPage() {
     return null;
   };
 
+  // Which roles are already taken by ANY subgroup for the current search result?
+  const takenRoles = (() => {
+    if (!result) return { primary: false, backup: false };
+    let primary = false, backup = false;
+    for (const s of subscriptions) {
+      if (s.bangumi_id !== result.bangumi_id) continue;
+      if (s.subgroup_id) primary = true;
+      if (s.backup_subgroup_id) backup = true;
+    }
+    return { primary, backup };
+  })();
+
   return (
     <>
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-2">
@@ -113,6 +125,7 @@ export default function RssPage() {
           onSubscribe={doSubscribe}
           onExcludeChange={handleExcludeChange}
           getSubMode={getSubMode}
+          takenRoles={takenRoles}
           onClose={clearSearch}
         />
       )}

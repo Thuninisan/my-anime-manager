@@ -19,6 +19,7 @@ interface Props {
   onToggleTagBox: (subgroupId: number) => void;
   onSubscribe: (group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup') => void;
   getSubMode: (subgroupId: number) => 'primary' | 'backup' | null;
+  takenRoles: { primary: boolean; backup: boolean };
   subscribingId: number | null;
   excludePatterns: Record<number, string[]>;
   onExcludeChange: (subgroupId: number, patterns: string[]) => void;
@@ -54,7 +55,7 @@ function CopyButton({ url }: { url: string }) {
 export default function SubtitleGroupTable({
   result, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe, getSubMode,
-  subscribingId, excludePatterns, onExcludeChange,
+  takenRoles, subscribingId, excludePatterns, onExcludeChange,
 }: Props) {
   if (result.groups.length === 0) {
     return <p className="text-center py-6 text-muted-foreground text-sm">No subtitle groups found</p>;
@@ -154,8 +155,13 @@ export default function SubtitleGroupTable({
                     订阅
                     <div className="w-3.5 h-3.5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                   </span>
+                ) : takenRoles.primary && takenRoles.backup ? (
+                  // Both roles already taken by other subgroups
+                  <span className="text-xs px-2.5 py-1.5 rounded-full bg-muted text-muted-foreground font-semibold cursor-default">
+                    已满
+                  </span>
                 ) : (
-                  // Not subscribed: dropdown
+                  // Not subscribed: dropdown with taken roles disabled
                   <DropdownMenuRoot>
                     <DropdownMenuTrigger className="text-xs px-2.5 py-1.5 rounded-full bg-primary/10 text-primary font-semibold hover:bg-primary hover:text-primary-foreground">
                       订阅
@@ -164,10 +170,16 @@ export default function SubtitleGroupTable({
                       </svg>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="min-w-[140px]">
-                      <DropdownMenuItem onClick={() => onSubscribe(g, 'primary')}>
+                      <DropdownMenuItem
+                        onClick={() => onSubscribe(g, 'primary')}
+                        disabled={takenRoles.primary}
+                      >
                         作为主 RSS 订阅
                       </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => onSubscribe(g, 'backup')}>
+                      <DropdownMenuItem
+                        onClick={() => onSubscribe(g, 'backup')}
+                        disabled={takenRoles.backup}
+                      >
                         作为副 RSS 订阅
                       </DropdownMenuItem>
                     </DropdownMenuContent>
