@@ -249,16 +249,12 @@ export default function EpisodeTable({
                           )}
                         </div>
 
-                        {/* Right: action buttons */}
-                        <div className="col-span-4 flex justify-end items-end gap-2 pb-1">
+                        {/* Right: Save button (always regenerates NFO) */}
+                        <div className="col-span-4 flex justify-end items-end pb-1">
                           <button
-                            className="px-5 py-2.5 text-xs font-bold bg-primary-container/40 text-on-primary-container hover:bg-primary-container/60 rounded-full transition-colors cursor-pointer shadow-sm"
-                            onClick={() => onSaveTmdb(e.sort, false)}
-                          >Save</button>
-                          <button
-                            className="px-5 py-2.5 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 rounded-full transition-colors cursor-pointer shadow-md shadow-primary/20"
+                            className="px-6 py-2.5 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 rounded-full transition-colors cursor-pointer shadow-md shadow-primary/20"
                             onClick={() => onSaveTmdb(e.sort, true)}
-                          >Save + NFO</button>
+                          >Save</button>
                         </div>
                       </div>
                     </td>

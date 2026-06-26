@@ -69,18 +69,15 @@ export default function LeftSidebar({
         <h2 className="text-lg font-bold text-foreground leading-tight">
           {sub?.name || data?.name || '...'}
         </h2>
-        <p className="text-sm text-muted-foreground mt-1">
+        <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
           Season {data?.bgm_season || sub?.bgm_season || '?'}
+          <span className="text-muted-foreground/40">·</span>
+          <span className={`font-medium ${isActive ? 'text-accent' : 'text-muted-foreground'}`}>
+            {isActive ? 'Ongoing' : 'Completed'}
+          </span>
         </p>
 
-        <div className="mt-5 space-y-3">
-          <div>
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground block">Status</span>
-            <span className={`text-sm font-semibold ${isActive ? 'text-accent' : 'text-muted-foreground'}`}>
-              {isActive ? 'Ongoing' : 'Completed'}
-            </span>
-          </div>
-
+        <div className="mt-4 space-y-2.5">
           {/* ── Primary RSS card ── */}
           <div className="relative group bg-muted/30 rounded-lg p-3 space-y-1.5">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Primary RSS</div>
@@ -171,14 +168,17 @@ export default function LeftSidebar({
           </div>
           )}
 
-          {/* Edit TMDB button */}
-          <button className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-primary/10 text-primary hover:bg-primary/20 transition-colors rounded-full text-sm font-bold cursor-pointer mt-3">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
-            </svg>
-            Edit TMDB
-          </button>
         </div>
+      </div>
+
+      {/* Edit TMDB — fixed at bottom */}
+      <div className="p-4 border-t border-border shrink-0">
+        <button className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 transition-colors rounded-full text-sm font-bold cursor-pointer">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+          </svg>
+          Edit TMDB
+        </button>
       </div>
     </aside>
   );

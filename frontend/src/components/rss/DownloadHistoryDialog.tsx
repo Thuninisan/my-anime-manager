@@ -194,7 +194,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
           />
 
           {!loading && data && (
-            <footer className="p-5 border-t border-border flex justify-between items-center shrink-0">
+            <footer className="p-4 border-t border-border flex justify-between items-center shrink-0">
               <span className="text-xs text-muted-foreground">
                 Total: {formatBytes(data.episodes.reduce((sum, e) => sum + (e.qbit?.size || 0), 0)) || '...'}
               </span>
