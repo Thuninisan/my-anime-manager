@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { usePreviewFlow } from '@/hooks/usePreviewFlow';
 import TorrentUpload from '@/components/TorrentUpload';
 import PreviewDashboard from '@/components/PreviewDashboard';
 import ProcessingResult from '@/components/ProcessingResult';
+import MatchTable from '@/components/MatchTable';
+import { parseAndSearchTorrent } from '@/api/torrentApi';
 
 export default function TorrentPage() {
   const {
@@ -15,12 +18,74 @@ export default function TorrentPage() {
   } = usePreviewFlow();
 
   const isPreviewState = state === 'preview' && previewData;
+  const [searchResult, setSearchResult] = useState<any>(null);
 
   return (
     <>
       {/* idle / uploading: show dropzone */}
       {(state === 'idle' || state === 'uploading') && (
-        <TorrentUpload onUpload={uploadTorrent} uploading={state === 'uploading'} />
+        <>
+          <TorrentUpload onUpload={uploadTorrent} uploading={state === 'uploading'} />
+          {/* Test: parse-and-search button */}
+          {state === 'idle' && (
+            <div className="flex justify-center mt-4">
+              <input
+                type="file"
+                accept=".torrent"
+                id="parse-search-input"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    const result = await parseAndSearchTorrent(file);
+                    setSearchResult(result);
+                  } catch (err: any) {
+                    console.error(err);
+                    setSearchResult({ error: err.message });
+                  }
+                }}
+              />
+              <button
+                className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition cursor-pointer"
+                onClick={() => document.getElementById('parse-search-input')?.click()}
+              >
+                Test: Parse &amp; Search
+              </button>
+            </div>
+          )}
+          {/* match table */}
+          {searchResult && !searchResult.error && searchResult.parsed_files && (
+            <div>
+              <div className="flex items-center justify-between max-w-full mx-auto mt-4 px-2">
+                <span className="text-sm font-semibold text-primary">
+                  Matches ({searchResult.parsed_files.length} episodes, {searchResult.skipped_files?.length || 0} skipped)
+                </span>
+                <button
+                  className="text-muted-foreground hover:text-foreground text-lg leading-none cursor-pointer"
+                  onClick={() => setSearchResult(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <MatchTable data={searchResult} />
+            </div>
+          )}
+          {searchResult?.error && (
+            <div className="max-w-4xl mx-auto mt-4 glass-card rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-semibold text-destructive">Error</span>
+                <button
+                  className="text-muted-foreground hover:text-foreground text-lg leading-none cursor-pointer"
+                  onClick={() => setSearchResult(null)}
+                >
+                  ×
+                </button>
+              </div>
+              <pre className="text-xs text-muted-foreground">{searchResult.error}</pre>
+            </div>
+          )}
+        </>
       )}
 
       {/* error */}

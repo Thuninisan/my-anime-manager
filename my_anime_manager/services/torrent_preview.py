@@ -1,0 +1,637 @@
+"""Torrent file parsing and parallel TMDB + Bangumi search.
+
+Independent of batch_service.py — this is a standalone pipeline for
+the ``POST /api/torrent/parse-and-search`` endpoint.
+
+Flow:
+  1. Bencode-extract file list from .torrent
+  2. Parse each video file with anitopy (skip .ass / skip-dirs)
+  3. Deduplicate show names (case-insensitive, frequency-ordered)
+  4. Parallel TMDB + Bangumi search for each show name
+  5. Organise into {default, backup} per source
+"""
+
+import asyncio
+import re
+from collections import Counter
+from pathlib import Path
+
+from ..utils.torrent_file_reader import read_torrent_file_list
+from ..vendor.anitopy import parse as anitopy_parse
+from ..clients import tmdb as tmdb_client
+from ..clients import bangumi as bgm_client
+from . import tmdb as tmdb_service
+from . import bangumi as bangumi_service
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Constants
+# ═══════════════════════════════════════════════════════════════════════
+
+SKIP_EXTENSIONS: set[str] = {".ass", ".ssa", ".srt", ".idx", ".sub"}
+
+SKIP_DIR_PATTERNS: set[str] = {
+    "cds", "scans", "sps", "specials",
+    "extra", "extras", "bonus", "ost",
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Step 1: Bencode extraction (delegated to torrent_file_reader)
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Called inline in parse_and_search().
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Step 2: Per-file anitopy parsing
+# ═══════════════════════════════════════════════════════════════════════
+
+def _is_in_skip_directory(torrent_path: str) -> bool:
+    """Check whether any directory component matches SKIP_DIR_PATTERNS.
+
+    Args:
+        torrent_path: Full path within the torrent (forward-slash separated).
+
+    Returns:
+        True if any directory segment (excluding the filename) is in the set.
+    """
+    parts = torrent_path.split("/")
+    # Only inspect directory components — the last element is the filename.
+    for part in parts[:-1]:
+        if part.lower() in SKIP_DIR_PATTERNS:
+            return True
+    return False
+
+
+def _extract_year(show_name: str) -> tuple[str, str | None]:
+    """Extract a trailing 4-digit year from a show name.
+
+    Examples:
+        "Attack on Titan 2013" → ("Attack on Titan", "2013")
+        "Show Name (2021)"     → ("Show Name", "2021")
+        "Show Name"            → ("Show Name", None)
+
+    Args:
+        show_name: The anime_title from anitopy.
+
+    Returns:
+        (cleaned_name, year_or_None)
+    """
+    year_match = re.search(r"[\s\-–—]*(\d{4})$", show_name)
+    if year_match:
+        year = year_match.group(1)
+        cleaned = re.sub(r"[\s\-–—]*\d{4}$", "", show_name).strip()
+        return cleaned, year
+    return show_name, None
+
+
+def _parse_file(file_entry: dict) -> dict:
+    """Parse a single torrent file entry with anitopy.
+
+    Checks are applied in order:
+      1. Skip by extension  (.ass, .ssa, …)
+      2. Skip by directory  (CDs/, Scans/, SPs/, Extra/, …)
+      3. anitopy.parse() on the bare filename
+
+    Args:
+        file_entry: A dict with ``"name"`` key (torrent-internal path).
+
+    Returns:
+        A dict describing the parse result (see module docstring for shape).
+    """
+    torrent_path: str = file_entry["name"]
+    file_name: str = torrent_path.split("/")[-1] or torrent_path
+
+    result: dict = {
+        "file_name": file_name,
+        "torrent_path": torrent_path,
+        "show_name": None,
+        "season": 1,
+        "episode": 0,
+        "is_extra": True,
+        "skip_reason": None,
+        "parsed": None,
+    }
+
+    # ── 1. Extension check ──
+    ext = Path(file_name).suffix.lower()
+    if ext in SKIP_EXTENSIONS:
+        result["skip_reason"] = "skip_extension"
+        return result
+
+    # ── 2. Directory check ──
+    if _is_in_skip_directory(torrent_path):
+        result["skip_reason"] = "skip_directory"
+        return result
+
+    # ── 3. anitopy parse ──
+    try:
+        info = anitopy_parse(file_name)
+    except Exception:
+        result["skip_reason"] = "parse_failure"
+        return result
+
+    if not info:
+        result["skip_reason"] = "parse_empty"
+        return result
+
+    anime_title: str = (info.get("anime_title") or "").strip()
+    if not anime_title:
+        result["skip_reason"] = "no_title"
+        return result
+
+    # ── Success ──
+    season_raw = info.get("anime_season")
+    ep_raw = info.get("episode_number")
+
+    season_num = int(season_raw) if season_raw else 1
+    episode_num = int(ep_raw) if ep_raw else 0
+
+    # Strip trailing year (e.g. "Show 2024" → "Show") so show_name
+    # matches the search_results key produced by _search_*_for_name.
+    base_name, _ = _extract_year(anime_title)
+    # Append season suffix when > 1 so multi-season torrents produce
+    # distinct show names (e.g. "Shield Hero" vs "Shield Hero Season 2").
+    show_name = base_name
+    if season_num > 1:
+        show_name = f"{base_name} Season {season_num}"
+
+    result["show_name"] = show_name
+    result["season"] = season_num
+    result["episode"] = episode_num
+    result["parsed"] = dict(info)  # shallow copy — all values are strs/lists
+    result["is_extra"] = False
+    result["skip_reason"] = None
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Step 3: Show-name deduplication
+# ═══════════════════════════════════════════════════════════════════════
+
+def _deduplicate_show_names(parsed_files: list[dict]) -> list[str]:
+    """Collect unique show names, ordered by frequency (descending).
+
+    Case-insensitive dedup; preserves the casing of the most frequent
+    variant for each distinct name.
+
+    Args:
+        parsed_files: List of successful parse results (is_extra=False).
+
+    Returns:
+        List of unique show names, most common first.
+    """
+    names = [p["show_name"] for p in parsed_files if p.get("show_name")]
+    if not names:
+        return []
+
+    # Map case-insensitive key → (best_casing, count)
+    freq: dict[str, tuple[str, int]] = {}
+    for n in names:
+        key = n.lower()
+        if key in freq:
+            existing, count = freq[key]
+            freq[key] = (existing, count + 1)
+        else:
+            freq[key] = (n, 1)
+
+    # Sort: highest count first; tie-break by original casing alphabetically
+    sorted_items = sorted(freq.values(), key=lambda x: (-x[1], x[0]))
+    return [name for name, _ in sorted_items]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Step 4: Parallel TMDB + Bangumi search
+# ═══════════════════════════════════════════════════════════════════════
+
+async def _search_tmdb_for_name(show_name: str) -> dict:
+    """Search TMDB for a single show name — return first + rest.
+
+    Calls the TMDB client directly to get raw, unfiltered results.
+    The cleaned name (with year stripped) is used as the searchby key
+    in the final output.
+
+    Args:
+        show_name: Raw show name (year extracted internally).
+
+    Returns:
+        dict with searchby, first (dict|None), rest (list[dict]).
+    """
+    cleaned_name, year = _extract_year(show_name)
+    res = await tmdb_client.search_tv(cleaned_name)
+    raw_results = res.json().get("results", [])
+    first = raw_results[0] if raw_results else None
+    # Pick only id + name for first entry
+    first_clean = {"id": first["id"], "name": first["name"]} if first else None
+    # Rest: id + name only, deduped by id
+    seen_ids = {first["id"]} if first else set()
+    rest = []
+    for r in raw_results[1:]:
+        rid = r.get("id")
+        if rid and rid not in seen_ids:
+            seen_ids.add(rid)
+            rest.append({"id": rid, "name": r.get("name", "")})
+    return {
+        "searchby": cleaned_name,
+        "first": first_clean,
+        "rest": rest,
+    }
+
+
+async def _search_bangumi_for_name(show_name: str) -> dict:
+    """Search Bangumi for a single show name — return first + rest.
+
+    Args:
+        show_name: Raw show name (year extracted internally).
+
+    Returns:
+        dict with searchby, first (dict|None), rest (list[dict]).
+    """
+    cleaned_name, _ = _extract_year(show_name)
+    results = await bangumi_service.search_bangumi(cleaned_name)
+    first = results[0] if results else None
+    # Pick only id + name + name_cn for first entry
+    first_clean = None
+    if first:
+        first_clean = {"id": first["id"], "name": first.get("name", "")}
+        if first.get("name_cn"):
+            first_clean["name_cn"] = first["name_cn"]
+    # Rest: id + name + name_cn, deduped by id
+    seen_ids = {first["id"]} if first else set()
+    rest = []
+    for r in results[1:]:
+        rid = r.get("id")
+        if rid and rid not in seen_ids:
+            seen_ids.add(rid)
+            entry = {"id": rid, "name": r.get("name", "")}
+            if r.get("name_cn"):
+                entry["name_cn"] = r["name_cn"]
+            rest.append(entry)
+    return {
+        "searchby": cleaned_name,
+        "first": first_clean,
+        "rest": rest,
+    }
+
+
+async def _parallel_search(show_names: list[str]) -> list[dict]:
+    """Search TMDB + Bangumi for every show name concurrently.
+
+    Within each show name, TMDB and Bangumi run in parallel.
+    Across show names, Bangumi calls are serialised via a semaphore
+    to respect the Bangumi client's built-in rate limiting.
+
+    Args:
+        show_names: Unique show names (frequency-ordered).
+
+    Returns:
+        List of per-name search dicts, one per show name in order.
+    """
+    # Semaphore ensures only one Bangumi request is in-flight at a time.
+    # Bangumi's internal _delay() sleeps before each HTTP call; without the
+    # semaphore all concurrent calls would sleep in parallel then fire
+    # simultaneously.
+    bangumi_sem = asyncio.Semaphore(1)
+
+    async def _search_pair(name: str) -> dict:
+        """TMDB + Bangumi for one show name, launched concurrently."""
+
+        async def _do_tmdb():
+            return await _search_tmdb_for_name(name)
+
+        async def _do_bangumi():
+            async with bangumi_sem:
+                return await _search_bangumi_for_name(name)
+
+        tmdb_result, bangumi_result = await asyncio.gather(
+            _do_tmdb(), _do_bangumi(),
+        )
+        return {
+            "show_name": name,
+            "tmdb": tmdb_result,
+            "bangumi": bangumi_result,
+        }
+
+    # Launch all pairs concurrently — Bangumi serialisation is handled
+    # inside each pair by the semaphore.
+    raw = await asyncio.gather(
+        *[_search_pair(name) for name in show_names],
+        return_exceptions=True,
+    )
+
+    # Separate successes from failures
+    pairs: list[dict] = []
+    for i, result in enumerate(raw):
+        if isinstance(result, BaseException):
+            print(f"   ⚠️ 搜索 '{show_names[i]}' 异常: {result}")
+            # Synthesise a failed pair so downstream logic stays simple
+            name = show_names[i]
+            cleaned, _ = _extract_year(name)
+            pairs.append({
+                "show_name": name,
+                "tmdb": {"searchby": cleaned, "first": None, "rest": []},
+                "bangumi": {"searchby": cleaned, "first": None, "rest": []},
+            })
+        else:
+            pairs.append(result)
+
+    return pairs
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Step 5: Organise into {default, backup}
+# ═══════════════════════════════════════════════════════════════════════
+
+def _organize(pairs: list[dict]) -> dict:
+    """Build search_results (keyed by search term) and flattened backup.
+
+    ``search_results``: key = cleaned search term → {tmdb, bangumi} first.
+    ``search_results_backup``: flat ``{tmdb: [...], bangumi: [...]}``,
+    merged across all search terms and deduplicated by id.
+
+    Args:
+        pairs: Search pair list from _parallel_search.
+
+    Returns:
+        ``{search_results: {…}, search_results_backup: {tmdb: […], bangumi: […]}}``
+    """
+    search_results: dict = {}
+
+    # Flat backup: merge rest from all sources, dedup by id
+    tmdb_backup: list[dict] = []
+    tmdb_seen: set[int] = set()
+    bangumi_backup: list[dict] = []
+    bangumi_seen: set[int] = set()
+
+    for p in pairs:
+        tmdb_src = p["tmdb"]
+        bgm_src = p["bangumi"]
+        key = tmdb_src["searchby"]
+
+        search_results[key] = {
+            "tmdb": tmdb_src["first"],
+            "bangumi": bgm_src["first"],
+        }
+
+        # Collect rest, dedup by id
+        for entry in tmdb_src["rest"]:
+            rid = entry["id"]
+            if rid not in tmdb_seen:
+                tmdb_seen.add(rid)
+                tmdb_backup.append(entry)
+        for entry in bgm_src["rest"]:
+            rid = entry["id"]
+            if rid not in bangumi_seen:
+                bangumi_seen.add(rid)
+                bangumi_backup.append(entry)
+
+    return {
+        "search_results": search_results,
+        "search_results_backup": {
+            "tmdb": tmdb_backup,
+            "bangumi": bangumi_backup,
+        },
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Step 5.5: Fetch episode listings for all discovered IDs
+# ═══════════════════════════════════════════════════════════════════════
+
+async def _fetch_episode_data(search_results: dict) -> dict:
+    """Fetch TMDB season→episode maps and Bangumi episode lists.
+
+    Collects every unique TMDB / Bangumi ID from *search_results*
+    (first results only, NOT backup).
+
+    TMDB: ``build_season_episode_map(tmdb_id)`` → {season: {name, episodes}}
+    Bangumi: ``get_episodes(subject_id)`` → [{sort, id, name, name_cn}]
+
+    Args:
+        search_results: Keyed by search term.
+
+    Returns:
+        ``{tmdb: {id: {season: …}}, bangumi: {id: {name, episodes}}}``
+    """
+    # ── Collect unique IDs from search_results only ──
+    tmdb_ids: set[int] = set()
+    bangumi_ids: set[int] = set()
+
+    for entry in search_results.values():
+        t = entry.get("tmdb")
+        b = entry.get("bangumi")
+        if t and t.get("id"):
+            tmdb_ids.add(t["id"])
+        if b and b.get("id"):
+            bangumi_ids.add(b["id"])
+
+    # ── Fetch TMDB season maps ──
+    tmdb_data: dict = {}
+    for tid in sorted(tmdb_ids):
+        try:
+            season_map = await tmdb_service.build_season_episode_map(tid)
+            # Fetch original-language names (ja) for each season and merge.
+            # Build a lookup: (season, epNum) → ja_name
+            ja_names: dict[tuple[int, int], str] = {}
+            for s_num in season_map:
+                try:
+                    ja_res = await tmdb_client.get_season_detail(
+                        tid, s_num, language="ja",
+                    )
+                    for ep in ja_res.json().get("episodes", []):
+                        ja_names[(s_num, ep["episode_number"])] = ep["name"]
+                except Exception:
+                    pass  # if ja fetch fails, name_cn stays as the only name
+            # Build trimmed output
+            output_seasons: dict = {}
+            for s_num, s_data in season_map.items():
+                clean_eps = []
+                for ep in s_data["episodes"]:
+                    entry = {
+                        "epNum": ep["epNum"],
+                        "tmdbId": ep["tmdbId"],
+                        "name": ja_names.get((int(s_num), ep["epNum"]), ep["name"]),
+                    }
+                    cn = ep.get("name")
+                    if cn and cn != entry["name"]:
+                        entry["name_cn"] = cn
+                    clean_eps.append(entry)
+                output_seasons[str(s_num)] = {
+                    "name": s_data["name"],
+                    "episodes": clean_eps,
+                }
+            tmdb_data[str(tid)] = output_seasons
+            total_eps = sum(len(v["episodes"]) for v in season_map.values())
+            print(f"   TMDB {tid}: {len(season_map)} 季, {total_eps} 集")
+        except Exception as exc:
+            print(f"   ⚠️ TMDB {tid} 剧集获取失败: {exc}")
+            tmdb_data[str(tid)] = {}
+
+    # ── Fetch Bangumi episode lists (serial via semaphore) ──
+    bangumi_data: dict = {}
+    bgm_sem = asyncio.Semaphore(1)
+
+    async def _fetch_one_bgm(bid: int):
+        async with bgm_sem:
+            # Get subject name
+            try:
+                subject = await bgm_client.get_subject(bid)
+                name = subject.get("name_cn") or subject.get("name", str(bid))
+            except Exception:
+                name = str(bid)
+
+            # Get episodes
+            try:
+                eps = await bgm_client.get_episodes(bid)
+            except Exception as exc:
+                print(f"   ⚠️ Bangumi {bid} 剧集获取失败: {exc}")
+                eps = []
+
+        # Pick only sort + id + name + name_cn for each episode
+        clean_eps = []
+        for ep in eps:
+            entry = {
+                "sort": ep.get("sort") or ep.get("ep", 0),
+                "id": ep["id"],
+                "name": ep.get("name", ""),
+            }
+            cn = ep.get("name_cn")
+            if cn and cn != entry["name"]:
+                entry["name_cn"] = cn
+            clean_eps.append(entry)
+        clean_eps.sort(key=lambda x: x["sort"])
+
+        return str(bid), {"name": name, "episodes": clean_eps}
+
+    tasks = [_fetch_one_bgm(bid) for bid in sorted(bangumi_ids)]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for r in results:
+        if isinstance(r, BaseException):
+            print(f"   ⚠️ Bangumi fetch 异常: {r}")
+        else:
+            bid_str, data = r
+            bangumi_data[bid_str] = data
+            print(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
+
+    return {
+        "tmdb": tmdb_data,
+        "bangumi": bangumi_data,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Top-level entry point
+# ═══════════════════════════════════════════════════════════════════════
+
+async def parse_and_search(torrent_path: str) -> dict:
+    """Full pipeline: extract → parse → dedup → search → organise.
+
+    This is the single entry point called by the API layer.
+
+    Args:
+        torrent_path: Filesystem path to a .torrent file.
+
+    Returns:
+        Nested dict with parsed_files, skipped_files, show_names,
+        and search_results.  See module docstring for the full shape.
+
+    Raises:
+        RuntimeError: If no files can be parsed from the torrent.
+    """
+    torrent_name: str = Path(torrent_path).stem
+
+    # ── Step 1: Bencode extraction ──
+    print("📋 读取种子文件内容 (bencode)...")
+    file_list: list[dict] = read_torrent_file_list(torrent_path)
+    print(f"   → {len(file_list)} 个文件\n")
+
+    # ── Step 2: Per-file anitopy parsing ──
+    print("🔧 anitopy 逐文件解析...")
+    parsed_results: list[dict] = [_parse_file(f) for f in file_list]
+
+    parsed_files: list[dict] = [r for r in parsed_results if not r["is_extra"]]
+    skipped_files: list[dict] = [
+        {
+            "file_name": r["file_name"],
+            "torrent_path": r["torrent_path"],
+            "skip_reason": r["skip_reason"],
+        }
+        for r in parsed_results if r["is_extra"]
+    ]
+
+    print(f"   合规剧集: {len(parsed_files)} 个")
+    print(f"   跳过文件: {len(skipped_files)} 个")
+    # Print skip-reason breakdown
+    reason_counts = Counter(s["skip_reason"] for s in skipped_files)
+    for reason, count in reason_counts.most_common():
+        print(f"     - {reason}: {count}")
+    print()
+
+    if not parsed_files:
+        raise RuntimeError("没有找到可处理的剧集文件")
+
+    # ── Step 3: Deduplicate show names ──
+    show_names: list[str] = _deduplicate_show_names(parsed_files)
+    print(f"📛 去重节目名: {len(show_names)} 个")
+    for i, name in enumerate(show_names):
+        count = sum(1 for p in parsed_files if p.get("show_name", "").lower() == name.lower())
+        print(f"   [{i + 1}] {name} ({count} 个文件)")
+    print()
+
+    # ── Step 4: Parallel TMDB + Bangumi search ──
+    print("🔍 并行搜索 TMDB + Bangumi...")
+    pairs: list[dict] = await _parallel_search(show_names)
+
+    # Log summary
+    for p in pairs:
+        t = p["tmdb"]
+        b = p["bangumi"]
+        t_status = f"TMDB id={t['first']['id']}" if t["first"] else "TMDB 无结果"
+        b_status = f"Bangumi id={b['first']['id']}" if b["first"] else "Bangumi 无结果"
+        t_rest = f" +{len(t['rest'])} backup" if t["rest"] else ""
+        b_rest = f" +{len(b['rest'])} backup" if b["rest"] else ""
+        print(f"   [{p['show_name']}] {t_status}{t_rest}  |  {b_status}{b_rest}")
+    print()
+
+    # ── Step 5: Organise results ──
+    organized = _organize(pairs)
+    search_results = organized["search_results"]
+    search_results_backup = organized["search_results_backup"]
+
+    # Summary
+    for key, entry in search_results.items():
+        t = entry["tmdb"]
+        b = entry["bangumi"]
+        t_info = f"TMDB id={t['id']} ({t['name']})" if t else "TMDB 无结果"
+        b_info = f"Bangumi id={b['id']} ({b.get('name_cn') or b['name']})" if b else "Bangumi 无结果"
+        print(f"   [{key}] {t_info}")
+        print(f"            {b_info}")
+    print()
+
+    # ── Step 5.5: Fetch episode listings ──
+    print("📡 获取剧集数据...")
+    episode_data = await _fetch_episode_data(search_results)
+    print()
+
+    return {
+        "torrent_name": torrent_name,
+        "torrent_path": torrent_path,
+        "total_files": len(file_list),
+        "parsed_files": [
+            {
+                "file_name": p["file_name"],
+                "torrent_path": p["torrent_path"],
+                "show_name": p["show_name"],
+                "season": p["season"],
+                "episode": p["episode"],
+                "parsed": p["parsed"],
+            }
+            for p in parsed_files
+        ],
+        "skipped_files": skipped_files,
+        "show_names": show_names,
+        "search_results": search_results,
+        "search_results_backup": search_results_backup,
+        "episode_data": episode_data,
+    }

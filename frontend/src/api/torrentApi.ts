@@ -65,6 +65,23 @@ export async function getConfig(): Promise<AppConfig> {
   return res.json();
 }
 
+export async function parseAndSearchTorrent(file: File): Promise<any> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const res = await fetch(`${API_BASE}/torrent/parse-and-search`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Parse+Search failed (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
 export async function updateConfig(changes: Partial<AppConfig>): Promise<AppConfig> {
   const res = await fetch('/config', {
     method: 'PUT',

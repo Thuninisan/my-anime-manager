@@ -557,6 +557,41 @@ async def torrent_confirm(body: dict):
     )
 
 
+# ── /api/torrent/parse-and-search ──
+
+@app.post("/api/torrent/parse-and-search")
+async def torrent_parse_and_search(file: UploadFile = File(...)):
+    """Parse a .torrent file and search TMDB + Bangumi for matched shows.
+
+    Independent endpoint — does NOT use the existing build_preview flow.
+    Upload a .torrent, get back parsed file list + deduplicated show names
+    + parallel TMDB/Bangumi search results.
+
+    Returns:
+        JSON with torrent_name, parsed_files, skipped_files, show_names,
+        and search_results (tmdb / bangumi each with default + backup).
+    """
+    if not file.filename or not file.filename.endswith(".torrent"):
+        raise HTTPException(400, "请上传 .torrent 文件")
+
+    # Save uploaded file to temp location
+    with tempfile.NamedTemporaryFile(suffix=".torrent", delete=False) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+
+    try:
+        from .services.torrent_preview import parse_and_search
+        result = await parse_and_search(tmp_path)
+    except Exception as e:
+        Path(tmp_path).unlink(missing_ok=True)
+        traceback.print_exc()
+        raise HTTPException(400, str(e))
+
+    # Clean up temp file
+    Path(tmp_path).unlink(missing_ok=True)
+    return result
+
+
 # ── /scan ──
 
 @app.post("/scan")
