@@ -28,7 +28,10 @@ from . import bangumi as bangumi_service
 # Constants
 # ═══════════════════════════════════════════════════════════════════════
 
-SKIP_EXTENSIONS: set[str] = {".ass", ".ssa", ".srt", ".idx", ".sub"}
+SKIP_EXTENSIONS: set[str] = {
+    ".ass", ".ssa", ".srt", ".idx", ".sub",   # subtitles
+    ".7z", ".zip", ".rar", ".tar", ".gz",     # font archives
+}
 
 SKIP_DIR_PATTERNS: set[str] = {
     "cds", "scans", "sps", "specials",
