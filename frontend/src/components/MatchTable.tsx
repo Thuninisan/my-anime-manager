@@ -161,18 +161,32 @@ export function computeMatches(data: any): MatchRow[] {
     const searchEntry = searchResults[pf.show_name];
 
     const tmdbId = searchEntry?.tmdb?.id;
-    const bangumiId = searchEntry?.bangumi?.id;
-
     const tmdbSeasons: Record<string, TmdbSeason> =
       (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
-    const bgmEntry: BgmEntry | undefined =
-      (bangumiId && episodeData.bangumi?.[String(bangumiId)]) || undefined;
 
-    // Match by sort first, fall back to positional index
-    const bgmEps = bgmEntry?.episodes || [];
-    let bgmEp = bgmEps.find((ep) => ep.sort === pf.episode) ?? null;
-    if (!bgmEp && pf.episode > 0 && pf.episode <= bgmEps.length) {
-      bgmEp = bgmEps[pf.episode - 1];
+    // Collect all BGM episodes across ALL bangumi entries (primary + sequels)
+    const allBgmEps = Object.values(episodeData.bangumi || {}) as BgmEntry[];
+    let bgmEp: BgmEpisode | null = null;
+    let matchedBgmName = "";
+    for (const entry of allBgmEps) {
+      const eps = entry.episodes || [];
+      const found = eps.find((ep) => ep.sort === pf.episode) ?? null;
+      if (found) {
+        bgmEp = found;
+        matchedBgmName = entry.name;
+        break;
+      }
+    }
+    // Fallback: positional index in the primary entry only
+    if (!bgmEp) {
+      const primaryBgmId = searchEntry?.bangumi?.id;
+      const primaryEntry: BgmEntry | undefined =
+        (primaryBgmId && episodeData.bangumi?.[String(primaryBgmId)]) || undefined;
+      const primaryEps = primaryEntry?.episodes || [];
+      if (pf.episode > 0 && pf.episode <= primaryEps.length) {
+        bgmEp = primaryEps[pf.episode - 1];
+        matchedBgmName = primaryEntry?.name || "";
+      }
     }
 
     // Fuzzy match BGM name → TMDB (name + name_cn for better coverage)
@@ -185,7 +199,7 @@ export function computeMatches(data: any): MatchRow[] {
       show_name: pf.show_name,
       src_season: pf.season,
       src_episode: pf.episode,
-      bgm_entry: bgmEntry?.name || (bangumiId ? `ID ${bangumiId}` : '-'),
+      bgm_entry: matchedBgmName || (searchEntry?.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
       bgm_sort: bgmEp?.sort ?? null,
       bgm_ep_name: bgmEp?.name || '-',
       bgm_ep_name_cn: bgmEp?.name_cn || '',
