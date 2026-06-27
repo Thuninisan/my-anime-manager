@@ -168,11 +168,12 @@ export function computeMatches(data: any): MatchRow[] {
     const bgmEntry: BgmEntry | undefined =
       (bangumiId && episodeData.bangumi?.[String(bangumiId)]) || undefined;
 
-    // Positional match: episode N → episodes[N-1] (sorted by sort)
+    // Match by sort first, fall back to positional index
     const bgmEps = bgmEntry?.episodes || [];
-    const bgmEp = pf.episode > 0 && pf.episode <= bgmEps.length
-      ? bgmEps[pf.episode - 1]
-      : null;
+    let bgmEp = bgmEps.find((ep) => ep.sort === pf.episode) ?? null;
+    if (!bgmEp && pf.episode > 0 && pf.episode <= bgmEps.length) {
+      bgmEp = bgmEps[pf.episode - 1];
+    }
 
     // Fuzzy match BGM name → TMDB (name + name_cn for better coverage)
     const tmdbMatch = bgmEp?.name
