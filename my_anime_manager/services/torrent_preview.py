@@ -254,10 +254,14 @@ async def _search_bangumi_for_name(show_name: str) -> dict:
     cleaned_name, _ = _extract_year(show_name)
     results = await bangumi_service.search_bangumi(cleaned_name)
     first = results[0] if results else None
-    # Pick only id + name + name_cn for first entry
+    # Pick only id + name + name_cn + eps for first entry
     first_clean = None
     if first:
-        first_clean = {"id": first["id"], "name": first.get("name", "")}
+        first_clean = {
+            "id": first["id"],
+            "name": first.get("name", ""),
+            "eps": first.get("eps", 0),
+        }
         if first.get("name_cn"):
             first_clean["name_cn"] = first["name_cn"]
     # Rest: id + name + name_cn, deduped by id
@@ -267,7 +271,11 @@ async def _search_bangumi_for_name(show_name: str) -> dict:
         rid = r.get("id")
         if rid and rid not in seen_ids:
             seen_ids.add(rid)
-            entry = {"id": rid, "name": r.get("name", "")}
+            entry = {
+                "id": rid,
+                "name": r.get("name", ""),
+                "eps": r.get("eps", 0),
+            }
             if r.get("name_cn"):
                 entry["name_cn"] = r["name_cn"]
             rest.append(entry)
@@ -402,32 +410,47 @@ def _organize(pairs: list[dict]) -> dict:
 # Step 5.5: Fetch episode listings for all discovered IDs
 # ═══════════════════════════════════════════════════════════════════════
 
-async def _fetch_episode_data(search_results: dict) -> dict:
+async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) -> dict:
     """Fetch TMDB season→episode maps and Bangumi episode lists.
 
     Collects every unique TMDB / Bangumi ID from *search_results*
     (first results only, NOT backup).
 
-    TMDB: ``build_season_episode_map(tmdb_id)`` → {season: {name, episodes}}
-    Bangumi: ``get_episodes(subject_id)`` → [{sort, id, name, name_cn}]
+    If a Bangumi entry's ``eps`` is less than the number of parsed files
+    for that show name, the sequel's episodes are fetched and stored under
+    the sequel's own Bangumi ID.
 
     Args:
         search_results: Keyed by search term.
+        parsed_files: List of parsed file dicts (for per-show file counts).
 
     Returns:
         ``{tmdb: {id: {season: …}}, bangumi: {id: {name, episodes}}}``
     """
+    # ── Per-show file counts ──
+    file_counts: dict[str, int] = {}
+    for pf in parsed_files:
+        sn = pf.get("show_name", "")
+        file_counts[sn] = file_counts.get(sn, 0) + 1
+
     # ── Collect unique IDs from search_results only ──
     tmdb_ids: set[int] = set()
     bangumi_ids: set[int] = set()
+    # Track which bangumi IDs need sequel expansion: bangumi_id → set of show_names
+    sequel_map: dict[int, list[str]] = {}
 
-    for entry in search_results.values():
+    for key, entry in search_results.items():
         t = entry.get("tmdb")
         b = entry.get("bangumi")
         if t and t.get("id"):
             tmdb_ids.add(t["id"])
         if b and b.get("id"):
-            bangumi_ids.add(b["id"])
+            bid = b["id"]
+            bangumi_ids.add(bid)
+            eps = b.get("eps", 0)
+            fc = file_counts.get(key, 0)
+            if eps > 0 and fc > eps:
+                sequel_map.setdefault(bid, []).append(key)
 
     # ── Fetch TMDB season maps ──
     tmdb_data: dict = {}
@@ -516,6 +539,34 @@ async def _fetch_episode_data(search_results: dict) -> dict:
             bid_str, data = r
             bangumi_data[bid_str] = data
             print(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
+
+    # ── Sequel expansion: if parsed file count > eps, fetch sequel episodes ──
+    for primary_bid, show_keys in sequel_map.items():
+        # Find sequel via relations
+        sequel_bid: int | None = None
+        try:
+            async with bgm_sem:
+                relations = await bgm_client.get_relations(primary_bid)
+            for rel in relations:
+                if rel.get("relation") == "续集":
+                    sequel_bid = rel.get("id")
+                    break
+        except Exception as exc:
+            print(f"   ⚠️ Bangumi {primary_bid} 关系获取失败: {exc}")
+
+        if not sequel_bid:
+            print(f"   ⚠️ Bangumi {primary_bid} 没有续集条目，但文件数超出 eps")
+            continue
+        if str(sequel_bid) in bangumi_data:
+            continue  # already fetched
+
+        print(f"   ↳ Bangumi {primary_bid} 文件数超出 eps，获取续集 {sequel_bid}")
+        try:
+            bid_str, data = await _fetch_one_bgm(sequel_bid)
+            bangumi_data[bid_str] = data
+            print(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
+        except Exception as exc:
+            print(f"   ⚠️ 续集 {sequel_bid} 剧集获取失败: {exc}")
 
     return {
         "tmdb": tmdb_data,
@@ -614,7 +665,7 @@ async def parse_and_search(torrent_path: str) -> dict:
 
     # ── Step 5.5: Fetch episode listings ──
     print("📡 获取剧集数据...")
-    episode_data = await _fetch_episode_data(search_results)
+    episode_data = await _fetch_episode_data(search_results, parsed_files)
     print()
 
     return {
