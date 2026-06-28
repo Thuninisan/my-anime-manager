@@ -267,8 +267,50 @@ async def _search_tmdb_for_name(show_name: str) -> dict:
     }
 
 
+def _alias_matches(subject: dict, target: str) -> bool:
+    """Check if a subject's name / name_cn / infobox aliases match target.
+
+    *target* is already lowercased and stripped.  Comparison is
+    case-insensitive (effective for ASCII; no-op for CJK).
+
+    Args:
+        subject: A Bangumi search-result dict (may contain ``infobox``).
+        target: Lowercased search keyword.
+
+    Returns:
+        True if any alias matches exactly.
+    """
+    # Check name and name_cn first (cheap, always available)
+    name = (subject.get("name") or "").lower().strip()
+    name_cn = (subject.get("name_cn") or "").lower().strip()
+    if name == target or name_cn == target:
+        return True
+
+    # Check infobox aliases
+    infobox = subject.get("infobox") or []
+    for item in infobox:
+        if item.get("key") == "别名":
+            value = item.get("value")
+            if isinstance(value, list):
+                # value = [{"v": "当哒当"}, {"v": "DAN DA DAN"}, ...]
+                for v in value:
+                    alias = (
+                        v.get("v") if isinstance(v, dict) else str(v)
+                    ).lower().strip()
+                    if alias == target:
+                        return True
+            elif isinstance(value, str):
+                if value.lower().strip() == target:
+                    return True
+    return False
+
+
 async def _search_bangumi_for_name(show_name: str) -> dict:
     """Search Bangumi for a single show name — return first + rest.
+
+    For show names that do NOT contain "Season", alias-based matching
+    is applied to pick the correct season-1 entry instead of blindly
+    using the first result (which is often a later season).
 
     Args:
         show_name: Raw show name (year extracted internally).
@@ -278,6 +320,27 @@ async def _search_bangumi_for_name(show_name: str) -> dict:
     """
     cleaned_name, _ = _extract_year(show_name)
     results = await bangumi_service.search_bangumi(cleaned_name)
+
+    # ── Alias matching for non-Season show names ──
+    # When "Season" is NOT in the show name, the first search result
+    # is often Season 2/3 instead of Season 1.  Match against infobox
+    # aliases to find the real Season 1 entry.
+    if "season" not in cleaned_name.lower() and len(results) > 1:
+        target = cleaned_name.lower().strip()
+        best_idx = None
+        for i, r in enumerate(results):
+            if _alias_matches(r, target):
+                best_idx = i
+                break
+        if best_idx is not None and best_idx > 0:
+            matched = results.pop(best_idx)
+            results.insert(0, matched)
+            print(
+                f"   🔀 别名匹配: "
+                f"{matched.get('name_cn') or matched['name']} "
+                f"[id: {matched['id']}] → 提升为首选"
+            )
+
     first = results[0] if results else None
     # Pick only id + name + name_cn + eps for first entry
     first_clean = None
