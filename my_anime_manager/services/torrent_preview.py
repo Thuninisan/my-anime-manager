@@ -307,7 +307,7 @@ def _alias_matches(subject: dict, target: str) -> bool:
 
 
 async def _search_bangumi_for_name(
-    show_name: str, tmdb_id: int | None = None,
+    show_name: str, tmdb_id: int | None = None, tmdb_name: str | None = None,
 ) -> dict:
     """Search Bangumi for a single show name — return first + rest.
 
@@ -315,13 +315,15 @@ async def _search_bangumi_for_name(
     is applied to pick the correct season-1 entry instead of blindly
     using the first result (which is often a later season).
 
-    If no Bangumi search result passes the map.json filter, falls back
-    to looking up *tmdb_id* in the prebuilt map and constructing a
-    synthetic result from the Bangumi subject API.
+    Fallback chain when the primary search yields nothing:
+      1. tmdb_id → map.json reverse lookup
+      2. tmdb_name (original Japanese title) → re-search Bangumi,
+         taking the first result with NO map.json filter
 
     Args:
         show_name: Raw show name (year extracted internally).
         tmdb_id: Optional TMDB series ID for map fallback lookup.
+        tmdb_name: Optional TMDB original name for re-search fallback.
 
     Returns:
         dict with searchby, first (dict|None), rest (list[dict]).
@@ -355,7 +357,7 @@ async def _search_bangumi_for_name(
                 f"[id: {matched['id']}] → 提升为首选"
             )
 
-    # ── Fallback: if no results remain, use tmdb_id → map lookup ──
+    # ── Fallback 1: tmdb_id → map.json reverse lookup ──
     if not results and tmdb_id is not None:
         bgm_id = data_store.get_bangumi_id_by_tmdb_id(tmdb_id)
         if bgm_id is not None:
@@ -365,14 +367,31 @@ async def _search_bangumi_for_name(
                 name = subject.get("name", "")
                 name_cn = subject.get("name_cn", "")
                 eps = subject.get("eps") or subject.get("total_episodes") or 0
-                first_clean = {
-                    "id": bgm_id, "name": name, "eps": eps,
+                return {
+                    "searchby": cleaned_name,
+                    "first": {
+                        "id": bgm_id, "name": name, "eps": eps,
+                        **({"name_cn": name_cn} if name_cn else {}),
+                    },
+                    "rest": [],
                 }
-                if name_cn:
-                    first_clean["name_cn"] = name_cn
-                return {"searchby": cleaned_name, "first": first_clean, "rest": []}
             except Exception as exc:
                 print(f"   ⚠️ Bangumi subject 获取失败 (id={bgm_id}): {exc}")
+
+    # ── Fallback 2: re-search Bangumi with TMDB original name ──
+    if not results and tmdb_name and tmdb_name.lower() != cleaned_name.lower():
+        print(f'🔍 Bangumi 重搜 (TMDB 原名): "{tmdb_name}"')
+        try:
+            retry_results = await bangumi_service.search_bangumi(tmdb_name)
+        except Exception:
+            retry_results = []
+        if retry_results:
+            r = retry_results[0]
+            print(
+                f"   ✅ 重搜命中: "
+                f"{r.get('name_cn') or r['name']} [id: {r['id']}]"
+            )
+            results = [r]  # take first result, no map.json filter
 
     first = results[0] if results else None
     # Pick only id + name + name_cn + eps for first entry
@@ -427,15 +446,19 @@ async def _parallel_search(show_names: list[str]) -> list[dict]:
     bangumi_sem = asyncio.Semaphore(1)
 
     async def _search_pair(name: str) -> dict:
-        """TMDB-first, then Bangumi (passing tmdb_id for map fallback)."""
+        """TMDB-first, then Bangumi (passing tmdb_id + tmdb_name for fallback)."""
         # Step 1: TMDB search
         tmdb_result = await _search_tmdb_for_name(name)
 
-        # Step 2: Bangumi search with tmdb_id for map fallback
+        # Step 2: Bangumi search with tmdb_id + tmdb_name for fallback chain
         async def _do_bangumi():
-            tmdb_id = tmdb_result["first"]["id"] if tmdb_result["first"] else None
+            tmdb_first = tmdb_result["first"]
+            tmdb_id = tmdb_first["id"] if tmdb_first else None
+            tmdb_name = tmdb_first["name"] if tmdb_first else None
             async with bangumi_sem:
-                return await _search_bangumi_for_name(name, tmdb_id=tmdb_id)
+                return await _search_bangumi_for_name(
+                    name, tmdb_id=tmdb_id, tmdb_name=tmdb_name,
+                )
 
         bangumi_result = await _do_bangumi()
 
