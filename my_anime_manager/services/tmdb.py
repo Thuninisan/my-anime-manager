@@ -236,33 +236,39 @@ async def build_season_episode_map(tv_id: int) -> dict[int, dict]:
     """
     season_map: dict[int, dict] = {}
 
-    print("   📡 使用默认 Season API 获取分季数据...")
-    consecutive_empty = 0
-    for s in range(1, 31):
+    # ── Fetch number_of_seasons from TV detail to bound iteration ──
+    # The /tv/{id} endpoint returns number_of_seasons, avoiding the old
+    # trial-and-error approach (range(1,31) with consecutive_empty heuristic).
+    print("   📡 获取节目基本信息 (season count)...")
+    try:
+        detail_res = await tmdb_client.get_tv_detail(tv_id)
+        detail = detail_res.json()
+        total_seasons = detail.get("number_of_seasons", 0)
+    except Exception:
+        total_seasons = 0
+
+    if total_seasons <= 0:
+        # Fallback: if detail fetch fails, keep old behaviour
+        total_seasons = 30
+
+    # number_of_seasons does NOT include season 0 (Specials), so range
+    # [1, total_seasons] already covers every regular season.
+    print(f"   📡 TMDB 共 {total_seasons} 季，获取 S01–S{total_seasons:02d} 分季数据...")
+
+    for s in range(1, total_seasons + 1):
         try:
             res = await tmdb_client.get_season_detail(tv_id, s)
         except Exception as exc:
-            consecutive_empty += 1
             print(f"   ⚠️ S{s:02d} 请求失败: {exc}")
-            if consecutive_empty >= 3:
-                break  # 3 in a row → no more seasons
             continue
 
         try:
             data = res.json()
         except Exception:
-            consecutive_empty += 1
-            if consecutive_empty >= 3:
-                break
             continue
 
         if not data or not data.get("episodes"):
-            consecutive_empty += 1
-            if consecutive_empty >= 3:
-                break
             continue
-
-        consecutive_empty = 0
 
         episodes = []
         filtered_count = 0
@@ -349,6 +355,7 @@ async def build_season_episode_map(tv_id: int) -> dict[int, dict]:
                         "guestStars": guest_stars,
                     })
                 episodes.sort(key=lambda e: e["epNum"])
+
                 season_map[0] = {
                     "name": data.get("name", "Specials"),
                     "episodes": episodes,

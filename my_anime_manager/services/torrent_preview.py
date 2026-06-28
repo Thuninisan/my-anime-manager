@@ -427,10 +427,22 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
     Returns:
         ``{tmdb: {id: {season: …}}, bangumi: {id: {name, episodes}}}``
     """
-    # ── Per-show file counts ──
+    # ── Per-show file counts (exclude OVA/OAD — they are not regular TV
+    #     episodes and should not trigger sequel expansion) ──
+    _OVA_OAD_TYPES: set[str] = {"OVA", "OAD", "OAV"}
     file_counts: dict[str, int] = {}
+    ova_show_names: set[str] = set()  # show_names that have OVA/OAD files
     for pf in parsed_files:
         sn = pf.get("show_name", "")
+        # anitopy stores anime_type in the parsed dict; it may be a string
+        # ("OVA") or a list (["OVA"]) when multiple types are detected.
+        parsed = pf.get("parsed") or {}
+        at = parsed.get("anime_type", "")
+        if isinstance(at, list):
+            at = at[0] if at else ""
+        if at and str(at).upper() in _OVA_OAD_TYPES:
+            ova_show_names.add(sn)  # track for 番外篇 expansion below
+            continue  # OVA/OAD files don't count toward regular TV episode totals
         file_counts[sn] = file_counts.get(sn, 0) + 1
 
     # ── Collect unique IDs from search_results only ──
@@ -457,32 +469,18 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
     for tid in sorted(tmdb_ids):
         try:
             season_map = await tmdb_service.build_season_episode_map(tid)
-            # Fetch original-language names (ja) for each season and merge.
-            # Build a lookup: (season, epNum) → ja_name
-            ja_names: dict[tuple[int, int], str] = {}
-            for s_num in season_map:
-                try:
-                    ja_res = await tmdb_client.get_season_detail(
-                        tid, s_num, language="ja",
-                    )
-                    for ep in ja_res.json().get("episodes", []):
-                        ja_names[(s_num, ep["episode_number"])] = ep["name"]
-                except Exception:
-                    pass  # if ja fetch fails, name_cn stays as the only name
-            # Build trimmed output
+            # TMDB now uses language=ja as the base, so episode names are
+            # already Japanese originals — no second fetch needed.
+            # Trim to the fields needed for the API response.
             output_seasons: dict = {}
             for s_num, s_data in season_map.items():
                 clean_eps = []
                 for ep in s_data["episodes"]:
-                    entry = {
+                    clean_eps.append({
                         "epNum": ep["epNum"],
                         "tmdbId": ep["tmdbId"],
-                        "name": ja_names.get((int(s_num), ep["epNum"]), ep["name"]),
-                    }
-                    cn = ep.get("name")
-                    if cn and cn != entry["name"]:
-                        entry["name_cn"] = cn
-                    clean_eps.append(entry)
+                        "name": ep["name"],
+                    })
                 output_seasons[str(s_num)] = {
                     "name": s_data["name"],
                     "episodes": clean_eps,
@@ -567,6 +565,49 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
             print(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
         except Exception as exc:
             print(f"   ⚠️ 续集 {sequel_bid} 剧集获取失败: {exc}")
+
+    # ── OVA/OAD special expansion: fetch 番外篇 episodes ──
+    # When torrent contains OVA/OAD files, automatically pull episode data
+    # from the primary Bangumi entry's related 番外篇 (side-story) subjects
+    # so the frontend can match OVA/OAD files against them.
+    if ova_show_names:
+        # Map primary Bangumi ID → show_names that have OVA/OAD files
+        ova_bgm_map: dict[int, set[str]] = {}
+        for key, entry in search_results.items():
+            if key in ova_show_names:
+                b = entry.get("bangumi")
+                if b and b.get("id"):
+                    ova_bgm_map.setdefault(b["id"], set()).add(key)
+
+        for primary_bid, show_keys in ova_bgm_map.items():
+            # Find 番外篇 via relations
+            special_bids: list[int] = []
+            try:
+                async with bgm_sem:
+                    relations = await bgm_client.get_relations(primary_bid)
+                for rel in relations:
+                    if rel.get("relation") == "番外篇":
+                        sid = rel.get("id")
+                        if sid:
+                            special_bids.append(sid)
+            except Exception as exc:
+                print(f"   ⚠️ Bangumi {primary_bid} 关系获取失败 (番外篇): {exc}")
+
+            if not special_bids:
+                print(f"   ⚠️ Bangumi {primary_bid} 有OVA/OAD文件但没有番外篇关联条目")
+                continue
+
+            for special_bid in special_bids:
+                if str(special_bid) in bangumi_data:
+                    continue  # already fetched
+
+                print(f"   ↳ Bangumi {primary_bid} 有OVA/OAD文件，获取番外篇 {special_bid}")
+                try:
+                    bid_str, data = await _fetch_one_bgm(special_bid)
+                    bangumi_data[bid_str] = data
+                    print(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
+                except Exception as exc:
+                    print(f"   ⚠️ 番外篇 {special_bid} 剧集获取失败: {exc}")
 
     return {
         "tmdb": tmdb_data,

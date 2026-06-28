@@ -9,7 +9,7 @@ TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original"
 _BASE = "https://api.themoviedb.org/3"
 
 # Common query params for every TMDB API call.
-_BASE_PARAMS = {"api_key": config.TMDB_API_KEY, "language": "zh-CN"}
+_BASE_PARAMS = {"api_key": config.TMDB_API_KEY, "language": "ja"}
 
 
 async def _tmdb_request(
