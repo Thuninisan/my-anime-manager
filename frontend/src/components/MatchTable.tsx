@@ -177,33 +177,68 @@ export function computeMatches(data: any): MatchRow[] {
     let bgmEp: BgmEpisode | null = null;
     let matchedBgmName = "";
     let matchedBgmId: number | null = null;
-    for (const [bidStr, entry] of allBgmEntries) {
-      const eps = entry.episodes || [];
-      const found = eps.find((ep) => ep.sort === pf.episode) ?? null;
-      if (found) {
-        bgmEp = found;
-        matchedBgmName = entry.name;
-        matchedBgmId = Number(bidStr);
-        break;
-      }
-    }
-    // Fallback: positional index in the primary entry only
-    if (!bgmEp) {
-      const primaryBgmId = searchEntry?.bangumi?.id;
-      const primaryEntry: BgmEntry | undefined =
-        (primaryBgmId && episodeData.bangumi?.[String(primaryBgmId)]) || undefined;
-      const primaryEps = primaryEntry?.episodes || [];
-      if (pf.episode > 0 && pf.episode <= primaryEps.length) {
-        bgmEp = primaryEps[pf.episode - 1];
-        matchedBgmName = primaryEntry?.name || "";
-        matchedBgmId = primaryBgmId ?? null;
+    let tmdbMatch: { season: number; epNum: number; name: string } | null = null;
+
+    // ── Season 0 (specials): match TMDB S0 first, then use TMDB ──
+    // original name to find the corresponding Bangumi SP episode.
+    // This works better than sort-based matching because specials
+    // often have non-sequential sort numbers in Bangumi.
+    if (pf.season === 0) {
+      const tmdbS0 = tmdbSeasons["0"];
+      if (tmdbS0) {
+        const tmdbEp = tmdbS0.episodes.find((ep) => ep.epNum === pf.episode);
+        if (tmdbEp) {
+          tmdbMatch = { season: 0, epNum: tmdbEp.epNum, name: tmdbEp.name };
+          // Use TMDB original name to find matching BGM episode
+          const tmdbNorm = normalise(tmdbEp.name);
+          for (const [bidStr, entry] of allBgmEntries) {
+            const eps = entry.episodes || [];
+            const found = eps.find(
+              (ep) => normalise(ep.name) === tmdbNorm,
+            );
+            if (found) {
+              bgmEp = found;
+              matchedBgmName = entry.name;
+              matchedBgmId = Number(bidStr);
+              break;
+            }
+          }
+        }
       }
     }
 
-    // Fuzzy match BGM name → TMDB (name + name_cn for better coverage)
-    const tmdbMatch = bgmEp?.name
-      ? fuzzyMatchTmdb(bgmEp.name, bgmEp.name_cn || "", tmdbSeasons)
-      : null;
+    // ── Regular season matching (skip if S0 already found BGM) ──
+    if (!bgmEp) {
+      for (const [bidStr, entry] of allBgmEntries) {
+        const eps = entry.episodes || [];
+        const found = eps.find((ep) => ep.sort === pf.episode) ?? null;
+        if (found) {
+          bgmEp = found;
+          matchedBgmName = entry.name;
+          matchedBgmId = Number(bidStr);
+          break;
+        }
+      }
+      // Fallback: positional index in the primary entry only
+      if (!bgmEp) {
+        const primaryBgmId = searchEntry?.bangumi?.id;
+        const primaryEntry: BgmEntry | undefined =
+          (primaryBgmId && episodeData.bangumi?.[String(primaryBgmId)]) || undefined;
+        const primaryEps = primaryEntry?.episodes || [];
+        if (pf.episode > 0 && pf.episode <= primaryEps.length) {
+          bgmEp = primaryEps[pf.episode - 1];
+          matchedBgmName = primaryEntry?.name || "";
+          matchedBgmId = primaryBgmId ?? null;
+        }
+      }
+    }
+
+    // Fuzzy match BGM name → TMDB (skip if S0 already matched directly)
+    if (!tmdbMatch) {
+      tmdbMatch = bgmEp?.name
+        ? fuzzyMatchTmdb(bgmEp.name, bgmEp.name_cn || "", tmdbSeasons)
+        : null;
+    }
 
     return {
       file_name: pf.file_name,
