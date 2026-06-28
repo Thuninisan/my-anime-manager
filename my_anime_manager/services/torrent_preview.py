@@ -571,13 +571,16 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
     Returns:
         ``{tmdb: {id: {season: …}}, bangumi: {id: {name, episodes}}}``
     """
-    # ── Per-show file counts (exclude OVA/OAD — they are not regular TV
-    #     episodes and should not trigger sequel expansion) ──
+    # ── Per-show file counts (exclude OVA/OAD + S0 specials — they are
+    #     not regular TV episodes and should not trigger sequel expansion) ──
     _OVA_OAD_TYPES: set[str] = {"OVA", "OAD", "OAV"}
     file_counts: dict[str, int] = {}
     ova_show_names: set[str] = set()  # show_names that have OVA/OAD files
     for pf in parsed_files:
         sn = pf.get("show_name", "")
+        # Season 0 = specials, not regular episodes
+        if pf.get("season") == 0:
+            continue
         # anitopy stores anime_type in the parsed dict; it may be a string
         # ("OVA") or a list (["OVA"]) when multiple types are detected.
         parsed = pf.get("parsed") or {}
