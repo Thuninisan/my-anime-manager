@@ -92,7 +92,21 @@ export async function fetchTmdbSeasonMap(tmdbId: number): Promise<Record<string,
 
 export async function fetchBangumiEpisodes(bangumiId: number): Promise<{ id: number; name: string; episodes: { sort: number; id: number; name: string; name_cn?: string }[] }> {
   const res = await fetch(`${API_BASE}/torrent/bangumi/${bangumiId}/episodes`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+      throw new Error('Backend not reachable — make sure the FastAPI server is running on port 8000.');
+    }
+    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    const text = await res.text().catch(() => '');
+    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+      throw new Error('Backend returned HTML — restart the FastAPI server to pick up new endpoints.');
+    }
+    throw new Error(`Expected JSON but got ${ct || 'unknown'}`);
+  }
   return res.json();
 }
 
