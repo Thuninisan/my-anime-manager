@@ -5,7 +5,13 @@
    3. parsed_file.episode → positional index → bangumi episode
    4. bangumi ep .name → fuzzy match TMDB episodes across all seasons
    5. Return TMDB season + episode
+
+   BGM Entry / BGM Name columns have dropdowns populated from
+   search_results + episode_data so the user can override the
+   auto-matched entry and episode.
 */
+
+import { useState, useMemo } from 'react';
 
 interface ParsedFile {
   file_name: string;
@@ -50,9 +56,11 @@ interface MatchRow {
   src_season: number;
   src_episode: number;
   bgm_entry: string;
+  bgm_entry_id: number | null;   // for dropdown default value
   bgm_sort: number | null;
   bgm_ep_name: string;
   bgm_ep_name_cn: string;
+  bgm_ep_id: number | null;      // for dropdown default value
   tmdb_season: number | null;
   tmdb_ep: number | null;
   tmdb_ep_name: string;
@@ -165,15 +173,17 @@ export function computeMatches(data: any): MatchRow[] {
       (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
 
     // Collect all BGM episodes across ALL bangumi entries (primary + sequels)
-    const allBgmEps = Object.values(episodeData.bangumi || {}) as BgmEntry[];
+    const allBgmEntries = Object.entries(episodeData.bangumi || {}) as [string, BgmEntry][];
     let bgmEp: BgmEpisode | null = null;
     let matchedBgmName = "";
-    for (const entry of allBgmEps) {
+    let matchedBgmId: number | null = null;
+    for (const [bidStr, entry] of allBgmEntries) {
       const eps = entry.episodes || [];
       const found = eps.find((ep) => ep.sort === pf.episode) ?? null;
       if (found) {
         bgmEp = found;
         matchedBgmName = entry.name;
+        matchedBgmId = Number(bidStr);
         break;
       }
     }
@@ -186,6 +196,7 @@ export function computeMatches(data: any): MatchRow[] {
       if (pf.episode > 0 && pf.episode <= primaryEps.length) {
         bgmEp = primaryEps[pf.episode - 1];
         matchedBgmName = primaryEntry?.name || "";
+        matchedBgmId = primaryBgmId ?? null;
       }
     }
 
@@ -200,9 +211,11 @@ export function computeMatches(data: any): MatchRow[] {
       src_season: pf.season,
       src_episode: pf.episode,
       bgm_entry: matchedBgmName || (searchEntry?.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
+      bgm_entry_id: matchedBgmId,
       bgm_sort: bgmEp?.sort ?? null,
       bgm_ep_name: bgmEp?.name || '-',
       bgm_ep_name_cn: bgmEp?.name_cn || '',
+      bgm_ep_id: bgmEp?.id ?? null,
       tmdb_season: tmdbMatch?.season ?? null,
       tmdb_ep: tmdbMatch?.epNum ?? null,
       tmdb_ep_name: tmdbMatch?.name || '-',
@@ -212,7 +225,110 @@ export function computeMatches(data: any): MatchRow[] {
 }
 
 export default function MatchTable({ data }: { data: any }) {
-  const rows = computeMatches(data);
+  const searchResults: Record<string, SearchEntry> = data.search_results || {};
+  const episodeData = data.episode_data || { tmdb: {}, bangumi: {} };
+
+  // ── Build BGM entry dropdown options ──
+  // Combine entries from search_results (primary matches) and
+  // episode_data.bangumi (auto-fetched sequels / 番外篇), deduped by ID.
+  const bgmEntryOptions = useMemo(() => {
+    const options: { id: number; name: string }[] = [];
+    const seen = new Set<number>();
+
+    // From search_results (primary per-show-name matches)
+    for (const entry of Object.values(searchResults)) {
+      if (entry.bangumi?.id && !seen.has(entry.bangumi.id)) {
+        seen.add(entry.bangumi.id);
+        options.push({
+          id: entry.bangumi.id,
+          name: entry.bangumi.name_cn || entry.bangumi.name || `ID ${entry.bangumi.id}`,
+        });
+      }
+    }
+
+    // From episode_data.bangumi (includes sequels, 番外篇, etc.)
+    const bgmData: Record<string, BgmEntry> = episodeData.bangumi || {};
+    for (const [idStr, entry] of Object.entries(bgmData)) {
+      const id = Number(idStr);
+      if (!seen.has(id)) {
+        seen.add(id);
+        options.push({ id, name: entry.name || `ID ${id}` });
+      }
+    }
+
+    return options.sort((a, b) => a.name.localeCompare(b.name));
+  }, [searchResults, episodeData]);
+
+  // ── Initial auto-computed rows ──
+  const initialRows = useMemo(() => computeMatches(data), [data]);
+
+  // ── Per-row overrides: rowIndex → { bgmEntryId, bgmEpSort } ──
+  const [overrides, setOverrides] = useState<
+    Record<number, { bgmEntryId: number; bgmEpSort: number }>
+  >({});
+
+  // ── Get episodes for a specific BGM entry ──
+  const getBgmEpisodes = (entryId: number): BgmEpisode[] => {
+    const bgmData: Record<string, BgmEntry> = episodeData.bangumi || {};
+    return bgmData[String(entryId)]?.episodes || [];
+  };
+
+  // ── Handle BGM Entry dropdown change → reset episode to first ──
+  const handleBgmEntryChange = (rowIndex: number, entryIdStr: string) => {
+    const entryId = Number(entryIdStr);
+    const eps = getBgmEpisodes(entryId);
+    const firstSort = eps[0]?.sort ?? 0;
+    setOverrides((prev) => ({
+      ...prev,
+      [rowIndex]: { bgmEntryId: entryId, bgmEpSort: firstSort },
+    }));
+  };
+
+  // ── Handle BGM Name (episode) dropdown change ──
+  const handleBgmEpChange = (rowIndex: number, entryId: number, epSortStr: string) => {
+    setOverrides((prev) => ({
+      ...prev,
+      [rowIndex]: { bgmEntryId: entryId, bgmEpSort: Number(epSortStr) },
+    }));
+  };
+
+  // ── Effective rows (apply overrides + re-compute TMDB match) ──
+  const rows = useMemo(() => {
+    return initialRows.map((r, i) => {
+      const ov = overrides[i];
+      if (!ov) return r;
+
+      // Look up the overridden BGM entry / episode
+      const ovEntry = bgmEntryOptions.find((e) => e.id === ov.bgmEntryId);
+      const eps = getBgmEpisodes(ov.bgmEntryId);
+      const ovEp = eps.find((e) => e.sort === ov.bgmEpSort);
+      if (!ovEp) return r;
+
+      // Re-compute TMDB match against the overridden BGM episode name
+      const tmdbId = searchResults[r.show_name]?.tmdb?.id;
+      const tmdbSeasons: Record<string, TmdbSeason> =
+        (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+      const tmdbMatch = fuzzyMatchTmdb(
+        ovEp.name,
+        ovEp.name_cn || "",
+        tmdbSeasons,
+      );
+
+      return {
+        ...r,
+        bgm_entry: ovEntry?.name || `ID ${ov.bgmEntryId}`,
+        bgm_entry_id: ov.bgmEntryId,
+        bgm_sort: ovEp.sort,
+        bgm_ep_name: ovEp.name,
+        bgm_ep_name_cn: ovEp.name_cn || '',
+        bgm_ep_id: ovEp.id,
+        tmdb_season: tmdbMatch?.season ?? null,
+        tmdb_ep: tmdbMatch?.epNum ?? null,
+        tmdb_ep_name: tmdbMatch?.name || '-',
+        matched: tmdbMatch !== null,
+      };
+    });
+  }, [initialRows, overrides, bgmEntryOptions, searchResults, episodeData]);
 
   return (
     <div className="max-w-full mx-auto mt-4 glass-card rounded-xl p-4 overflow-auto max-h-[70vh]">
@@ -232,34 +348,79 @@ export default function MatchTable({ data }: { data: any }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((r, i) => (
-            <tr
-              key={i}
-              className={`border-b border-border/50 ${
-                r.matched ? '' : 'bg-amber-500/5'
-              }`}
-            >
-              <td className="p-1.5 font-mono whitespace-nowrap">{r.file_name}</td>
-              <td className="p-1.5 whitespace-nowrap text-muted-foreground">{r.show_name}</td>
-              <td className="p-1.5 text-center">{r.src_season}</td>
-              <td className="p-1.5 text-center">{r.src_episode}</td>
-              <td className="p-1.5 whitespace-nowrap text-muted-foreground max-w-[140px] truncate">{r.bgm_entry}</td>
-              <td className="p-1.5 text-center">{r.bgm_sort ?? '-'}</td>
-              <td className="p-1.5 max-w-[200px] truncate" title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}>
-                {r.bgm_ep_name}
-                {r.bgm_ep_name_cn && <span className="text-muted-foreground ml-1">{r.bgm_ep_name_cn}</span>}
-              </td>
-              <td className={`p-1.5 text-center ${r.matched ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-                {r.tmdb_season ?? '-'}
-              </td>
-              <td className={`p-1.5 text-center ${r.matched ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-                {r.tmdb_ep ?? '-'}
-              </td>
-              <td className={`p-1.5 max-w-[200px] truncate ${r.matched ? '' : 'text-muted-foreground'}`}>
-                {r.tmdb_ep_name}
-              </td>
-            </tr>
-          ))}
+          {rows.map((r, i) => {
+            // Episodes for the currently selected BGM entry (drives BGM Name dropdown)
+            const currentEps = r.bgm_entry_id
+              ? getBgmEpisodes(r.bgm_entry_id)
+              : [];
+            const currentEntryId = r.bgm_entry_id ?? 0;
+
+            return (
+              <tr
+                key={i}
+                className={`border-b border-border/50 ${
+                  r.matched ? '' : 'bg-amber-500/5'
+                }`}
+              >
+                <td className="p-1.5 font-mono whitespace-nowrap">{r.file_name}</td>
+                <td className="p-1.5 whitespace-nowrap text-muted-foreground">{r.show_name}</td>
+                <td className="p-1.5 text-center">{r.src_season}</td>
+                <td className="p-1.5 text-center">{r.src_episode}</td>
+                {/* ── BGM Entry dropdown ── */}
+                <td className="p-1.5 max-w-[160px]">
+                  <select
+                    className="bg-transparent text-xs w-full truncate border border-border/50 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                    value={currentEntryId || ''}
+                    onChange={(e) => handleBgmEntryChange(i, e.target.value)}
+                  >
+                    {!currentEntryId && (
+                      <option value="" disabled>
+                        -
+                      </option>
+                    )}
+                    {bgmEntryOptions.map((opt) => (
+                      <option key={opt.id} value={opt.id}>
+                        {opt.name}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="p-1.5 text-center">{r.bgm_sort ?? '-'}</td>
+                {/* ── BGM Name dropdown ── */}
+                <td className="p-1.5 max-w-[220px]">
+                  <select
+                    className="bg-transparent text-xs w-full truncate border border-border/50 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring cursor-pointer"
+                    value={r.bgm_sort ?? ''}
+                    onChange={(e) =>
+                      handleBgmEpChange(i, currentEntryId, e.target.value)
+                    }
+                    title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
+                  >
+                    {currentEps.length === 0 && (
+                      <option value="" disabled>
+                        {r.bgm_ep_name || '-'}
+                      </option>
+                    )}
+                    {currentEps.map((ep) => (
+                      <option key={ep.sort} value={ep.sort}>
+                        E{ep.sort} {ep.name}
+                        {ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className={`p-1.5 text-center ${r.matched ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+                  {r.tmdb_season ?? '-'}
+                </td>
+                <td className={`p-1.5 text-center ${r.matched ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+                  {r.tmdb_ep ?? '-'}
+                </td>
+                <td className={`p-1.5 max-w-[200px] truncate ${r.matched ? '' : 'text-muted-foreground'}`}>
+                  {r.tmdb_ep_name}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
