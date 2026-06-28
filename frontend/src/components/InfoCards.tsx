@@ -164,7 +164,7 @@ export default function InfoCards({ searchResult, onEpisodeDataChange }: Props) 
   };
 
   return (
-    <div className="max-w-full mx-auto mt-4 flex gap-4">
+    <div className="max-w-full mx-auto mt-4 flex gap-4 relative z-20">
       {/* ── TMDB Info Card ── */}
       <div className="flex-1 glass-card rounded-xl p-4">
         <div className="text-xs font-semibold text-primary mb-2">TMDB</div>
@@ -197,7 +197,7 @@ export default function InfoCards({ searchResult, onEpisodeDataChange }: Props) 
       </div>
 
       {/* ── Bangumi Info Card (with autocomplete) ── */}
-      <div className="flex-1 glass-card rounded-xl p-4">
+      <div className="flex-1 glass-card rounded-xl p-4 overflow-visible">
         <div className="text-xs font-semibold text-primary mb-2">Bangumi</div>
         <ul className="text-xs text-muted-foreground mb-3 space-y-0.5">
           {bangumiEntries.size === 0 && <li className="italic">No match</li>}
@@ -234,7 +234,7 @@ export default function InfoCards({ searchResult, onEpisodeDataChange }: Props) 
 
           {/* Autocomplete dropdown */}
           {showDropdown && candidates.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-10 max-h-60 overflow-y-auto">
+            <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
               {candidates.map((c, idx) => (
                 <div
                   key={c.bangumi_id}
