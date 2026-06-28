@@ -592,6 +592,50 @@ async def torrent_parse_and_search(file: UploadFile = File(...)):
     return result
 
 
+# ── /api/torrent/bangumi/{id}/episodes ──
+
+@app.get("/api/torrent/bangumi/{bangumi_id}/episodes")
+async def torrent_bangumi_episodes(bangumi_id: int):
+    """Fetch episode data for a Bangumi subject (main + SP).
+
+    Used by the frontend to add extra Bangumi entries to the match table.
+    """
+    try:
+        eps_main = await bgm_client.get_episodes(bangumi_id, ep_type=0)
+    except Exception:
+        eps_main = []
+    try:
+        eps_sp = await bgm_client.get_episodes(bangumi_id, ep_type=1)
+    except Exception:
+        eps_sp = []
+
+    try:
+        subject = await bgm_client.get_subject(bangumi_id)
+        name = subject.get("name_cn") or subject.get("name", str(bangumi_id))
+    except Exception:
+        name = str(bangumi_id)
+
+    all_eps = (eps_main or []) + (eps_sp or [])
+    clean_eps = []
+    for ep in all_eps:
+        entry = {
+            "sort": ep.get("sort") or ep.get("ep", 0),
+            "id": ep["id"],
+            "name": ep.get("name", ""),
+        }
+        cn = ep.get("name_cn")
+        if cn and cn != entry["name"]:
+            entry["name_cn"] = cn
+        clean_eps.append(entry)
+    clean_eps.sort(key=lambda x: x["sort"])
+
+    return {
+        "id": bangumi_id,
+        "name": name,
+        "episodes": clean_eps,
+    }
+
+
 # ── /scan ──
 
 @app.post("/scan")

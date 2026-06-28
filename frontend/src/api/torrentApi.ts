@@ -82,6 +82,20 @@ export async function parseAndSearchTorrent(file: File): Promise<any> {
   return res.json();
 }
 
+// ── Episode data lookup by ID ──
+
+export async function fetchTmdbSeasonMap(tmdbId: number): Promise<Record<string, { name: string; episodes: { epNum: number; tmdbId: number; name: string }[] }>> {
+  const res = await fetch(`/api/rss/tmdb/${tmdbId}/seasons`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function fetchBangumiEpisodes(bangumiId: number): Promise<{ id: number; name: string; episodes: { sort: number; id: number; name: string; name_cn?: string }[] }> {
+  const res = await fetch(`${API_BASE}/torrent/bangumi/${bangumiId}/episodes`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function updateConfig(changes: Partial<AppConfig>): Promise<AppConfig> {
   const res = await fetch('/config', {
     method: 'PUT',
