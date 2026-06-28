@@ -38,6 +38,15 @@ SKIP_DIR_PATTERNS: set[str] = {
     "extra", "extras", "bonus", "ost",
 }
 
+# anitopy anime_type values that indicate a non-episodic video file
+# (creditless OP/ED, regular OP/ED, previews).  These files should be
+# skipped even if anitopy assigns an episode_number to them (e.g. "ED1").
+_NON_EPISODIC_TYPES: set[str] = {
+    "ED", "ENDING", "NCED",          # ending / creditless ending
+    "NCOP", "OP", "OPENING",         # opening / creditless opening
+    "PREVIEW", "PV",                 # preview / promotional video
+}
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Step 1: Bencode extraction (delegated to torrent_file_reader)
@@ -96,6 +105,7 @@ def _parse_file(file_entry: dict) -> dict:
       1. Skip by extension  (.ass, .ssa, …)
       2. Skip by directory  (CDs/, Scans/, SPs/, Extra/, …)
       3. anitopy.parse() on the bare filename
+      4. Skip by non-episodic type  (NCED, OP, PV, …)
 
     Args:
         file_entry: A dict with ``"name"`` key (torrent-internal path).
@@ -143,6 +153,21 @@ def _parse_file(file_entry: dict) -> dict:
     if not anime_title:
         result["skip_reason"] = "no_title"
         return result
+
+    # ── 4. Non-episodic video type check (NCED, OP, PV, etc.) ──
+    # anitopy returns anime_type as a string (single) or list (multiple).
+    # Files like "ED1.mkv" would otherwise pass through with a spurious
+    # episode_number matching.
+    at_raw = info.get("anime_type")
+    if at_raw:
+        types = (
+            [str(t).upper() for t in at_raw]
+            if isinstance(at_raw, list)
+            else [str(at_raw).upper()]
+        )
+        if any(t in _NON_EPISODIC_TYPES for t in types):
+            result["skip_reason"] = "skip_non_episodic"
+            return result
 
     # ── Success ──
     season_raw = info.get("anime_season")
