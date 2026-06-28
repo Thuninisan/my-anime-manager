@@ -78,6 +78,24 @@ def get_tmdb_season(bangumi_id: int) -> int | None:
     return entry.get("tmdb_season") if entry else None
 
 
+def get_bangumi_id_by_tmdb_id(tmdb_id: int) -> int | None:
+    """Reverse lookup: TMDB ID → Bangumi ID.
+
+    Args:
+        tmdb_id: TMDB series ID.
+
+    Returns:
+        Bangumi ID, or None if not found.
+    """
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    for bgm_id_str, entry in _bangumi_mikan_map.items():
+        if entry.get("tmdb_id") == tmdb_id:
+            return int(bgm_id_str)
+    return None
+
+
 def search_by_name(query: str) -> list[dict]:
     """Search bangumi_mikan_map by name. Returns up to 20 short matches."""
     global _bangumi_mikan_map
