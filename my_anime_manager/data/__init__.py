@@ -38,7 +38,7 @@ def get_mikan_id(bangumi_id: int) -> int | None:
     if _bangumi_mikan_map is None:
         _bangumi_mikan_map = _load()
     entry = _bangumi_mikan_map.get(bangumi_id)
-    return entry["mikan_id"] if entry else None
+    return entry.get("mikan_id") if entry else None
 
 
 def get_bangumi_name(bangumi_id: int) -> str | None:
@@ -47,6 +47,15 @@ def get_bangumi_name(bangumi_id: int) -> str | None:
         _bangumi_mikan_map = _load()
     entry = _bangumi_mikan_map.get(bangumi_id)
     return entry["name"] if entry else None
+
+
+def get_bangumi_name_original(bangumi_id: int) -> str | None:
+    """Get original (Japanese) title from the mapping."""
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    entry = _bangumi_mikan_map.get(bangumi_id)
+    return entry.get("name_original") if entry else None
 
 
 def get_tmdb_id(bangumi_id: int) -> int | None:
