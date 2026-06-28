@@ -22,6 +22,7 @@ from ..clients import tmdb as tmdb_client
 from ..clients import bangumi as bgm_client
 from . import tmdb as tmdb_service
 from . import bangumi as bangumi_service
+from .. import data as data_store
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -320,6 +321,12 @@ async def _search_bangumi_for_name(show_name: str) -> dict:
     """
     cleaned_name, _ = _extract_year(show_name)
     results = await bangumi_service.search_bangumi(cleaned_name)
+
+    # ── Filter: keep only results whose Bangumi ID exists in map.json ──
+    before = len(results)
+    results = [r for r in results if data_store.get_bangumi_name(r["id"]) is not None]
+    if len(results) < before:
+        print(f"   🔍 Bangumi 过滤: {before} → {len(results)} (仅保留 map.json 中存在的 ID)")
 
     # ── Alias matching for non-Season show names ──
     # When "Season" is NOT in the show name, the first search result
