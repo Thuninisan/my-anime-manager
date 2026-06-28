@@ -160,14 +160,15 @@ async def get_episode_total(subject_id: int) -> int:
             return 0
 
 
-async def get_episodes(subject_id: int) -> list[dict]:
-    """Get all main-story episodes for a subject (paginated).
+async def get_episodes(subject_id: int, ep_type: int = 0) -> list[dict]:
+    """Get episodes for a subject (paginated).
 
     Args:
-        subject_id: Bangumi subject ID
+        subject_id: Bangumi subject ID.
+        ep_type: Episode type — 0 = main story, 1 = SP, 2 = OP, 3 = ED.
 
     Returns:
-        Sorted list of episode dicts
+        Sorted list of episode dicts.
     """
     await _delay()
     all_eps = []
@@ -181,7 +182,7 @@ async def get_episodes(subject_id: int) -> list[dict]:
                 "/v0/episodes",
                 params={
                     "subject_id": subject_id,
-                    "type": 0,  # main story only
+                    "type": ep_type,
                     "limit": limit,
                     "offset": offset,
                 },

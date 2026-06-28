@@ -652,9 +652,19 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
             except Exception:
                 name = str(bid)
 
-            # Get episodes
+            # Get episodes (main story + SP)
             try:
-                eps = await bgm_client.get_episodes(bid)
+                eps_main, eps_sp = await asyncio.gather(
+                    bgm_client.get_episodes(bid, ep_type=0),
+                    bgm_client.get_episodes(bid, ep_type=1),
+                    return_exceptions=True,
+                )
+                if isinstance(eps_main, BaseException):
+                    print(f"   ⚠️ Bangumi {bid} 正片剧集获取失败: {eps_main}")
+                    eps_main = []
+                if isinstance(eps_sp, BaseException):
+                    eps_sp = []
+                eps = (eps_main or []) + (eps_sp or [])
             except Exception as exc:
                 print(f"   ⚠️ Bangumi {bid} 剧集获取失败: {exc}")
                 eps = []
