@@ -234,7 +234,7 @@ def _deduplicate_show_names(parsed_files: list[dict]) -> list[str]:
 # Step 4: Parallel TMDB + Bangumi search
 # ═══════════════════════════════════════════════════════════════════════
 
-async def _search_tmdb_for_name(show_name: str) -> dict:
+async def _search_tmdb_for_name(show_name: str, search_as_movie: bool = False) -> dict:
     """Search TMDB for a single show name — return first + rest.
 
     Calls the TMDB client directly to get raw, unfiltered results.
@@ -243,12 +243,16 @@ async def _search_tmdb_for_name(show_name: str) -> dict:
 
     Args:
         show_name: Raw show name (year extracted internally).
+        search_as_movie: If True, use /search/movie instead of /search/tv.
 
     Returns:
-        dict with searchby, first (dict|None), rest (list[dict]).
+        dict with searchby, first (dict|None), rest (list[dict]), media_type.
     """
     cleaned_name, year = _extract_year(show_name)
-    res = await tmdb_client.search_tv(cleaned_name)
+    if search_as_movie:
+        res = await tmdb_client.search_movie(cleaned_name)
+    else:
+        res = await tmdb_client.search_tv(cleaned_name)
     raw_results = res.json().get("results", [])
     first = raw_results[0] if raw_results else None
     # Pick only id + name for first entry
@@ -265,6 +269,7 @@ async def _search_tmdb_for_name(show_name: str) -> dict:
         "searchby": cleaned_name,
         "first": first_clean,
         "rest": rest,
+        "media_type": "movie" if search_as_movie else "tv",
     }
 
 
@@ -426,19 +431,31 @@ async def _search_bangumi_for_name(
     }
 
 
-async def _parallel_search(show_names: list[str]) -> list[dict]:
+async def _parallel_search(show_names: list[str], parsed_files: list[dict] | None = None) -> list[dict]:
     """Search TMDB + Bangumi for every show name concurrently.
 
     Within each show name, TMDB and Bangumi run in parallel.
     Across show names, Bangumi calls are serialised via a semaphore
     to respect the Bangumi client's built-in rate limiting.
 
+    When a show name has ≤ 2 parsed files, TMDB uses /search/movie
+    instead of /search/tv (movies typically have 1–2 files while TV
+    series have many more).
+
     Args:
         show_names: Unique show names (frequency-ordered).
+        parsed_files: Parsed file dicts (for per-show file counts).
 
     Returns:
         List of per-name search dicts, one per show name in order.
     """
+    # Count files per show name to decide TV vs movie search
+    file_counts: dict[str, int] = {}
+    if parsed_files:
+        for pf in parsed_files:
+            sn = pf.get("show_name", "")
+            file_counts[sn] = file_counts.get(sn, 0) + 1
+
     # Semaphore ensures only one Bangumi request is in-flight at a time.
     # Bangumi's internal _delay() sleeps before each HTTP call; without the
     # semaphore all concurrent calls would sleep in parallel then fire
@@ -447,8 +464,10 @@ async def _parallel_search(show_names: list[str]) -> list[dict]:
 
     async def _search_pair(name: str) -> dict:
         """TMDB-first, then Bangumi (passing tmdb_id + tmdb_name for fallback)."""
-        # Step 1: TMDB search
-        tmdb_result = await _search_tmdb_for_name(name)
+        # Step 1: TMDB search (movie if ≤ 2 files, otherwise TV)
+        count = file_counts.get(name, 0)
+        search_as_movie = count <= 2
+        tmdb_result = await _search_tmdb_for_name(name, search_as_movie=search_as_movie)
 
         # Step 2: Bangumi search with tmdb_id + tmdb_name for fallback chain
         async def _do_bangumi():
@@ -485,7 +504,7 @@ async def _parallel_search(show_names: list[str]) -> list[dict]:
             cleaned, _ = _extract_year(name)
             pairs.append({
                 "show_name": name,
-                "tmdb": {"searchby": cleaned, "first": None, "rest": []},
+                "tmdb": {"searchby": cleaned, "first": None, "rest": [], "media_type": "tv"},
                 "bangumi": {"searchby": cleaned, "first": None, "rest": []},
             })
         else:
@@ -527,6 +546,7 @@ def _organize(pairs: list[dict]) -> dict:
         search_results[key] = {
             "tmdb": tmdb_src["first"],
             "bangumi": bgm_src["first"],
+            "media_type": tmdb_src.get("media_type", "tv"),
         }
 
         # Collect rest, dedup by id
@@ -594,6 +614,8 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
 
     # ── Collect unique IDs from search_results only ──
     tmdb_ids: set[int] = set()
+    # Track media_type per TMDB ID so we know which ones are movies
+    tmdb_media_types: dict[int, str] = {}
     bangumi_ids: set[int] = set()
     # Track which bangumi IDs need sequel expansion: bangumi_id → set of show_names
     sequel_map: dict[int, list[str]] = {}
@@ -603,6 +625,8 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
         b = entry.get("bangumi")
         if t and t.get("id"):
             tmdb_ids.add(t["id"])
+            mt = entry.get("media_type", "tv")
+            tmdb_media_types[t["id"]] = mt
         if b and b.get("id"):
             bid = b["id"]
             bangumi_ids.add(bid)
@@ -611,30 +635,49 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
             if eps > 0 and fc > eps:
                 sequel_map.setdefault(bid, []).append(key)
 
-    # ── Fetch TMDB season maps ──
+    # ── Fetch TMDB season maps (TV) or movie pseudo-seasons ──
     tmdb_data: dict = {}
     for tid in sorted(tmdb_ids):
         try:
-            season_map = await tmdb_service.build_season_episode_map(tid)
-            # TMDB now uses language=ja as the base, so episode names are
-            # already Japanese originals — no second fetch needed.
-            # Trim to the fields needed for the API response.
-            output_seasons: dict = {}
-            for s_num, s_data in season_map.items():
-                clean_eps = []
-                for ep in s_data["episodes"]:
-                    clean_eps.append({
-                        "epNum": ep["epNum"],
-                        "tmdbId": ep["tmdbId"],
-                        "name": ep["name"],
-                    })
-                output_seasons[str(s_num)] = {
-                    "name": s_data["name"],
-                    "episodes": clean_eps,
+            mt = tmdb_media_types.get(tid, "tv")
+            if mt == "movie":
+                # Build a fake single-season structure so the frontend
+                # can treat movies like a 1-episode "season".
+                movie_res = await tmdb_client.get_movie_detail(tid)
+                movie = movie_res.json()
+                output_seasons = {
+                    "1": {
+                        "name": movie.get("title", ""),
+                        "episodes": [{
+                            "epNum": 1,
+                            "tmdbId": tid,
+                            "name": movie.get("title", ""),
+                        }],
+                    }
                 }
-            tmdb_data[str(tid)] = output_seasons
-            total_eps = sum(len(v["episodes"]) for v in season_map.values())
-            print(f"   TMDB {tid}: {len(season_map)} 季, {total_eps} 集")
+                tmdb_data[str(tid)] = output_seasons
+                print(f"   TMDB movie {tid}: {movie.get('title', '?')}")
+            else:
+                season_map = await tmdb_service.build_season_episode_map(tid)
+                # TMDB now uses language=ja as the base, so episode names are
+                # already Japanese originals — no second fetch needed.
+                # Trim to the fields needed for the API response.
+                output_seasons: dict = {}
+                for s_num, s_data in season_map.items():
+                    clean_eps = []
+                    for ep in s_data["episodes"]:
+                        clean_eps.append({
+                            "epNum": ep["epNum"],
+                            "tmdbId": ep["tmdbId"],
+                            "name": ep["name"],
+                        })
+                    output_seasons[str(s_num)] = {
+                        "name": s_data["name"],
+                        "episodes": clean_eps,
+                    }
+                tmdb_data[str(tid)] = output_seasons
+                total_eps = sum(len(v["episodes"]) for v in season_map.values())
+                print(f"   TMDB {tid}: {len(season_map)} 季, {total_eps} 集")
         except Exception as exc:
             print(f"   ⚠️ TMDB {tid} 剧集获取失败: {exc}")
             tmdb_data[str(tid)] = {}
@@ -833,13 +876,13 @@ async def parse_and_search(torrent_path: str) -> dict:
 
     # ── Step 4: Parallel TMDB + Bangumi search ──
     print("🔍 并行搜索 TMDB + Bangumi...")
-    pairs: list[dict] = await _parallel_search(show_names)
+    pairs: list[dict] = await _parallel_search(show_names, parsed_files=parsed_files)
 
     # Log summary
     for p in pairs:
         t = p["tmdb"]
         b = p["bangumi"]
-        t_status = f"TMDB id={t['first']['id']}" if t["first"] else "TMDB 无结果"
+        t_status = f"TMDB {'movie' if t.get('media_type') == 'movie' else ''} id={t['first']['id']}" if t["first"] else "TMDB 无结果"
         b_status = f"Bangumi id={b['first']['id']}" if b["first"] else "Bangumi 无结果"
         t_rest = f" +{len(t['rest'])} backup" if t["rest"] else ""
         b_rest = f" +{len(b['rest'])} backup" if b["rest"] else ""
@@ -855,7 +898,8 @@ async def parse_and_search(torrent_path: str) -> dict:
     for key, entry in search_results.items():
         t = entry["tmdb"]
         b = entry["bangumi"]
-        t_info = f"TMDB id={t['id']} ({t['name']})" if t else "TMDB 无结果"
+        t_mt = entry.get("media_type", "tv")
+        t_info = f"TMDB {'movie' if t_mt == 'movie' else ''} id={t['id']} ({t['name']})" if t else "TMDB 无结果"
         b_info = f"Bangumi id={b['id']} ({b.get('name_cn') or b['name']})" if b else "Bangumi 无结果"
         print(f"   [{key}] {t_info}")
         print(f"            {b_info}")

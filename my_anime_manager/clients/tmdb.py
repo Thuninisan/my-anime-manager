@@ -75,3 +75,17 @@ async def get_tv_images(tv_id: int, languages: str = "ja,zh,null") -> httpx.Resp
         params={"include_image_language": languages},
         label=f"TMDB images",
     )
+
+
+# ── Movie endpoints ──
+
+async def search_movie(query: str) -> httpx.Response:
+    """Search for movies."""
+    return await _tmdb_request(
+        "/search/movie", params={"query": query}, label=f"TMDB movie search"
+    )
+
+
+async def get_movie_detail(movie_id: int) -> httpx.Response:
+    """Get movie details (title, overview, release_date, runtime, etc.)."""
+    return await _tmdb_request(f"/movie/{movie_id}", label=f"TMDB movie/{movie_id}")
