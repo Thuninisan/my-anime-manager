@@ -345,9 +345,10 @@ export default function MatchTable({ data }: { data: any }) {
   // ── Initial auto-computed rows ──
   const initialRows = useMemo(() => computeMatches(data), [data]);
 
-  // ── Per-row overrides: rowIndex → { bgmEntryId, bgmEpSort } ──
+  // ── Per-row overrides: rowIndex → { bgmEntryId, bgmEpSort, tmdbSeason?, tmdbEp? } ──
+  // TMDB fields allow direct season/episode override independent of BGM matching.
   const [overrides, setOverrides] = useState<
-    Record<number, { bgmEntryId: number; bgmEpSort: number }>
+    Record<number, { bgmEntryId: number; bgmEpSort: number; tmdbSeason?: number; tmdbEp?: number }>
   >({});
 
   // ── Get episodes for a specific BGM entry ──
@@ -375,6 +376,47 @@ export default function MatchTable({ data }: { data: any }) {
     }));
   };
 
+  // ── Handle TMDB Season dropdown change → auto-select first episode ──
+  const handleTmdbSeasonChange = (rowIndex: number, showName: string, seasonStr: string) => {
+    const season = Number(seasonStr);
+    // Find the first episode of the selected TMDB season (sorted by epNum)
+    const tmdbId = searchResults[showName]?.tmdb?.id;
+    const tmdbSeasons: Record<string, TmdbSeason> =
+      (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+    const seasonData = tmdbSeasons[String(season)];
+    const sortedEps = [...(seasonData?.episodes || [])].sort((a, b) => a.epNum - b.epNum);
+    const firstEp = sortedEps[0]?.epNum;
+    setOverrides((prev) => {
+      const existing = prev[rowIndex];
+      return {
+        ...prev,
+        [rowIndex]: {
+          bgmEntryId: existing?.bgmEntryId ?? 0,
+          bgmEpSort: existing?.bgmEpSort ?? 0,
+          tmdbSeason: season,
+          tmdbEp: firstEp,  // auto-select first episode, matching BGM Entry behaviour
+        },
+      };
+    });
+  };
+
+  // ── Handle TMDB Episode dropdown change ──
+  const handleTmdbEpChange = (rowIndex: number, epStr: string) => {
+    const ep = Number(epStr);
+    setOverrides((prev) => {
+      const existing = prev[rowIndex];
+      return {
+        ...prev,
+        [rowIndex]: {
+          bgmEntryId: existing?.bgmEntryId ?? 0,
+          bgmEpSort: existing?.bgmEpSort ?? 0,
+          tmdbSeason: existing?.tmdbSeason ?? 0,
+          tmdbEp: ep,
+        },
+      };
+    });
+  };
+
   // ── Effective rows (apply overrides + re-compute TMDB match) ──
   const rows = useMemo(() => {
     return initialRows.map((r, i) => {
@@ -399,17 +441,48 @@ export default function MatchTable({ data }: { data: any }) {
         };
       }
 
-      if (!ovEp) return r;
-
-      // Re-compute TMDB match against the overridden BGM episode name
+      // ── Resolve TMDB lookup data shared by BGM→TMDB and direct overrides ──
       const tmdbId = searchResults[r.show_name]?.tmdb?.id;
       const tmdbSeasons: Record<string, TmdbSeason> =
         (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+
+      if (!ovEp) {
+        // No BGM episode matched — TMDB override may still apply independently
+        if (ov.tmdbSeason != null && ov.tmdbEp != null) {
+          const sData = tmdbSeasons[String(ov.tmdbSeason)];
+          const eData = sData?.episodes?.find(e => e.epNum === ov.tmdbEp);
+          return {
+            ...r,
+            tmdb_season: ov.tmdbSeason,
+            tmdb_ep: ov.tmdbEp,
+            tmdb_ep_name: eData?.name || '-',
+            matched: true,
+          };
+        }
+        return r;
+      }
+
+      // Re-compute TMDB match against the overridden BGM episode name
       const tmdbMatch = fuzzyMatchTmdb(
         ovEp.name,
         ovEp.name_cn || "",
         tmdbSeasons,
       );
+
+      let finalSeason = tmdbMatch?.season ?? null;
+      let finalEp = tmdbMatch?.epNum ?? null;
+      let finalEpName = tmdbMatch?.name || '-';
+      let finalMatched = tmdbMatch !== null;
+
+      // TMDB direct override takes precedence over auto-computed match
+      if (ov.tmdbSeason != null && ov.tmdbEp != null) {
+        finalSeason = ov.tmdbSeason;
+        finalEp = ov.tmdbEp;
+        finalMatched = true;
+        const sData = tmdbSeasons[String(ov.tmdbSeason)];
+        const eData = sData?.episodes?.find(e => e.epNum === ov.tmdbEp);
+        finalEpName = eData?.name || '-';
+      }
 
       return {
         ...r,
@@ -419,10 +492,10 @@ export default function MatchTable({ data }: { data: any }) {
         bgm_ep_name: ovEp.name,
         bgm_ep_name_cn: ovEp.name_cn || '',
         bgm_ep_id: ovEp.id,
-        tmdb_season: tmdbMatch?.season ?? null,
-        tmdb_ep: tmdbMatch?.epNum ?? null,
-        tmdb_ep_name: tmdbMatch?.name || '-',
-        matched: tmdbMatch !== null,
+        tmdb_season: finalSeason,
+        tmdb_ep: finalEp,
+        tmdb_ep_name: finalEpName,
+        matched: finalMatched,
       };
     });
   }, [initialRows, overrides, bgmEntryOptions, searchResults, episodeData]);
@@ -463,7 +536,6 @@ export default function MatchTable({ data }: { data: any }) {
               <thead className="bg-slate-50 dark:bg-white/5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                 <tr>
                   <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">File Name</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">Detected Show</th>
                   <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">BGM Entry</th>
                   <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">TMDB Name</th>
                   <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-right">Status</th>
@@ -476,10 +548,9 @@ export default function MatchTable({ data }: { data: any }) {
                   return (
                     <tr key={i} className="table-row-hover group">
                       <td className="px-4 py-3 font-mono text-[12px] max-w-xs truncate">{r.file_name}</td>
-                      <td className="px-4 py-3 text-slate-500">{r.show_name}</td>
                       <td className="px-4 py-3">
                         <select
-                          className="text-xs py-1 bg-transparent border-slate-200 dark:border-white/10 rounded w-full max-w-[200px] truncate"
+                          className="text-xs py-1 bg-transparent border-slate-200 dark:border-white/10 rounded w-full max-w-[100px] truncate"
                           value={currentEntryId || ''}
                           onChange={(e) => {
                             const entryId = Number(e.target.value);
@@ -561,7 +632,7 @@ export default function MatchTable({ data }: { data: any }) {
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Entry</span>
                       <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[100px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
                         value={currentEntryId || ''}
                         onChange={(e) => handleBgmEntryChange(i, e.target.value)}
                       >
@@ -594,10 +665,48 @@ export default function MatchTable({ data }: { data: any }) {
                       </select>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TS/TE</span>
-                      <span className={`text-[11px] font-bold ${r.matched ? 'text-primary' : 'text-slate-400'}`}>
-                        {r.tmdb_season ?? '-'} / {r.tmdb_ep ?? '-'}
-                      </span>
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB S</span>
+                      <select
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        value={r.tmdb_season ?? ''}
+                        onChange={(e) => handleTmdbSeasonChange(i, r.show_name, e.target.value)}
+                      >
+                        {r.tmdb_season == null && <option value="" disabled>-</option>}
+                        {(() => {
+                          const tmdbId = searchResults[r.show_name]?.tmdb?.id;
+                          const rowTmdbSeasons: Record<string, TmdbSeason> =
+                            (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+                          return Object.entries(rowTmdbSeasons).map(([skey, sdata]) => (
+                            <option key={skey} value={Number(skey)}>{sdata.name || `Season ${skey}`}</option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB Ep</span>
+                      <select
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        value={r.tmdb_ep ?? ''}
+                        onChange={(e) => handleTmdbEpChange(i, e.target.value)}
+                        title={r.tmdb_ep_name}
+                      >
+                        {(() => {
+                          const tmdbId = searchResults[r.show_name]?.tmdb?.id;
+                          const rowTmdbSeasons: Record<string, TmdbSeason> =
+                            (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+                          const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
+                          const selSeasonData = selSeasonKey ? rowTmdbSeasons[selSeasonKey] : null;
+                          const episodeOptions = (selSeasonData?.episodes || []).sort((a, b) => a.epNum - b.epNum);
+                          if (episodeOptions.length === 0) {
+                            return <option value="" disabled>{r.tmdb_ep_name || '-'}</option>;
+                          }
+                          return episodeOptions.map((ep) => (
+                            <option key={ep.epNum} value={ep.epNum}>
+                              E{ep.epNum} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                            </option>
+                          ));
+                        })()}
+                      </select>
                     </div>
                     <div className="ml-auto">
                       {r.matched ? (

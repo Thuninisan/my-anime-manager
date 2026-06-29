@@ -46,8 +46,8 @@ class KeywordManager:
                  options_unidentifiable_unsearchable,
                  ['SP'])  # e.g. "Yumeiro Patissiere SP Professional"
         self.add(ElementCategory.ANIME_TYPE, options_unidentifiable_invalid, [
-            'ED', 'ENDING', 'NCED',
-            'NCOP', 'OP', 'OPENING',
+            'CM', 'ED', 'ENDING', 'MENU',
+            'NCED', 'NCOP', 'OP', 'OPENING',
             'PREVIEW', 'PV'])
 
         self.add(ElementCategory.AUDIO_TERM, options_default, [

@@ -44,7 +44,9 @@ SKIP_DIR_PATTERNS: set[str] = {
 # (creditless OP/ED, regular OP/ED, previews).  These files should be
 # skipped even if anitopy assigns an episode_number to them (e.g. "ED1").
 _NON_EPISODIC_TYPES: set[str] = {
+    "CM",                             # commercial / 广告
     "ED", "ENDING", "NCED",          # ending / creditless ending
+    "MENU",                           # DVD/BD menu
     "NCOP", "OP", "OPENING",         # opening / creditless opening
     "PREVIEW", "PV",                 # preview / promotional video
 }
