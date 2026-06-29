@@ -342,8 +342,31 @@ export default function MatchTable({ data }: { data: any }) {
     return options.sort((a, b) => a.name.localeCompare(b.name));
   }, [searchResults, episodeData]);
 
-  // ── Initial auto-computed rows ──
-  const initialRows = useMemo(() => computeMatches(data), [data]);
+  // ── Initial auto-computed rows (regular files only) ──
+  const initialRows = useMemo(() => {
+    const regularRows = computeMatches(data);
+    const specials: any[] = data.specials || [];
+    // SP/Extra directory files have all dropdowns starting empty —
+    // the user manually selects BGM entry / episode / TMDB mapping.
+    const spRows: MatchRow[] = specials.map((s: any) => ({
+      file_name: s.file_name,
+      show_name: s.show_name,
+      src_season: s.season,
+      src_episode: s.episode,
+      bgm_entry: '-',
+      bgm_entry_id: null,
+      bgm_sort: null,
+      bgm_ep_name: '-',
+      bgm_ep_name_cn: '',
+      bgm_ep_id: null,
+      tmdb_season: null,
+      tmdb_ep: null,
+      tmdb_ep_name: '-',
+      matched: false,
+      media_type: "special" as any,
+    }));
+    return [...regularRows, ...spRows];
+  }, [data]);
 
   // ── Per-row overrides: rowIndex → { bgmEntryId, bgmEpSort, tmdbSeason?, tmdbEp? } ──
   // TMDB fields allow direct season/episode override independent of BGM matching.
@@ -506,7 +529,11 @@ export default function MatchTable({ data }: { data: any }) {
     [rows],
   );
   const tvRows = useMemo(
-    () => rows.map((r, i) => ({ ...r, _idx: i })).filter((r) => r.media_type !== "movie"),
+    () => rows.map((r, i) => ({ ...r, _idx: i })).filter((r) => r.media_type === "tv"),
+    [rows],
+  );
+  const spRows = useMemo(
+    () => rows.map((r, i) => ({ ...r, _idx: i })).filter((r) => r.media_type === "special"),
     [rows],
   );
 
@@ -713,6 +740,145 @@ export default function MatchTable({ data }: { data: any }) {
                         <span className="bg-primary/10 text-primary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Mapped</span>
                       ) : (
                         <span className="bg-secondary/10 text-secondary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Pending</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ── SP / Extras Cards ── */}
+      {spRows.length > 0 && (
+        <div className="mb-10">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500">
+                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+              </svg>
+              <h3 className="font-bold text-lg">SP / Extras</h3>
+              <span className="text-xs text-slate-400 ml-2">({spRows.length} files)</span>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {spRows.map((r) => {
+              const i = (r as any)._idx as number;
+              const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
+              const currentEntryId = r.bgm_entry_id ?? 0;
+              return (
+                <div key={i} className="bg-surface-light dark:bg-surface-dark border border-amber-500/20 dark:border-amber-500/20 rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md group">
+                  {/* Top row: file name + badges */}
+                  <div className="px-4 py-3 border-b border-slate-50 dark:border-white/5">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-3">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400 shrink-0">
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                            <polyline points="14 2 14 8 20 8" />
+                          </svg>
+                          <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{r.file_name}</h4>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 shrink-0">
+                        <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 dark:bg-amber-500/5 rounded-md">
+                          <span className="text-[10px] text-amber-500 font-bold uppercase tracking-tighter">SP</span>
+                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{r.show_name}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-white/5 rounded-md">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">S/E</span>
+                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{r.src_season} / {r.src_episode}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Bottom row: mapping controls (all default empty — user selects manually) */}
+                  <div className="px-4 py-2.5 bg-slate-50/30 dark:bg-white/[0.02] flex flex-wrap items-center gap-x-6 gap-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Entry</span>
+                      <select
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[100px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        value={currentEntryId || ''}
+                        onChange={(e) => handleBgmEntryChange(i, e.target.value)}
+                      >
+                        {!currentEntryId && <option value="" disabled>-</option>}
+                        {bgmEntryOptions.map((opt) => (
+                          <option key={opt.id} value={opt.id}>{opt.name}</option>
+                        ))}
+                      </select>
+                      <div className="flex items-center gap-1 ml-1">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">#</span>
+                        <span className="text-[11px] font-mono text-slate-500">{r.bgm_sort ?? '-'}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Name</span>
+                      <select
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        value={r.bgm_sort ?? ''}
+                        onChange={(e) => handleBgmEpChange(i, currentEntryId, e.target.value)}
+                        title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
+                      >
+                        {currentEps.length === 0 && (
+                          <option value="" disabled>{r.bgm_ep_name || '-'}</option>
+                        )}
+                        {currentEps.map((ep) => (
+                          <option key={ep.sort} value={ep.sort}>
+                            E{ep.sort} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB S</span>
+                      <select
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        value={r.tmdb_season ?? ''}
+                        onChange={(e) => handleTmdbSeasonChange(i, r.show_name, e.target.value)}
+                      >
+                        {r.tmdb_season == null && <option value="" disabled>-</option>}
+                        {(() => {
+                          const tmdbId = searchResults[r.show_name]?.tmdb?.id;
+                          const rowTmdbSeasons: Record<string, TmdbSeason> =
+                            (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+                          return Object.entries(rowTmdbSeasons).map(([skey, sdata]) => (
+                            <option key={skey} value={Number(skey)}>{sdata.name || `Season ${skey}`}</option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB Ep</span>
+                      <select
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        value={r.tmdb_ep ?? ''}
+                        onChange={(e) => handleTmdbEpChange(i, e.target.value)}
+                        title={r.tmdb_ep_name}
+                      >
+                        {(() => {
+                          const tmdbId = searchResults[r.show_name]?.tmdb?.id;
+                          const rowTmdbSeasons: Record<string, TmdbSeason> =
+                            (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+                          const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
+                          const selSeasonData = selSeasonKey ? rowTmdbSeasons[selSeasonKey] : null;
+                          const episodeOptions = (selSeasonData?.episodes || []).sort((a, b) => a.epNum - b.epNum);
+                          if (episodeOptions.length === 0) {
+                            return <option value="" disabled>{r.tmdb_ep_name || '-'}</option>;
+                          }
+                          return episodeOptions.map((ep) => (
+                            <option key={ep.epNum} value={ep.epNum}>
+                              E{ep.epNum} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                            </option>
+                          ));
+                        })()}
+                      </select>
+                    </div>
+                    <div className="ml-auto">
+                      {r.matched ? (
+                        <span className="bg-primary/10 text-primary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Mapped</span>
+                      ) : (
+                        <span className="bg-amber-500/10 text-amber-500 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Select</span>
                       )}
                     </div>
                   </div>
