@@ -160,12 +160,13 @@ async def get_episode_total(subject_id: int) -> int:
             return 0
 
 
-async def get_episodes(subject_id: int, ep_type: int = 0) -> list[dict]:
+async def get_episodes(subject_id: int, ep_type: int | None = 0) -> list[dict]:
     """Get episodes for a subject (paginated).
 
     Args:
         subject_id: Bangumi subject ID.
         ep_type: Episode type — 0 = main story, 1 = SP, 2 = OP, 3 = ED.
+                 Pass None to fetch all types in a single request.
 
     Returns:
         Sorted list of episode dicts.
@@ -177,15 +178,17 @@ async def get_episodes(subject_id: int, ep_type: int = 0) -> list[dict]:
 
     async with _get_client() as client:
         while True:
+            params: dict = {
+                "subject_id": subject_id,
+                "limit": limit,
+                "offset": offset,
+            }
+            if ep_type is not None:
+                params["type"] = ep_type
             res = await _retry(
                 client.get,
                 "/v0/episodes",
-                params={
-                    "subject_id": subject_id,
-                    "type": ep_type,
-                    "limit": limit,
-                    "offset": offset,
-                },
+                params=params,
             )
             data = res.json()
             eps = data.get("data", [])

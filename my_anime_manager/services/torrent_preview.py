@@ -742,19 +742,14 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
             except Exception:
                 name = str(bid)
 
-            # Get episodes (main story + SP)
+            # Get all episodes in one request (no type filter), then
+            # keep only main story (type=0) and SP (type=1) on our side.
             try:
-                eps_main, eps_sp = await asyncio.gather(
-                    bgm_client.get_episodes(bid, ep_type=0),
-                    bgm_client.get_episodes(bid, ep_type=1),
-                    return_exceptions=True,
-                )
-                if isinstance(eps_main, BaseException):
-                    print(f"   ⚠️ Bangumi {bid} 正片剧集获取失败: {eps_main}")
-                    eps_main = []
-                if isinstance(eps_sp, BaseException):
-                    eps_sp = []
-                eps = (eps_main or []) + (eps_sp or [])
+                raw_eps = await bgm_client.get_episodes(bid, ep_type=None)
+                eps = [
+                    e for e in raw_eps
+                    if e.get("type") in (0, 1)
+                ]
             except Exception as exc:
                 print(f"   ⚠️ Bangumi {bid} 剧集获取失败: {exc}")
                 eps = []
@@ -785,17 +780,11 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
             bangumi_data[bid_str] = data
             print(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
 
-    # ── Movie Bangumi entries: fetch name only (no episodes needed) ──
-    for bid in sorted(bangumi_movie_ids):
-        try:
-            async with bgm_sem:
-                subject = await bgm_client.get_subject(bid)
-            name = subject.get("name_cn") or subject.get("name", str(bid))
-            bangumi_data[str(bid)] = {"name": name, "episodes": []}
-            print(f"   Bangumi movie {bid} ({name}): 跳过剧集获取")
-        except Exception as exc:
-            print(f"   ⚠️ Bangumi movie {bid} 获取失败: {exc}")
-            bangumi_data[str(bid)] = {"name": str(bid), "episodes": []}
+    # ── Movie Bangumi entries: name comes from search_results, no API needed ──
+    # The frontend already receives search_results with bangumi.name/name_cn;
+    # episode_data.bangumi is only used for episode dropdowns (not needed for movies).
+    if bangumi_movie_ids:
+        print(f"   Bangumi movie IDs (名称已在搜索结果中): {sorted(bangumi_movie_ids)}")
 
     # ── Sequel expansion: if parsed file count > eps, fetch sequel episodes ──
     for primary_bid, show_keys in sequel_map.items():
