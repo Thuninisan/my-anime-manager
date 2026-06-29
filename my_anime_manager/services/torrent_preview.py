@@ -32,6 +32,7 @@ from .. import data as data_store
 SKIP_EXTENSIONS: set[str] = {
     ".ass", ".ssa", ".srt", ".idx", ".sub",   # subtitles
     ".7z", ".zip", ".rar", ".tar", ".gz",     # font archives
+    ".mka",                                     # Matroska audio (no video)
 }
 
 SKIP_DIR_PATTERNS: set[str] = {
