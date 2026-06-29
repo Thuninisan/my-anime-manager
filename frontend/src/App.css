@@ -187,3 +187,10 @@ body {
 .animate-float {
   animation: float 3s ease-in-out infinite;
 }
+
+.table-row-hover:hover {
+  background-color: rgba(240, 145, 153, 0.04);
+}
+.dark .table-row-hover:hover {
+  background-color: rgba(240, 145, 153, 0.06);
+}

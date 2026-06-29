@@ -438,166 +438,163 @@ export default function MatchTable({ data }: { data: any }) {
   );
 
   return (
-    <div className="max-w-full mx-auto mt-4 space-y-6">
+    <div className="space-y-10">
       {/* ── Movie Table ── */}
       {movieRows.length > 0 && (
-        <div className="glass-card rounded-xl p-4 overflow-auto max-h-[50vh]">
-          <h3 className="text-sm font-medium text-muted-foreground mb-2">
-            映画 ({movieRows.length} ファイル)
-          </h3>
-          <table className="w-full text-xs border-collapse">
-            <thead className="sticky top-0 bg-card z-10">
-              <tr className="border-b border-border text-muted-foreground">
-                <th className="text-left p-1.5 whitespace-nowrap">File</th>
-                <th className="text-left p-1.5 whitespace-nowrap">Show</th>
-                <th className="text-left p-1.5 whitespace-nowrap">BGM Entry</th>
-                <th className="text-left p-1.5">TMDB Name</th>
-              </tr>
-            </thead>
-            <tbody>
-              {movieRows.map((r) => {
-                const i = (r as any)._idx as number;
-                const currentEntryId = r.bgm_entry_id ?? 0;
-                return (
-                  <tr
-                    key={i}
-                    className={`border-b border-border/50 ${
-                      r.matched ? '' : 'bg-amber-500/5'
-                    }`}
-                  >
-                    <td className="p-1.5 font-mono whitespace-nowrap">{r.file_name}</td>
-                    <td className="p-1.5 whitespace-nowrap text-muted-foreground">{r.show_name}</td>
-                    <td className="p-1.5 max-w-[200px]">
-                      <select
-                        className="bg-transparent text-xs w-full truncate border border-border/50 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring cursor-pointer"
-                        value={currentEntryId || ''}
-                        onChange={(e) => {
-                          // Movie override: just update BGM entry (no episode selection)
-                          const entryId = Number(e.target.value);
-                          setOverrides((prev) => ({
-                            ...prev,
-                            [i]: { bgmEntryId: entryId, bgmEpSort: 0 },
-                          }));
-                        }}
-                      >
-                        {!currentEntryId && (
-                          <option value="" disabled>-</option>
+        <div className="mb-10">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
+                <rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18" />
+                <line x1="7" y1="2" x2="7" y2="22" />
+                <line x1="17" y1="2" x2="17" y2="22" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <line x1="2" y1="7" x2="7" y2="7" />
+                <line x1="2" y1="17" x2="7" y2="17" />
+                <line x1="17" y1="7" x2="22" y2="7" />
+                <line x1="17" y1="17" x2="22" y2="17" />
+              </svg>
+              <h3 className="font-bold text-lg">Movies</h3>
+              <span className="text-xs text-slate-400 ml-2">({movieRows.length} files)</span>
+            </div>
+          </div>
+          <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl overflow-hidden shadow-sm">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50 dark:bg-white/5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">File Name</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">Detected Show</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">BGM Entry</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">TMDB Name</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm font-medium divide-y divide-border-light dark:divide-border-dark">
+                {movieRows.map((r) => {
+                  const i = (r as any)._idx as number;
+                  const currentEntryId = r.bgm_entry_id ?? 0;
+                  return (
+                    <tr key={i} className="table-row-hover group">
+                      <td className="px-4 py-3 font-mono text-[12px] max-w-xs truncate">{r.file_name}</td>
+                      <td className="px-4 py-3 text-slate-500">{r.show_name}</td>
+                      <td className="px-4 py-3">
+                        <select
+                          className="text-xs py-1 bg-transparent border-slate-200 dark:border-white/10 rounded w-full max-w-[200px] truncate"
+                          value={currentEntryId || ''}
+                          onChange={(e) => {
+                            const entryId = Number(e.target.value);
+                            setOverrides((prev) => ({
+                              ...prev,
+                              [i]: { bgmEntryId: entryId, bgmEpSort: 0 },
+                            }));
+                          }}
+                        >
+                          {!currentEntryId && <option value="" disabled>-</option>}
+                          {bgmEntryOptions.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 max-w-[250px] truncate">{r.tmdb_ep_name}</td>
+                      <td className="px-4 py-3 text-right">
+                        {r.matched ? (
+                          <span className="bg-primary/10 text-primary text-[10px] px-2 py-1 rounded font-bold uppercase">Mapped</span>
+                        ) : (
+                          <span className="bg-amber-500/10 text-amber-500 text-[10px] px-2 py-1 rounded font-bold uppercase">Pending</span>
                         )}
-                        {bgmEntryOptions.map((opt) => (
-                          <option key={opt.id} value={opt.id}>
-                            {opt.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className={`p-1.5 max-w-[250px] truncate ${r.matched ? '' : 'text-muted-foreground'}`}>
-                      {r.tmdb_ep_name}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {/* ── TV Table ── */}
       {tvRows.length > 0 && (
-        <div className="glass-card rounded-xl p-4 overflow-auto max-h-[50vh]">
-          <h3 className="text-sm font-medium text-muted-foreground mb-2">
-            TV / シリーズ ({tvRows.length} ファイル)
-          </h3>
-          <table className="w-full text-xs border-collapse">
-            <thead className="sticky top-0 bg-card z-10">
-              <tr className="border-b border-border text-muted-foreground">
-                <th className="text-left p-1.5 whitespace-nowrap">File</th>
-                <th className="text-left p-1.5 whitespace-nowrap">Show</th>
-                <th className="text-center p-1.5 w-10">S</th>
-                <th className="text-center p-1.5 w-10">E</th>
-                <th className="text-left p-1.5 whitespace-nowrap">BGM Entry</th>
-                <th className="text-center p-1.5 w-10">BGM#</th>
-                <th className="text-left p-1.5">BGM Name</th>
-                <th className="text-center p-1.5 w-10">T S</th>
-                <th className="text-center p-1.5 w-10">T E</th>
-                <th className="text-left p-1.5">TMDB Name</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tvRows.map((r) => {
-                const i = (r as any)._idx as number;
-                const currentEps = r.bgm_entry_id
-                  ? getBgmEpisodes(r.bgm_entry_id)
-                  : [];
-                const currentEntryId = r.bgm_entry_id ?? 0;
-
-                return (
-                  <tr
-                    key={i}
-                    className={`border-b border-border/50 ${
-                      r.matched ? '' : 'bg-amber-500/5'
-                    }`}
-                  >
-                    <td className="p-1.5 font-mono whitespace-nowrap">{r.file_name}</td>
-                    <td className="p-1.5 whitespace-nowrap text-muted-foreground">{r.show_name}</td>
-                    <td className="p-1.5 text-center">{r.src_season}</td>
-                    <td className="p-1.5 text-center">{r.src_episode}</td>
-                    {/* ── BGM Entry dropdown ── */}
-                    <td className="p-1.5 max-w-[160px]">
-                      <select
-                        className="bg-transparent text-xs w-full truncate border border-border/50 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring cursor-pointer"
-                        value={currentEntryId || ''}
-                        onChange={(e) => handleBgmEntryChange(i, e.target.value)}
-                      >
-                        {!currentEntryId && (
-                          <option value="" disabled>
-                            -
-                          </option>
+        <div className="mb-10">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
+                <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
+                <polyline points="17 2 12 7 7 2" />
+              </svg>
+              <h3 className="font-bold text-lg">TV Series</h3>
+              <span className="text-xs text-slate-400 ml-2">({tvRows.length} files)</span>
+            </div>
+          </div>
+          <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl overflow-x-auto custom-scrollbar shadow-sm">
+            <table className="w-full text-left border-collapse min-w-[1000px]">
+              <thead className="bg-slate-50 dark:bg-white/5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">File Name</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">Show</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-center">S/E</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">BGM Entry</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-center">BGM#</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">BGM Name</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-center">TS/TE</th>
+                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="text-sm font-medium divide-y divide-border-light dark:divide-border-dark">
+                {tvRows.map((r) => {
+                  const i = (r as any)._idx as number;
+                  const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
+                  const currentEntryId = r.bgm_entry_id ?? 0;
+                  return (
+                    <tr key={i} className="table-row-hover group">
+                      <td className="px-4 py-3 font-mono text-[11px] max-w-xs truncate">{r.file_name}</td>
+                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.show_name}</td>
+                      <td className="px-4 py-3 text-center text-slate-400">{r.src_season} / {r.src_episode}</td>
+                      <td className="px-4 py-3">
+                        <select
+                          className="text-[10px] py-1 bg-transparent border-slate-200 dark:border-white/10 rounded w-full max-w-[160px] truncate"
+                          value={currentEntryId || ''}
+                          onChange={(e) => handleBgmEntryChange(i, e.target.value)}
+                        >
+                          {!currentEntryId && <option value="" disabled>-</option>}
+                          {bgmEntryOptions.map((opt) => (
+                            <option key={opt.id} value={opt.id}>{opt.name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-center text-slate-400">{r.bgm_sort ?? '-'}</td>
+                      <td className="px-4 py-3 max-w-[220px]">
+                        <select
+                          className="text-[10px] py-1 bg-transparent border-slate-200 dark:border-white/10 rounded w-full truncate"
+                          value={r.bgm_sort ?? ''}
+                          onChange={(e) => handleBgmEpChange(i, currentEntryId, e.target.value)}
+                          title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
+                        >
+                          {currentEps.length === 0 && (
+                            <option value="" disabled>{r.bgm_ep_name || '-'}</option>
+                          )}
+                          {currentEps.map((ep) => (
+                            <option key={ep.sort} value={ep.sort}>
+                              E{ep.sort} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className={`px-4 py-3 text-center ${r.matched ? 'text-primary' : 'text-slate-400'}`}>
+                        {r.tmdb_season ?? '-'} / {r.tmdb_ep ?? '-'}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {r.matched ? (
+                          <span className="bg-primary/10 text-primary text-[10px] px-2 py-1 rounded font-bold uppercase">Mapped</span>
+                        ) : (
+                          <span className="bg-amber-500/10 text-amber-500 text-[10px] px-2 py-1 rounded font-bold uppercase">Pending</span>
                         )}
-                        {bgmEntryOptions.map((opt) => (
-                          <option key={opt.id} value={opt.id}>
-                            {opt.name}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="p-1.5 text-center">{r.bgm_sort ?? '-'}</td>
-                    {/* ── BGM Name dropdown ── */}
-                    <td className="p-1.5 max-w-[220px]">
-                      <select
-                        className="bg-transparent text-xs w-full truncate border border-border/50 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-ring cursor-pointer"
-                        value={r.bgm_sort ?? ''}
-                        onChange={(e) =>
-                          handleBgmEpChange(i, currentEntryId, e.target.value)
-                        }
-                        title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
-                      >
-                        {currentEps.length === 0 && (
-                          <option value="" disabled>
-                            {r.bgm_ep_name || '-'}
-                          </option>
-                        )}
-                        {currentEps.map((ep) => (
-                          <option key={ep.sort} value={ep.sort}>
-                            E{ep.sort} {ep.name}
-                            {ep.name_cn ? ` / ${ep.name_cn}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className={`p-1.5 text-center ${r.matched ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-                      {r.tmdb_season ?? '-'}
-                    </td>
-                    <td className={`p-1.5 text-center ${r.matched ? 'text-emerald-400' : 'text-muted-foreground'}`}>
-                      {r.tmdb_ep ?? '-'}
-                    </td>
-                    <td className={`p-1.5 max-w-[200px] truncate ${r.matched ? '' : 'text-muted-foreground'}`}>
-                      {r.tmdb_ep_name}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

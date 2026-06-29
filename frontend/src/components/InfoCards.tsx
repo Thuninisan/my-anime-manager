@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { IconSearch } from '@/components/icons';
 import { fetchTmdbSeasonMap, fetchBangumiEpisodes } from '@/api/torrentApi';
 import { searchBangumi } from '@/api/rssApi';
 
@@ -164,94 +163,98 @@ export default function InfoCards({ searchResult, onEpisodeDataChange }: Props) 
   };
 
   return (
-    <div className="max-w-full mx-auto mt-4 flex gap-4 relative z-20">
-      {/* ── TMDB Info Card ── */}
-      <div className="flex-1 glass-card rounded-xl p-4">
-        <div className="text-xs font-semibold text-primary mb-2">TMDB</div>
-        <ul className="text-xs text-muted-foreground mb-3 space-y-0.5">
-          {tmdbEntries.size === 0 && <li className="italic">No match</li>}
-          {[...tmdbEntries].map(([id, name]) => (
-            <li key={id}>
-              <span className="text-foreground">{name}</span>
-              <span className="ml-1 opacity-60">({id})</span>
-            </li>
-          ))}
-        </ul>
-        <div className="flex gap-1.5">
-          <input
-            className="flex-1 h-7 rounded border border-border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
-            placeholder="TMDB ID"
-            value={tmdbInput}
-            onChange={(e) => { setTmdbInput(e.target.value); setTmdbError(''); }}
-            onKeyDown={(e) => e.key === 'Enter' && handleAddTmdb()}
-          />
-          <button
-            className="inline-flex items-center h-7 rounded bg-primary text-primary-foreground px-3 text-xs font-semibold hover:bg-primary/85 transition cursor-pointer disabled:opacity-50"
-            onClick={handleAddTmdb}
-            disabled={tmdbLoading}
-          >
-            {tmdbLoading ? '...' : 'Add'}
-          </button>
-        </div>
-        {tmdbError && <div className="text-xs text-destructive mt-1">{tmdbError}</div>}
+    <div className="mb-8 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl shadow-sm overflow-hidden">
+      <div className="bg-slate-50 dark:bg-white/5 px-6 py-3 border-b border-border-light dark:border-border-dark flex justify-between items-center">
+        <h3 className="font-bold text-sm">Metadata Source Overrides</h3>
+        <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold uppercase">Manual Mapping</span>
       </div>
 
-      {/* ── Bangumi Info Card (with autocomplete) ── */}
-      <div className="flex-1 glass-card rounded-xl p-4 overflow-visible">
-        <div className="text-xs font-semibold text-primary mb-2">Bangumi</div>
-        <ul className="text-xs text-muted-foreground mb-3 space-y-0.5">
-          {bangumiEntries.size === 0 && <li className="italic">No match</li>}
-          {[...bangumiEntries].map(([id, name]) => (
-            <li key={id}>
-              <span className="text-foreground">{name}</span>
-              <span className="ml-1 opacity-60">({id})</span>
-            </li>
-          ))}
-        </ul>
-        <div className="relative flex items-center gap-1.5 bg-background rounded border border-border" ref={bgmContainerRef}>
-          <span className="pl-2 text-muted-foreground shrink-0">
-            <IconSearch />
-          </span>
-          <input
-            type="text"
-            className="flex-1 h-7 bg-transparent text-xs outline-none border-0"
-            placeholder="名称或 Bangumi ID"
-            value={bgmInput}
-            onChange={(e) => handleBgmInputChange(e.target.value)}
-            onFocus={() => { if (candidates.length > 0) setShowDropdown(true); }}
-            onKeyDown={handleBgmKeyDown}
-          />
-          <button
-            className="h-7 rounded-r bg-primary text-primary-foreground px-3 text-xs font-semibold hover:bg-primary/85 transition cursor-pointer disabled:opacity-50 shrink-0"
-            onClick={() => {
-              const id = parseInt(bgmInput.trim(), 10);
-              if (id && id > 0) handleAddBangumi(id);
-            }}
-            disabled={bgmLoading}
-          >
-            {bgmLoading ? '...' : 'Add'}
-          </button>
-
-          {/* Autocomplete dropdown */}
-          {showDropdown && candidates.length > 0 && (
-            <div className="absolute top-full left-0 right-0 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
-              {candidates.map((c, idx) => (
-                <div
-                  key={c.bangumi_id}
-                  className={`px-3 py-2 cursor-pointer text-xs flex justify-between items-center ${
-                    idx === highlightIdx ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
-                  }`}
-                  onMouseEnter={() => setHighlightIdx(idx)}
-                  onClick={() => handleSelectCandidate(c)}
-                >
-                  <span className="truncate">{c.name}</span>
-                  <span className="text-[10px] text-muted-foreground ml-2 shrink-0">ID: {c.bangumi_id}</span>
-                </div>
-              ))}
-            </div>
-          )}
+      <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8 relative z-20">
+        {/* ── TMDB Match ── */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="bg-[#01b4e4] w-2 h-6 rounded-full"></span>
+            <h4 className="font-bold text-sm tracking-tight text-[#01b4e4]">TMDB Match</h4>
+          </div>
+          <div className="text-xs space-y-1 text-slate-500 dark:text-slate-400 italic">
+            {tmdbEntries.size === 0 && <p>No match</p>}
+            {[...tmdbEntries].map(([id, name]) => (
+              <p key={id}>{name} ({id})</p>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 text-sm bg-slate-50 dark:bg-white/5 border-border-light dark:border-border-dark rounded-lg py-2"
+              placeholder="Search TMDB ID..."
+              value={tmdbInput}
+              onChange={(e) => { setTmdbInput(e.target.value); setTmdbError(''); }}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddTmdb()}
+            />
+            <button
+              className="px-4 bg-primary text-white text-sm font-bold rounded-lg hover:brightness-105 transition-all cursor-pointer disabled:opacity-50"
+              onClick={handleAddTmdb}
+              disabled={tmdbLoading}
+            >
+              {tmdbLoading ? '...' : 'Add'}
+            </button>
+          </div>
+          {tmdbError && <div className="text-xs text-destructive mt-1">{tmdbError}</div>}
         </div>
-        {bgmError && <div className="text-xs text-destructive mt-1">{bgmError}</div>}
+
+        {/* ── Bangumi Match ── */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="bg-primary w-2 h-6 rounded-full"></span>
+            <h4 className="font-bold text-sm tracking-tight text-primary">Bangumi Match</h4>
+          </div>
+          <div className="text-xs space-y-1 text-slate-500 dark:text-slate-400 italic">
+            {bangumiEntries.size === 0 && <p>No match</p>}
+            {[...bangumiEntries].map(([id, name]) => (
+              <p key={id}>{name} ({id})</p>
+            ))}
+          </div>
+          <div className="relative flex gap-2" ref={bgmContainerRef}>
+            <input
+              type="text"
+              className="flex-1 text-sm bg-slate-50 dark:bg-white/5 border-border-light dark:border-border-dark rounded-lg py-2 outline-none"
+              placeholder="Search Name or Bangumi ID..."
+              value={bgmInput}
+              onChange={(e) => handleBgmInputChange(e.target.value)}
+              onFocus={() => { if (candidates.length > 0) setShowDropdown(true); }}
+              onKeyDown={handleBgmKeyDown}
+            />
+            <button
+              className="px-4 bg-primary text-white text-sm font-bold rounded-lg hover:brightness-105 transition-all cursor-pointer disabled:opacity-50"
+              onClick={() => {
+                const id = parseInt(bgmInput.trim(), 10);
+                if (id && id > 0) handleAddBangumi(id);
+              }}
+              disabled={bgmLoading}
+            >
+              {bgmLoading ? '...' : 'Add'}
+            </button>
+
+            {/* Autocomplete dropdown */}
+            {showDropdown && candidates.length > 0 && (
+              <div className="absolute top-full left-0 right-16 mt-1 bg-card border border-border rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                {candidates.map((c, idx) => (
+                  <div
+                    key={c.bangumi_id}
+                    className={`px-3 py-2 cursor-pointer text-xs flex justify-between items-center ${
+                      idx === highlightIdx ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
+                    }`}
+                    onMouseEnter={() => setHighlightIdx(idx)}
+                    onClick={() => handleSelectCandidate(c)}
+                  >
+                    <span className="truncate">{c.name}</span>
+                    <span className="text-[10px] text-muted-foreground ml-2 shrink-0">ID: {c.bangumi_id}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {bgmError && <div className="text-xs text-destructive mt-1">{bgmError}</div>}
+        </div>
       </div>
     </div>
   );

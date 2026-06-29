@@ -3,8 +3,7 @@ import { usePreviewFlow } from '@/hooks/usePreviewFlow';
 import TorrentUpload from '@/components/TorrentUpload';
 import PreviewDashboard from '@/components/PreviewDashboard';
 import ProcessingResult from '@/components/ProcessingResult';
-import MatchTable from '@/components/MatchTable';
-import InfoCards from '@/components/InfoCards';
+import TorrentPreview from '@/components/TorrentPreview';
 import { parseAndSearchTorrent } from '@/api/torrentApi';
 
 export default function TorrentPage() {
@@ -21,11 +20,6 @@ export default function TorrentPage() {
   const isPreviewState = state === 'preview' && previewData;
   const [searchResult, setSearchResult] = useState<any>(null);
   const [augmentedEpData, setAugmentedEpData] = useState<any>(null);
-
-  // Merge original episode_data with user-added entries
-  const mergedResult = augmentedEpData && searchResult
-    ? { ...searchResult, episode_data: augmentedEpData }
-    : searchResult;
 
   return (
     <>
@@ -61,26 +55,14 @@ export default function TorrentPage() {
               </button>
             </div>
           )}
-          {/* match table */}
+          {/* match table / preview */}
           {searchResult && !searchResult.error && searchResult.parsed_files && (
-            <div>
-              <div className="flex items-center justify-between max-w-full mx-auto mt-4 px-2">
-                <span className="text-sm font-semibold text-primary">
-                  Matches ({searchResult.parsed_files.length} episodes, {searchResult.skipped_files?.length || 0} skipped)
-                </span>
-                <button
-                  className="text-muted-foreground hover:text-foreground text-lg leading-none cursor-pointer"
-                  onClick={() => { setSearchResult(null); setAugmentedEpData(null); }}
-                >
-                  ×
-                </button>
-              </div>
-              <InfoCards
-                searchResult={searchResult}
-                onEpisodeDataChange={setAugmentedEpData}
-              />
-              <MatchTable data={mergedResult} />
-            </div>
+            <TorrentPreview
+              searchResult={searchResult}
+              augmentedEpData={augmentedEpData}
+              onEpisodeDataChange={setAugmentedEpData}
+              onClose={() => { setSearchResult(null); setAugmentedEpData(null); }}
+            />
           )}
           {searchResult?.error && (
             <div className="max-w-4xl mx-auto mt-4 glass-card rounded-xl p-4">
