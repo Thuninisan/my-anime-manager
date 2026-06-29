@@ -500,11 +500,10 @@ async def _parallel_search(show_names: list[str], parsed_files: list[dict] | Non
             if original_title:
                 async with bangumi_sem:
                     bgm_raw = await bangumi_service.search_bangumi(original_title)
-                # Filter: must exist in map.json AND platform is not TV
+                # Filter: exclude TV platform entries only
                 bgm_raw = [
                     r for r in bgm_raw
-                    if data_store.get_bangumi_name(r["id"]) is not None
-                    and r.get("platform", "") != "TV"
+                    if r.get("platform", "") != "TV"
                 ]
                 first = bgm_raw[0] if bgm_raw else None
                 if first:
