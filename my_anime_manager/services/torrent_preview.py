@@ -487,23 +487,54 @@ async def _parallel_search(show_names: list[str], parsed_files: list[dict] | Non
     bangumi_sem = asyncio.Semaphore(1)
 
     async def _search_pair(name: str) -> dict:
-        """TMDB-first, then Bangumi (passing tmdb_id + tmdb_name for fallback)."""
+        """TMDB-first, then Bangumi.  Movies use TMDB original_title → Bangumi."""
         # Step 1: TMDB search (movie if ≤ 2 files, otherwise TV)
         count = file_counts.get(name, 0)
         search_as_movie = count <= 2
         tmdb_result = await _search_tmdb_for_name(name, search_as_movie=search_as_movie)
 
-        # Step 2: Bangumi search with tmdb_id + tmdb_name for fallback chain
-        async def _do_bangumi():
-            tmdb_first = tmdb_result["first"]
-            tmdb_id = tmdb_first["id"] if tmdb_first else None
-            tmdb_name = tmdb_first["name"] if tmdb_first else None
-            async with bangumi_sem:
-                return await _search_bangumi_for_name(
-                    name, tmdb_id=tmdb_id, tmdb_name=tmdb_name,
-                )
+        # Step 2: Bangumi search
+        if search_as_movie and tmdb_result["first"]:
+            # Movie: search Bangumi with TMDB original_title, exclude TV platform
+            original_title = tmdb_result["first"].get("original_title", "")
+            if original_title:
+                async with bangumi_sem:
+                    bgm_raw = await bangumi_service.search_bangumi(original_title)
+                # Filter: must exist in map.json AND platform is not TV
+                bgm_raw = [
+                    r for r in bgm_raw
+                    if data_store.get_bangumi_name(r["id"]) is not None
+                    and r.get("platform", "") != "TV"
+                ]
+                first = bgm_raw[0] if bgm_raw else None
+                if first:
+                    bangumi_result: dict = {
+                        "searchby": original_title,
+                        "first": {
+                            "id": first["id"],
+                            "name": first.get("name", ""),
+                            "eps": first.get("eps", 0),
+                        },
+                        "rest": [],
+                    }
+                    if first.get("name_cn"):
+                        bangumi_result["first"]["name_cn"] = first["name_cn"]
+                else:
+                    bangumi_result = {"searchby": original_title, "first": None, "rest": []}
+            else:
+                bangumi_result = {"searchby": name, "first": None, "rest": []}
+        else:
+            # TV: existing fallback chain (primary name → map → tmdb_name)
+            async def _do_bangumi():
+                tmdb_first = tmdb_result["first"]
+                tmdb_id = tmdb_first["id"] if tmdb_first else None
+                tmdb_name = tmdb_first["name"] if tmdb_first else None
+                async with bangumi_sem:
+                    return await _search_bangumi_for_name(
+                        name, tmdb_id=tmdb_id, tmdb_name=tmdb_name,
+                    )
 
-        bangumi_result = await _do_bangumi()
+            bangumi_result = await _do_bangumi()
 
         return {
             "show_name": name,

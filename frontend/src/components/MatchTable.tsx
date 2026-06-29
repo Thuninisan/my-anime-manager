@@ -181,21 +181,10 @@ export function computeMatches(data: any): MatchRow[] {
     let matchedBgmId: number | null = null;
     let tmdbMatch: { season: number; epNum: number; name: string } | null = null;
 
-    // ── Movie matching: direct name comparison, no episode data needed ──
-    // Movies don't have seasons/episodes; we compare the Bangumi subject
-    // name against the TMDB original_title to determine a match.
+    // ── Movie: backend already matched via TMDB original_title → Bangumi ──
+    // No frontend matching needed — just display the results.
     if (searchEntry?.media_type === "movie") {
-      const tmdbTitle = searchEntry.tmdb?.original_title || searchEntry.tmdb?.name || "";
-      const bgmName = searchEntry.bangumi?.name || "";
-      const bgmNameCn = searchEntry.bangumi?.name_cn || "";
-
-      const tmdbNorm = normalise(tmdbTitle);
-      const matched = !!tmdbNorm && (
-        normalise(bgmName) === tmdbNorm ||
-        normalise(bgmNameCn) === tmdbNorm ||
-        normalise(bgmName).includes(tmdbNorm) ||
-        tmdbNorm.includes(normalise(bgmName))
-      );
+      const matched = !!(searchEntry.tmdb && searchEntry.bangumi);
 
       return {
         file_name: pf.file_name,
