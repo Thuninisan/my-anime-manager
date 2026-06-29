@@ -371,7 +371,7 @@ export default function MatchTable({ data }: { data: any }) {
   // ── Per-row overrides: rowIndex → { bgmEntryId, bgmEpSort, tmdbSeason?, tmdbEp? } ──
   // TMDB fields allow direct season/episode override independent of BGM matching.
   const [overrides, setOverrides] = useState<
-    Record<number, { bgmEntryId: number; bgmEpSort: number; tmdbSeason?: number; tmdbEp?: number }>
+    Record<number, { bgmEntryId: number; bgmEpSort: number; tmdbSeason?: number; tmdbEp?: number; tmdbShowId?: number }>
   >({});
 
   // ── Get episodes for a specific BGM entry ──
@@ -400,9 +400,37 @@ export default function MatchTable({ data }: { data: any }) {
   };
 
   // ── Handle TMDB Season dropdown change → auto-select first episode ──
+  // SP cards pass a composite "tmdbId:season" value to allow selecting
+  // seasons from ANY show, not just the one matched to the SP file's show_name.
   const handleTmdbSeasonChange = (rowIndex: number, showName: string, seasonStr: string) => {
+    // SP composite value: "tmdbId:season"
+    if (seasonStr.includes(":")) {
+      const [tmdbIdStr, seasonStr2] = seasonStr.split(":");
+      const tmdbShowId = Number(tmdbIdStr);
+      const season = Number(seasonStr2);
+      const tmdbSeasons: Record<string, TmdbSeason> =
+        episodeData.tmdb?.[String(tmdbShowId)] || {};
+      const seasonData = tmdbSeasons[String(season)];
+      const sortedEps = [...(seasonData?.episodes || [])].sort((a, b) => a.epNum - b.epNum);
+      const firstEp = sortedEps[0]?.epNum;
+      setOverrides((prev) => {
+        const existing = prev[rowIndex];
+        return {
+          ...prev,
+          [rowIndex]: {
+            bgmEntryId: existing?.bgmEntryId ?? 0,
+            bgmEpSort: existing?.bgmEpSort ?? 0,
+            tmdbSeason: season,
+            tmdbEp: firstEp,
+            tmdbShowId: tmdbShowId,
+          },
+        };
+      });
+      return;
+    }
+
+    // Regular card: use the show's own TMDB match
     const season = Number(seasonStr);
-    // Find the first episode of the selected TMDB season (sorted by epNum)
     const tmdbId = searchResults[showName]?.tmdb?.id;
     const tmdbSeasons: Record<string, TmdbSeason> =
       (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
@@ -417,7 +445,7 @@ export default function MatchTable({ data }: { data: any }) {
           bgmEntryId: existing?.bgmEntryId ?? 0,
           bgmEpSort: existing?.bgmEpSort ?? 0,
           tmdbSeason: season,
-          tmdbEp: firstEp,  // auto-select first episode, matching BGM Entry behaviour
+          tmdbEp: firstEp,
         },
       };
     });
@@ -435,6 +463,7 @@ export default function MatchTable({ data }: { data: any }) {
           bgmEpSort: existing?.bgmEpSort ?? 0,
           tmdbSeason: existing?.tmdbSeason ?? 0,
           tmdbEp: ep,
+          tmdbShowId: existing?.tmdbShowId,  // preserve SP cross-show binding
         },
       };
     });
@@ -465,7 +494,8 @@ export default function MatchTable({ data }: { data: any }) {
       }
 
       // ── Resolve TMDB lookup data shared by BGM→TMDB and direct overrides ──
-      const tmdbId = searchResults[r.show_name]?.tmdb?.id;
+      // SP rows may have a cross-show tmdbShowId override for manual mapping.
+      const tmdbId = ov.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
       const tmdbSeasons: Record<string, TmdbSeason> =
         (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
 
@@ -830,24 +860,45 @@ export default function MatchTable({ data }: { data: any }) {
                         ))}
                       </select>
                     </div>
+                    {/* SP cards: TMDB S aggregates ALL TMDB seasons from all shows */}
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB S</span>
                       <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={r.tmdb_season ?? ''}
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[160px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        value={(() => {
+                          const ov = overrides[i];
+                          if (ov?.tmdbShowId && ov.tmdbSeason != null) return `${ov.tmdbShowId}:${ov.tmdbSeason}`;
+                          return r.tmdb_season ?? '';
+                        })()}
                         onChange={(e) => handleTmdbSeasonChange(i, r.show_name, e.target.value)}
                       >
                         {r.tmdb_season == null && <option value="" disabled>-</option>}
                         {(() => {
-                          const tmdbId = searchResults[r.show_name]?.tmdb?.id;
-                          const rowTmdbSeasons: Record<string, TmdbSeason> =
-                            (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
-                          return Object.entries(rowTmdbSeasons).map(([skey, sdata]) => (
-                            <option key={skey} value={Number(skey)}>{sdata.name || `Season ${skey}`}</option>
+                          const opts: { value: string; label: string }[] = [];
+                          for (const [tmdbIdStr, seasons] of Object.entries(episodeData.tmdb || {})) {
+                            const showTmdbId = Number(tmdbIdStr);
+                            let showLabel = '';
+                            for (const [, entry] of Object.entries(searchResults)) {
+                              if (entry.tmdb?.id === showTmdbId) {
+                                showLabel = entry.tmdb.name;
+                                break;
+                              }
+                            }
+                            if (!showLabel) showLabel = `TMDB ${showTmdbId}`;
+                            for (const [skey, sdata] of Object.entries(seasons)) {
+                              opts.push({
+                                value: `${showTmdbId}:${skey}`,
+                                label: `${showLabel}  ${sdata.name || `Season ${skey}`}`,
+                              });
+                            }
+                          }
+                          return opts.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
                           ));
                         })()}
                       </select>
                     </div>
+                    {/* SP cards: TMDB Ep looks up from the override's tmdbShowId */}
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB Ep</span>
                       <select
@@ -857,11 +908,12 @@ export default function MatchTable({ data }: { data: any }) {
                         title={r.tmdb_ep_name}
                       >
                         {(() => {
-                          const tmdbId = searchResults[r.show_name]?.tmdb?.id;
-                          const rowTmdbSeasons: Record<string, TmdbSeason> =
-                            (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+                          const ov = overrides[i];
+                          const lookupTmdbId = ov?.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
+                          const lookupSeasons: Record<string, TmdbSeason> =
+                            (lookupTmdbId && episodeData.tmdb?.[String(lookupTmdbId)]) || {};
                           const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
-                          const selSeasonData = selSeasonKey ? rowTmdbSeasons[selSeasonKey] : null;
+                          const selSeasonData = selSeasonKey ? lookupSeasons[selSeasonKey] : null;
                           const episodeOptions = (selSeasonData?.episodes || []).sort((a, b) => a.epNum - b.epNum);
                           if (episodeOptions.length === 0) {
                             return <option value="" disabled>{r.tmdb_ep_name || '-'}</option>;
