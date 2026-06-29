@@ -255,16 +255,39 @@ async def _search_tmdb_for_name(show_name: str, search_as_movie: bool = False) -
         res = await tmdb_client.search_tv(cleaned_name)
     raw_results = res.json().get("results", [])
     first = raw_results[0] if raw_results else None
-    # Pick only id + name for first entry
-    first_clean = {"id": first["id"], "name": first["name"]} if first else None
-    # Rest: id + name only, deduped by id
+    # Build first_clean: TMDB /search/movie uses "title", /search/tv uses "name".
+    # Also preserve original_title / original_name for frontend movie matching.
+    if first:
+        first_name = first.get("title") or first.get("name", "")
+        first_clean = {"id": first["id"], "name": first_name}
+        if search_as_movie:
+            ot = first.get("original_title", "")
+            if ot:
+                first_clean["original_title"] = ot
+        else:
+            oname = first.get("original_name", "")
+            if oname:
+                first_clean["original_name"] = oname
+    else:
+        first_clean = None
+    # Rest: id + name (title for movies) only, deduped by id
     seen_ids = {first["id"]} if first else set()
     rest = []
     for r in raw_results[1:]:
         rid = r.get("id")
         if rid and rid not in seen_ids:
             seen_ids.add(rid)
-            rest.append({"id": rid, "name": r.get("name", "")})
+            rname = r.get("title") or r.get("name", "")
+            entry = {"id": rid, "name": rname}
+            if search_as_movie:
+                ot = r.get("original_title", "")
+                if ot:
+                    entry["original_title"] = ot
+            else:
+                oname = r.get("original_name", "")
+                if oname:
+                    entry["original_name"] = oname
+            rest.append(entry)
     return {
         "searchby": cleaned_name,
         "first": first_clean,
@@ -641,22 +664,10 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
         try:
             mt = tmdb_media_types.get(tid, "tv")
             if mt == "movie":
-                # Build a fake single-season structure so the frontend
-                # can treat movies like a 1-episode "season".
-                movie_res = await tmdb_client.get_movie_detail(tid)
-                movie = movie_res.json()
-                output_seasons = {
-                    "1": {
-                        "name": movie.get("title", ""),
-                        "episodes": [{
-                            "epNum": 1,
-                            "tmdbId": tid,
-                            "name": movie.get("title", ""),
-                        }],
-                    }
-                }
-                tmdb_data[str(tid)] = output_seasons
-                print(f"   TMDB movie {tid}: {movie.get('title', '?')}")
+                # Movies don't have seasons/episodes — the frontend
+                # matches via direct name comparison instead.
+                print(f"   TMDB movie {tid}: 跳过章节获取（前端名称匹配）")
+                continue
             else:
                 season_map = await tmdb_service.build_season_episode_map(tid)
                 # TMDB now uses language=ja as the base, so episode names are

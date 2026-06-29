@@ -22,8 +22,9 @@ interface ParsedFile {
 }
 
 interface SearchEntry {
-  tmdb: { id: number; name: string } | null;
+  tmdb: { id: number; name: string; original_title?: string; original_name?: string } | null;
   bangumi: { id: number; name: string; name_cn?: string } | null;
+  media_type?: "tv" | "movie";
 }
 
 interface TmdbEpisode {
@@ -178,6 +179,40 @@ export function computeMatches(data: any): MatchRow[] {
     let matchedBgmName = "";
     let matchedBgmId: number | null = null;
     let tmdbMatch: { season: number; epNum: number; name: string } | null = null;
+
+    // ── Movie matching: direct name comparison, no episode data needed ──
+    // Movies don't have seasons/episodes; we compare the Bangumi subject
+    // name against the TMDB original_title to determine a match.
+    if (searchEntry?.media_type === "movie") {
+      const tmdbTitle = searchEntry.tmdb?.original_title || searchEntry.tmdb?.name || "";
+      const bgmName = searchEntry.bangumi?.name || "";
+      const bgmNameCn = searchEntry.bangumi?.name_cn || "";
+
+      const tmdbNorm = normalise(tmdbTitle);
+      const matched = !!tmdbNorm && (
+        normalise(bgmName) === tmdbNorm ||
+        normalise(bgmNameCn) === tmdbNorm ||
+        normalise(bgmName).includes(tmdbNorm) ||
+        tmdbNorm.includes(normalise(bgmName))
+      );
+
+      return {
+        file_name: pf.file_name,
+        show_name: pf.show_name,
+        src_season: pf.season,
+        src_episode: pf.episode,
+        bgm_entry: searchEntry.bangumi?.name || (searchEntry.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
+        bgm_entry_id: searchEntry.bangumi?.id ?? null,
+        bgm_sort: null,
+        bgm_ep_name: searchEntry.bangumi?.name || '-',
+        bgm_ep_name_cn: searchEntry.bangumi?.name_cn || '',
+        bgm_ep_id: null,
+        tmdb_season: null,
+        tmdb_ep: null,
+        tmdb_ep_name: searchEntry.tmdb?.name || '-',
+        matched,
+      };
+    }
 
     // ── Season 0 (specials): match TMDB S0 first, then use TMDB ──
     // original name to find the corresponding Bangumi SP episode.
