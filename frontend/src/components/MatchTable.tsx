@@ -209,17 +209,38 @@ export function computeMatches(data: any): MatchRow[] {
 
     // ── Regular season matching (skip if S0 already found BGM) ──
     if (!bgmEp) {
-      for (const [bidStr, entry] of allBgmEntries) {
-        const eps = entry.episodes || [];
+      // First, try the Bangumi entry that was specifically matched to
+      // this show name by the backend (respects per-show search results).
+      // This prevents multi-season torrents where all files share the
+      // same sort numbers from all matching the first Bangumi entry.
+      const preferredBgmId = searchEntry?.bangumi?.id;
+      const preferredEntry: BgmEntry | undefined =
+        (preferredBgmId != null && episodeData.bangumi?.[String(preferredBgmId)]) || undefined;
+      if (preferredEntry) {
+        const eps = preferredEntry.episodes || [];
         const found = eps.find((ep) => ep.sort === pf.episode) ?? null;
         if (found) {
           bgmEp = found;
-          matchedBgmName = entry.name;
-          matchedBgmId = Number(bidStr);
-          break;
+          matchedBgmName = preferredEntry.name;
+          matchedBgmId = preferredBgmId!;
         }
       }
-      // Fallback: positional index in the primary entry only
+
+      // Fallback: search across ALL Bangumi entries (sequels, 番外篇, etc.)
+      if (!bgmEp) {
+        for (const [bidStr, entry] of allBgmEntries) {
+          const eps = entry.episodes || [];
+          const found = eps.find((ep) => ep.sort === pf.episode) ?? null;
+          if (found) {
+            bgmEp = found;
+            matchedBgmName = entry.name;
+            matchedBgmId = Number(bidStr);
+            break;
+          }
+        }
+      }
+
+      // Last-resort fallback: positional index in the primary entry only
       if (!bgmEp) {
         const primaryBgmId = searchEntry?.bangumi?.id;
         const primaryEntry: BgmEntry | undefined =
