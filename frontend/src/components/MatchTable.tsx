@@ -512,7 +512,7 @@ export default function MatchTable({ data }: { data: any }) {
         </div>
       )}
 
-      {/* ── TV Table ── */}
+      {/* ── TV Cards ── */}
       {tvRows.length > 0 && (
         <div className="mb-10">
           <div className="flex items-center justify-between mb-4">
@@ -525,75 +525,91 @@ export default function MatchTable({ data }: { data: any }) {
               <span className="text-xs text-slate-400 ml-2">({tvRows.length} files)</span>
             </div>
           </div>
-          <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl overflow-x-auto custom-scrollbar shadow-sm">
-            <table className="w-full text-left border-collapse min-w-[1000px]">
-              <thead className="bg-slate-50 dark:bg-white/5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                <tr>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">File Name</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">Show</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-center">S/E</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">BGM Entry</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-center">BGM#</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">BGM Name</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-center">TS/TE</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="text-sm font-medium divide-y divide-border-light dark:divide-border-dark">
-                {tvRows.map((r) => {
-                  const i = (r as any)._idx as number;
-                  const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
-                  const currentEntryId = r.bgm_entry_id ?? 0;
-                  return (
-                    <tr key={i} className="table-row-hover group">
-                      <td className="px-4 py-3 font-mono text-[11px] max-w-xs truncate">{r.file_name}</td>
-                      <td className="px-4 py-3 text-slate-500 whitespace-nowrap">{r.show_name}</td>
-                      <td className="px-4 py-3 text-center text-slate-400">{r.src_season} / {r.src_episode}</td>
-                      <td className="px-4 py-3">
-                        <select
-                          className="text-[10px] py-1 bg-transparent border-slate-200 dark:border-white/10 rounded w-full max-w-[160px] truncate"
-                          value={currentEntryId || ''}
-                          onChange={(e) => handleBgmEntryChange(i, e.target.value)}
-                        >
-                          {!currentEntryId && <option value="" disabled>-</option>}
-                          {bgmEntryOptions.map((opt) => (
-                            <option key={opt.id} value={opt.id}>{opt.name}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-3 text-center text-slate-400">{r.bgm_sort ?? '-'}</td>
-                      <td className="px-4 py-3 max-w-[220px]">
-                        <select
-                          className="text-[10px] py-1 bg-transparent border-slate-200 dark:border-white/10 rounded w-full truncate"
-                          value={r.bgm_sort ?? ''}
-                          onChange={(e) => handleBgmEpChange(i, currentEntryId, e.target.value)}
-                          title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
-                        >
-                          {currentEps.length === 0 && (
-                            <option value="" disabled>{r.bgm_ep_name || '-'}</option>
-                          )}
-                          {currentEps.map((ep) => (
-                            <option key={ep.sort} value={ep.sort}>
-                              E{ep.sort} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className={`px-4 py-3 text-center ${r.matched ? 'text-primary' : 'text-slate-400'}`}>
-                        {r.tmdb_season ?? '-'} / {r.tmdb_ep ?? '-'}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        {r.matched ? (
-                          <span className="bg-primary/10 text-primary text-[10px] px-2 py-1 rounded font-bold uppercase">Mapped</span>
-                        ) : (
-                          <span className="bg-amber-500/10 text-amber-500 text-[10px] px-2 py-1 rounded font-bold uppercase">Pending</span>
+          <div className="space-y-3">
+            {tvRows.map((r) => {
+              const i = (r as any)._idx as number;
+              const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
+              const currentEntryId = r.bgm_entry_id ?? 0;
+              return (
+                <div key={i} className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md group">
+                  {/* Top row: file name + badges */}
+                  <div className="px-4 py-3 border-b border-slate-50 dark:border-white/5">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-3">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300 shrink-0">
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                            <polyline points="14 2 14 8 20 8" />
+                          </svg>
+                          <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{r.file_name}</h4>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 shrink-0">
+                        <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-white/5 rounded-md">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Show</span>
+                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{r.show_name}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-white/5 rounded-md">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">S/E</span>
+                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{r.src_season} / {r.src_episode}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Bottom row: mapping controls */}
+                  <div className="px-4 py-2.5 bg-slate-50/30 dark:bg-white/[0.02] flex flex-wrap items-center gap-x-6 gap-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Entry</span>
+                      <select
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        value={currentEntryId || ''}
+                        onChange={(e) => handleBgmEntryChange(i, e.target.value)}
+                      >
+                        {!currentEntryId && <option value="" disabled>-</option>}
+                        {bgmEntryOptions.map((opt) => (
+                          <option key={opt.id} value={opt.id}>{opt.name}</option>
+                        ))}
+                      </select>
+                      <div className="flex items-center gap-1 ml-1">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">#</span>
+                        <span className="text-[11px] font-mono text-slate-500">{r.bgm_sort ?? '-'}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Name</span>
+                      <select
+                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                        value={r.bgm_sort ?? ''}
+                        onChange={(e) => handleBgmEpChange(i, currentEntryId, e.target.value)}
+                        title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
+                      >
+                        {currentEps.length === 0 && (
+                          <option value="" disabled>{r.bgm_ep_name || '-'}</option>
                         )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        {currentEps.map((ep) => (
+                          <option key={ep.sort} value={ep.sort}>
+                            E{ep.sort} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TS/TE</span>
+                      <span className={`text-[11px] font-bold ${r.matched ? 'text-primary' : 'text-slate-400'}`}>
+                        {r.tmdb_season ?? '-'} / {r.tmdb_ep ?? '-'}
+                      </span>
+                    </div>
+                    <div className="ml-auto">
+                      {r.matched ? (
+                        <span className="bg-primary/10 text-primary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Mapped</span>
+                      ) : (
+                        <span className="bg-secondary/10 text-secondary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Pending</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
