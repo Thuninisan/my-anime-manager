@@ -646,54 +646,27 @@ export default function MatchTable({ data }: { data: any }) {
               <span className="text-xs text-slate-400 ml-2">({movieRows.length} files)</span>
             </div>
           </div>
-          <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl overflow-hidden shadow-sm">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50 dark:bg-white/5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                <tr>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">File Name</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">BGM Entry</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark">TMDB Name</th>
-                  <th className="px-4 py-3 border-b border-border-light dark:border-border-dark text-right">Status</th>
-                </tr>
-              </thead>
-              <tbody className="text-sm font-medium divide-y divide-border-light dark:divide-border-dark">
-                {movieRows.map((r) => {
-                  const i = (r as any)._idx as number;
-                  const currentEntryId = r.bgm_entry_id ?? 0;
-                  return (
-                    <tr key={i} className="table-row-hover group">
-                      <td className="px-4 py-3 font-mono text-[12px] max-w-xs truncate">{r.file_name}</td>
-                      <td className="px-4 py-3">
-                        <select
-                          className="text-xs py-1 bg-transparent border-slate-200 dark:border-white/10 rounded w-full max-w-[100px] truncate"
-                          value={currentEntryId || ''}
-                          onChange={(e) => {
-                            const entryId = Number(e.target.value);
-                            setOverrides((prev) => ({
-                              ...prev,
-                              [i]: { bgmEntryId: entryId, bgmEpSort: 0 },
-                            }));
-                          }}
-                        >
-                          {!currentEntryId && <option value="" disabled>-</option>}
-                          {bgmEntryOptions.map((opt) => (
-                            <option key={opt.id} value={opt.id}>{opt.name}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-4 py-3 text-slate-500 max-w-[250px] truncate">{r.tmdb_ep_name}</td>
-                      <td className="px-4 py-3 text-right">
-                        {r.matched ? (
-                          <span className="bg-primary/10 text-primary text-[10px] px-2 py-1 rounded font-bold uppercase">Mapped</span>
-                        ) : (
-                          <span className="bg-amber-500/10 text-amber-500 text-[10px] px-2 py-1 rounded font-bold uppercase">Pending</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div className="space-y-3">
+            {movieRows.map((r) => {
+              const i = (r as any)._idx as number;
+              const currentEntryId = r.bgm_entry_id ?? 0;
+              const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
+
+              return (
+                <MappingCard
+                  key={i}
+                  row={r}
+                  rowIndex={i}
+                  variant="movie"
+                  hasSubtitle={hasMatchingSubtitle(r.file_name)}
+                  bgmEntryOptions={bgmEntryOptions}
+                  currentEps={currentEps}
+                  currentEntryId={currentEntryId}
+                  onBgmEntryChange={(v) => handleBgmEntryChange(i, v)}
+                  onToggleMatched={() => handleToggleMatched(i, r.matched)}
+                />
+              );
+            })}
           </div>
         </div>
       )}
