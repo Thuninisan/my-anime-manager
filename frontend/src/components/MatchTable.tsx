@@ -310,6 +310,16 @@ export function computeMatches(data: any): MatchRow[] {
 export default function MatchTable({ data }: { data: any }) {
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
   const episodeData = data.episode_data || { tmdb: {}, bangumi: {} };
+  const subtitles: string[] = data.subtitles || [];
+
+  // ── Check whether a video file has a matching subtitle file ──
+  // Match by filename stem (name without extension).
+  const hasMatchingSubtitle = (videoFileName: string): boolean => {
+    const videoStem = videoFileName.replace(/\.[^.]+$/, '').toLowerCase();
+    return subtitles.some(
+      (sub) => sub.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
+    );
+  };
 
   // ── Build BGM entry dropdown options ──
   // Combine entries from search_results (primary matches) and
@@ -691,6 +701,9 @@ export default function MatchTable({ data }: { data: any }) {
                           <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{r.file_name}</h4>
                         </div>
                       </div>
+                      {hasMatchingSubtitle(r.file_name) && (
+                        <span className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">Sub</span>
+                      )}
                     </div>
                   </div>
                   {/* Bottom row: mapping controls */}
@@ -826,6 +839,9 @@ export default function MatchTable({ data }: { data: any }) {
                           <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{r.file_name}</h4>
                         </div>
                       </div>
+                      {hasMatchingSubtitle(r.file_name) && (
+                        <span className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">Sub</span>
+                      )}
                     </div>
                   </div>
                   {/* Bottom row: mapping controls (all default empty — user selects manually) */}

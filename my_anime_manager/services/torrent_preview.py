@@ -1002,7 +1002,17 @@ async def parse_and_search(torrent_path: str) -> dict:
     # ── Step 1: Bencode extraction ──
     print("📋 读取种子文件内容 (bencode)...")
     file_list: list[dict] = read_torrent_file_list(torrent_path)
-    print(f"   → {len(file_list)} 个文件\n")
+    print(f"   → {len(file_list)} 个文件")
+
+    # ── Collect subtitle files (before anitopy parsing skips them) ──
+    subtitle_files: list[str] = [
+        Path(f["name"]).name
+        for f in file_list
+        if Path(f["name"]).suffix.lower() in SKIP_EXTENSIONS
+    ]
+    if subtitle_files:
+        print(f"   📝 {len(subtitle_files)} 个字幕文件")
+    print()
 
     # ── Step 2: Per-file anitopy parsing ──
     print("🔧 anitopy 逐文件解析...")
@@ -1084,6 +1094,7 @@ async def parse_and_search(torrent_path: str) -> dict:
         "torrent_name": torrent_name,
         "torrent_path": torrent_path,
         "total_files": len(file_list),
+        "subtitles": subtitle_files,
         "parsed_files": [
             {
                 "file_name": p["file_name"],
