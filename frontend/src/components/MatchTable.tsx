@@ -356,13 +356,13 @@ export default function MatchTable({ data }: { data: any }) {
   const initialRows = useMemo(() => {
     const regularRows = computeMatches(data);
     const specials: any[] = data.specials || [];
-    // SP/Extra directory files have all dropdowns starting empty —
-    // the user manually selects BGM entry / episode / TMDB mapping.
+    // SP/Extra files are returned as-is without anitopy re-parsing.
+    // All dropdowns start empty — the user manually selects everything.
     const spRows: MatchRow[] = specials.map((s: any) => ({
       file_name: s.file_name,
-      show_name: s.show_name,
-      src_season: s.season,
-      src_episode: s.episode,
+      show_name: s.show_name || '-',
+      src_season: s.season ?? 0,
+      src_episode: s.episode ?? 0,
       bgm_entry: '-',
       bgm_entry_id: null,
       bgm_sort: null,

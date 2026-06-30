@@ -23,6 +23,7 @@ from ..clients import bangumi as bgm_client
 from . import tmdb as tmdb_service
 from . import bangumi as bangumi_service
 from .. import data as data_store
+from .. import config
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -32,19 +33,11 @@ from .. import data as data_store
 SKIP_EXTENSIONS: set[str] = {
     ".ass", ".ssa", ".srt", ".idx", ".sub",   # subtitles
     ".7z", ".zip", ".rar", ".tar", ".gz",     # font archives
-    ".mka",                                     # Matroska audio (no video)
 }
 
 SKIP_DIR_PATTERNS: set[str] = {
     "cds", "scans", "sps", "specials",
     "extra", "extras", "bonus", "ost",
-}
-
-# Directories whose video files are parsed *after* the main search
-# pipeline completes, so they don't affect show-name dedup or search.
-SPECIAL_DIR_PATTERNS: set[str] = {
-    "sp", "sps", "specials",
-    "extra", "extras", "bonus",
 }
 
 # anitopy anime_type values that indicate a non-episodic video file
@@ -83,22 +76,6 @@ def _is_in_skip_directory(torrent_path: str) -> bool:
     # Only inspect directory components — the last element is the filename.
     for part in parts[:-1]:
         if part.lower() in SKIP_DIR_PATTERNS:
-            return True
-    return False
-
-
-def _is_in_special_directory(torrent_path: str) -> bool:
-    """Check whether any directory component matches SPECIAL_DIR_PATTERNS.
-
-    Args:
-        torrent_path: Full path within the torrent (forward-slash separated).
-
-    Returns:
-        True if any directory segment (excluding the filename) is in the set.
-    """
-    parts = torrent_path.split("/")
-    for part in parts[:-1]:
-        if part.lower() in SPECIAL_DIR_PATTERNS:
             return True
     return False
 
@@ -878,96 +855,6 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Step 6: Post-search SP/Extra file parsing
-# ═══════════════════════════════════════════════════════════════════════
-#
-# Files inside SP / SPs / Specials / Extra / Extras / Bonus directories
-# are skipped during the main parse phase so they don't affect search.
-# After the search pipeline completes we come back, run anitopy on them,
-# and return them in a separate "specials" field so the frontend can
-# present them for manual mapping.
-
-
-def _parse_special_files(parsed_results: list[dict]) -> list[dict]:
-    """Re-parse skipped files that are in special directories.
-
-    Only processes files whose skip_reason is "skip_directory" AND whose
-    path is inside a SPECIAL_DIR_PATTERNS directory.  Runs anitopy,
-    filters out non-episodic video types (CM, OP, ED, Menu, PV, etc.),
-    and returns the successfully parsed entries.
-
-    Args:
-        parsed_results: Full list from ``_parse_file()`` (including skipped).
-
-    Returns:
-        List of dicts with keys: file_name, torrent_path, show_name,
-        season, episode, parsed.
-    """
-    specials: list[dict] = []
-
-    for r in parsed_results:
-        if not r["is_extra"]:
-            continue
-        if r.get("skip_reason") != "skip_directory":
-            continue
-        if not _is_in_special_directory(r["torrent_path"]):
-            continue
-
-        file_name: str = r["file_name"]
-
-        # ── Extension check (same as _parse_file step 1) ──
-        ext = Path(file_name).suffix.lower()
-        if ext in SKIP_EXTENSIONS:
-            continue
-
-        # ── anitopy parse ──
-        try:
-            info = anitopy_parse(file_name)
-        except Exception:
-            continue
-
-        if not info:
-            continue
-
-        anime_title: str = (info.get("anime_title") or "").strip()
-        if not anime_title:
-            continue
-
-        # ── Non-episodic type check ──
-        at_raw = info.get("anime_type")
-        if at_raw:
-            types = (
-                [str(t).upper() for t in at_raw]
-                if isinstance(at_raw, list)
-                else [str(at_raw).upper()]
-            )
-            if any(t in _NON_EPISODIC_TYPES for t in types):
-                continue
-
-        # ── Success ──
-        season_raw = info.get("anime_season")
-        ep_raw = info.get("episode_number")
-        season_num = int(season_raw) if season_raw else 1
-        episode_num = int(ep_raw) if ep_raw else 0
-
-        base_name, _ = _extract_year(anime_title)
-        show_name = base_name
-        if season_num > 1:
-            show_name = f"{base_name} Season {season_num}"
-
-        specials.append({
-            "file_name": file_name,
-            "torrent_path": r["torrent_path"],
-            "show_name": show_name,
-            "season": season_num,
-            "episode": episode_num,
-            "parsed": dict(info),
-        })
-
-    return specials
-
-
-# ═══════════════════════════════════════════════════════════════════════
 # Top-level entry point
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -1001,6 +888,39 @@ async def parse_and_search(torrent_path: str) -> dict:
     ]
     if subtitle_files:
         print(f"   📝 {len(subtitle_files)} 个字幕文件")
+
+    # ── Exclude-pattern filtering (before anitopy parsing) ──
+    # Uses word-boundary matching so short keywords like "iv" don't
+    # accidentally match inside words like "Live" or "Archive".
+    raw_patterns: list[str] = [
+        p.strip().lower()
+        for p in config.TORRENT_EXCLUDE_PATTERNS.split(",")
+        if p.strip()
+    ]
+    if raw_patterns:
+        before = len(file_list)
+        file_list = [
+            f for f in file_list
+            if not any(
+                re.search(rf"(?:^|[^a-zA-Z]){re.escape(p)}(?:$|[^a-zA-Z])", f["name"].lower())
+                for p in raw_patterns
+            )
+        ]
+        excluded = before - len(file_list)
+        if excluded:
+            print(f"   🚫 排除关键词过滤: {excluded} 个文件被排除 ({', '.join(raw_patterns)})")
+
+    # ── Filter out subtitle / font-archive / audio-only files ──
+    # Subtitle files were already collected above; font archives and .mka
+    # have no video content and don't need anitopy parsing.
+    before_ext = len(file_list)
+    file_list = [
+        f for f in file_list
+        if Path(f["name"]).suffix.lower() not in SKIP_EXTENSIONS
+    ]
+    ext_skipped = before_ext - len(file_list)
+    if ext_skipped:
+        print(f"   📎 非视频文件过滤: {ext_skipped} 个文件 (字幕/字体/音频)")
     print()
 
     # ── Step 2: Per-file anitopy parsing ──
@@ -1072,10 +992,17 @@ async def parse_and_search(torrent_path: str) -> dict:
     episode_data = await _fetch_episode_data(search_results, parsed_files)
     print()
 
-    # ── Step 6: Post-search SP/Extra file parsing ──
-    # Only run after search is complete so specials don't affect dedup/search.
-    print("📦 解析 SP/Extra 目录文件...")
-    specials: list[dict] = _parse_special_files(parsed_results)
+    # ── Step 6: Collect SP/Extra files (no re-parsing) ──
+    # Files in special directories were marked is_extra during Step 2.
+    # Return them directly so the frontend can present them for manual mapping.
+    print("📦 收集 SP/Extra 目录文件...")
+    specials: list[dict] = [
+        {
+            "file_name": r["file_name"],
+            "torrent_path": r["torrent_path"],
+        }
+        for r in parsed_results if r["is_extra"]
+    ]
     print(f"   → {len(specials)} 个特殊文件")
     print()
 
@@ -1095,17 +1022,7 @@ async def parse_and_search(torrent_path: str) -> dict:
             }
             for p in parsed_files
         ],
-        "specials": [
-            {
-                "file_name": s["file_name"],
-                "torrent_path": s["torrent_path"],
-                "show_name": s["show_name"],
-                "season": s["season"],
-                "episode": s["episode"],
-                "parsed": s["parsed"],
-            }
-            for s in specials
-        ],
+        "specials": specials,
         "skipped_files": skipped_files,
         "show_names": show_names,
         "search_results": search_results,
