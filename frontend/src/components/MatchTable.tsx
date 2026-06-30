@@ -371,7 +371,7 @@ export default function MatchTable({ data }: { data: any }) {
   // ── Per-row overrides: rowIndex → { bgmEntryId, bgmEpSort, tmdbSeason?, tmdbEp? } ──
   // TMDB fields allow direct season/episode override independent of BGM matching.
   const [overrides, setOverrides] = useState<
-    Record<number, { bgmEntryId: number; bgmEpSort: number; tmdbSeason?: number; tmdbEp?: number; tmdbShowId?: number }>
+    Record<number, { bgmEntryId: number; bgmEpSort: number; tmdbSeason?: number; tmdbEp?: number; tmdbShowId?: number; manualMatched?: boolean }>
   >({});
 
   // ── Get episodes for a specific BGM entry ──
@@ -451,6 +451,17 @@ export default function MatchTable({ data }: { data: any }) {
     });
   };
 
+  // ── Handle badge click: toggle matched ↔ pending ──
+  const handleToggleMatched = (rowIndex: number, currentMatched: boolean) => {
+    setOverrides((prev) => {
+      const existing = prev[rowIndex] || { bgmEntryId: 0, bgmEpSort: 0 };
+      return {
+        ...prev,
+        [rowIndex]: { ...existing, manualMatched: !currentMatched },
+      };
+    });
+  };
+
   // ── Handle TMDB Episode dropdown change ──
   const handleTmdbEpChange = (rowIndex: number, epStr: string) => {
     const ep = Number(epStr);
@@ -475,6 +486,14 @@ export default function MatchTable({ data }: { data: any }) {
       const ov = overrides[i];
       if (!ov) return r;
 
+      // Helper: apply manualMatched toggle if set, otherwise keep computed value
+      const applyManualMatched = (row: MatchRow, computedMatched: boolean): MatchRow => {
+        if (ov.manualMatched !== undefined) {
+          return { ...row, matched: ov.manualMatched };
+        }
+        return row;
+      };
+
       // Look up the overridden BGM entry
       const ovEntry = bgmEntryOptions.find((e) => e.id === ov.bgmEntryId);
       const eps = getBgmEpisodes(ov.bgmEntryId);
@@ -482,7 +501,7 @@ export default function MatchTable({ data }: { data: any }) {
 
       // Movies: override only updates BGM entry — no episodes to match against
       if (r.media_type === "movie") {
-        return {
+        return applyManualMatched({
           ...r,
           bgm_entry: ovEntry?.name || `ID ${ov.bgmEntryId}`,
           bgm_entry_id: ov.bgmEntryId,
@@ -490,7 +509,7 @@ export default function MatchTable({ data }: { data: any }) {
           bgm_ep_name_cn: '',
           bgm_ep_id: null,
           bgm_sort: null,
-        };
+        }, r.matched);
       }
 
       // ── Resolve TMDB lookup data shared by BGM→TMDB and direct overrides ──
@@ -504,15 +523,15 @@ export default function MatchTable({ data }: { data: any }) {
         if (ov.tmdbSeason != null && ov.tmdbEp != null) {
           const sData = tmdbSeasons[String(ov.tmdbSeason)];
           const eData = sData?.episodes?.find(e => e.epNum === ov.tmdbEp);
-          return {
+          return applyManualMatched({
             ...r,
             tmdb_season: ov.tmdbSeason,
             tmdb_ep: ov.tmdbEp,
             tmdb_ep_name: eData?.name || '-',
             matched: true,
-          };
+          }, true);
         }
-        return r;
+        return applyManualMatched(r, r.matched);
       }
 
       // Re-compute TMDB match against the overridden BGM episode name
@@ -537,7 +556,7 @@ export default function MatchTable({ data }: { data: any }) {
         finalEpName = eData?.name || '-';
       }
 
-      return {
+      return applyManualMatched({
         ...r,
         bgm_entry: ovEntry?.name || `ID ${ov.bgmEntryId}`,
         bgm_entry_id: ov.bgmEntryId,
@@ -549,7 +568,7 @@ export default function MatchTable({ data }: { data: any }) {
         tmdb_ep: finalEp,
         tmdb_ep_name: finalEpName,
         matched: finalMatched,
-      };
+      }, finalMatched);
     });
   }, [initialRows, overrides, bgmEntryOptions, searchResults, episodeData]);
 
@@ -672,16 +691,6 @@ export default function MatchTable({ data }: { data: any }) {
                           <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{r.file_name}</h4>
                         </div>
                       </div>
-                      <div className="flex items-center gap-4 shrink-0">
-                        <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-white/5 rounded-md">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Show</span>
-                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{r.show_name}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-white/5 rounded-md">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">S/E</span>
-                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{r.src_season} / {r.src_episode}</span>
-                        </div>
-                      </div>
                     </div>
                   </div>
                   {/* Bottom row: mapping controls */}
@@ -766,11 +775,17 @@ export default function MatchTable({ data }: { data: any }) {
                       </select>
                     </div>
                     <div className="ml-auto">
-                      {r.matched ? (
-                        <span className="bg-primary/10 text-primary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Mapped</span>
-                      ) : (
-                        <span className="bg-secondary/10 text-secondary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Pending</span>
-                      )}
+                      <button
+                        className="cursor-pointer select-none transition-all hover:scale-105 active:scale-95"
+                        onClick={() => handleToggleMatched(i, r.matched)}
+                        title="Click to toggle mapped/pending"
+                      >
+                        {r.matched ? (
+                          <span className="bg-primary/10 text-primary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Mapped</span>
+                        ) : (
+                          <span className="bg-secondary/10 text-secondary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Pending</span>
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -809,16 +824,6 @@ export default function MatchTable({ data }: { data: any }) {
                             <polyline points="14 2 14 8 20 8" />
                           </svg>
                           <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{r.file_name}</h4>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4 shrink-0">
-                        <div className="flex items-center gap-1.5 px-2 py-1 bg-amber-50 dark:bg-amber-500/5 rounded-md">
-                          <span className="text-[10px] text-amber-500 font-bold uppercase tracking-tighter">SP</span>
-                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{r.show_name}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 dark:bg-white/5 rounded-md">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">S/E</span>
-                          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{r.src_season} / {r.src_episode}</span>
                         </div>
                       </div>
                     </div>
@@ -927,11 +932,17 @@ export default function MatchTable({ data }: { data: any }) {
                       </select>
                     </div>
                     <div className="ml-auto">
-                      {r.matched ? (
-                        <span className="bg-primary/10 text-primary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Mapped</span>
-                      ) : (
-                        <span className="bg-amber-500/10 text-amber-500 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Select</span>
-                      )}
+                      <button
+                        className="cursor-pointer select-none transition-all hover:scale-105 active:scale-95"
+                        onClick={() => handleToggleMatched(i, r.matched)}
+                        title="Click to toggle mapped/pending"
+                      >
+                        {r.matched ? (
+                          <span className="bg-primary/10 text-primary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Mapped</span>
+                        ) : (
+                          <span className="bg-secondary/10 text-secondary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Pending</span>
+                        )}
+                      </button>
                     </div>
                   </div>
                 </div>
