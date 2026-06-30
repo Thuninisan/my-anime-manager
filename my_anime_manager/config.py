@@ -25,6 +25,8 @@ _DEFAULTS: dict[str, Any] = {
     "QBITTORRENT_PASSWORD": "Wu_570048008",
     "QBITTORRENT_SAVE_PATH": "/Media/BD",
     "RSS_DOWNLOAD_PATH": "/Media/番剧",
+    "TORRENT_DOWNLOAD_PATH": "/data/downloads",
+    "TORRENT_EXCLUDE_PATTERNS": "",
 }
 
 # Runtime overrides (set via API) — empty dict means "use env / default"

@@ -254,6 +254,8 @@ export interface AppConfig {
   QBITTORRENT_PASSWORD: string;
   QBITTORRENT_SAVE_PATH: string;
   RSS_DOWNLOAD_PATH: string;
+  TORRENT_DOWNLOAD_PATH: string;
+  TORRENT_EXCLUDE_PATTERNS: string;
 }
 
 /* App state machine */
