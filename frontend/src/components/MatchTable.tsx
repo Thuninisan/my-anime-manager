@@ -12,6 +12,8 @@
 */
 
 import { useState, useMemo } from 'react';
+import MappingCard from '@/components/Cards/MappingCard';
+import type { TmdbSeasonOption, TmdbEpOption } from '@/components/Cards/MappingCard';
 
 interface ParsedFile {
   file_name: string;
@@ -39,7 +41,7 @@ interface TmdbSeason {
   episodes: TmdbEpisode[];
 }
 
-interface BgmEpisode {
+export interface BgmEpisode {
   sort: number;
   id: number;
   name: string;
@@ -51,7 +53,7 @@ interface BgmEntry {
   episodes: BgmEpisode[];
 }
 
-interface MatchRow {
+export interface MatchRow {
   file_name: string;
   show_name: string;
   src_season: number;
@@ -714,121 +716,43 @@ export default function MatchTable({ data }: { data: any }) {
               const i = (r as any)._idx as number;
               const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
               const currentEntryId = r.bgm_entry_id ?? 0;
+
+              // Pre-compute TMDB season options for this TV card
+              const tmdbId = searchResults[r.show_name]?.tmdb?.id;
+              const rowTmdbSeasons: Record<string, TmdbSeason> =
+                (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+              const tmdbSeasonOpts: TmdbSeasonOption[] = Object.entries(rowTmdbSeasons).map(([skey, sdata]) => ({
+                value: String(Number(skey)),
+                label: sdata.name || `Season ${skey}`,
+              }));
+
+              // Pre-compute TMDB episode options
+              const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
+              const selSeasonData = selSeasonKey ? rowTmdbSeasons[selSeasonKey] : null;
+              const tmdbEpOpts: TmdbEpOption[] = (selSeasonData?.episodes || [])
+                .sort((a, b) => a.epNum - b.epNum);
+
               return (
-                <div key={i} className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md group">
-                  {/* Top row: file name + badges */}
-                  <div className="px-4 py-3 border-b border-slate-50 dark:border-white/5">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300 shrink-0">
-                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                            <polyline points="14 2 14 8 20 8" />
-                          </svg>
-                          <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{r.file_name}</h4>
-                        </div>
-                      </div>
-                      {hasMatchingSubtitle(r.file_name) && (
-                        <span className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">Sub</span>
-                      )}
-                    </div>
-                  </div>
-                  {/* Bottom row: mapping controls */}
-                  <div className="px-4 py-2.5 bg-slate-50/30 dark:bg-white/[0.02] flex flex-wrap items-center gap-x-6 gap-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Entry</span>
-                      <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[100px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={currentEntryId || ''}
-                        onChange={(e) => handleBgmEntryChange(i, e.target.value)}
-                      >
-                        {!currentEntryId && <option value="" disabled>-</option>}
-                        {bgmEntryOptions.map((opt) => (
-                          <option key={opt.id} value={opt.id}>{opt.name}</option>
-                        ))}
-                      </select>
-                      <div className="flex items-center gap-1 ml-1">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">#</span>
-                        <span className="text-[11px] font-mono text-slate-500">{r.bgm_sort ?? '-'}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Name</span>
-                      <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={r.bgm_ep_id ?? ''}
-                        onChange={(e) => handleBgmEpChange(i, currentEntryId, e.target.value)}
-                        title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
-                      >
-                        {currentEps.length === 0 && (
-                          <option value="" disabled>{r.bgm_ep_name || '-'}</option>
-                        )}
-                        {currentEps.map((ep) => (
-                          <option key={`${i}-bgm-${ep.id}`} value={ep.id}>
-                            E{ep.sort} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB S</span>
-                      <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={r.tmdb_season ?? ''}
-                        onChange={(e) => handleTmdbSeasonChange(i, r.show_name, e.target.value)}
-                      >
-                        {r.tmdb_season == null && <option value="" disabled>-</option>}
-                        {(() => {
-                          const tmdbId = searchResults[r.show_name]?.tmdb?.id;
-                          const rowTmdbSeasons: Record<string, TmdbSeason> =
-                            (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
-                          return Object.entries(rowTmdbSeasons).map(([skey, sdata]) => (
-                            <option key={skey} value={Number(skey)}>{sdata.name || `Season ${skey}`}</option>
-                          ));
-                        })()}
-                      </select>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB Ep</span>
-                      <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={r.tmdb_ep ?? ''}
-                        onChange={(e) => handleTmdbEpChange(i, e.target.value)}
-                        title={r.tmdb_ep_name}
-                      >
-                        {(() => {
-                          const tmdbId = searchResults[r.show_name]?.tmdb?.id;
-                          const rowTmdbSeasons: Record<string, TmdbSeason> =
-                            (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
-                          const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
-                          const selSeasonData = selSeasonKey ? rowTmdbSeasons[selSeasonKey] : null;
-                          const episodeOptions = (selSeasonData?.episodes || []).sort((a, b) => a.epNum - b.epNum);
-                          if (episodeOptions.length === 0) {
-                            return <option value="" disabled>{r.tmdb_ep_name || '-'}</option>;
-                          }
-                          return episodeOptions.map((ep) => (
-                            <option key={`${i}-tmdb-${ep.tmdbId}`} value={ep.epNum}>
-                              E{ep.epNum} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
-                            </option>
-                          ));
-                        })()}
-                      </select>
-                    </div>
-                    <div className="ml-auto">
-                      <button
-                        className="cursor-pointer select-none transition-all hover:scale-105 active:scale-95"
-                        onClick={() => handleToggleMatched(i, r.matched)}
-                        title="Click to toggle mapped/pending"
-                      >
-                        {r.matched ? (
-                          <span className="bg-primary/10 text-primary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Mapped</span>
-                        ) : (
-                          <span className="bg-secondary/10 text-secondary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Pending</span>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <MappingCard
+                  key={i}
+                  row={r}
+                  rowIndex={i}
+                  variant="tv"
+                  hasSubtitle={hasMatchingSubtitle(r.file_name)}
+                  bgmEntryOptions={bgmEntryOptions}
+                  currentEps={currentEps}
+                  currentEntryId={currentEntryId}
+                  tmdbSeasonOptions={tmdbSeasonOpts}
+                  tmdbSeasonValue={r.tmdb_season ?? ''}
+                  tmdbEpOptions={tmdbEpOpts}
+                  tmdbEpValue={r.tmdb_ep ?? ''}
+                  tmdbEpTitle={r.tmdb_ep_name}
+                  onBgmEntryChange={(v) => handleBgmEntryChange(i, v)}
+                  onBgmEpChange={(v) => handleBgmEpChange(i, currentEntryId, v)}
+                  onTmdbSeasonChange={(v) => handleTmdbSeasonChange(i, r.show_name, v)}
+                  onTmdbEpChange={(v) => handleTmdbEpChange(i, v)}
+                  onToggleMatched={() => handleToggleMatched(i, r.matched)}
+                />
               );
             })}
           </div>
@@ -852,143 +776,63 @@ export default function MatchTable({ data }: { data: any }) {
               const i = (r as any)._idx as number;
               const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
               const currentEntryId = r.bgm_entry_id ?? 0;
+
+              // Pre-compute TMDB season options: aggregate ALL seasons from all shows
+              const tmdbSeasonOpts: TmdbSeasonOption[] = [];
+              for (const [tmdbIdStr, seasons] of Object.entries(episodeData.tmdb || {})) {
+                const showTmdbId = Number(tmdbIdStr);
+                let showLabel = '';
+                for (const [, entry] of Object.entries(searchResults)) {
+                  if (entry.tmdb?.id === showTmdbId) {
+                    showLabel = entry.tmdb.name;
+                    break;
+                  }
+                }
+                if (!showLabel) showLabel = `TMDB ${showTmdbId}`;
+                for (const [skey, sdata] of Object.entries(seasons)) {
+                  tmdbSeasonOpts.push({
+                    value: `${showTmdbId}:${skey}`,
+                    label: `${showLabel}  ${sdata.name || `Season ${skey}`}`,
+                  });
+                }
+              }
+
+              // SP TMDB season value may be a composite "tmdbId:season"
+              const ov = overrides[i];
+              const tmdbSeasonVal = ov?.tmdbShowId && ov.tmdbSeason != null
+                ? `${ov.tmdbShowId}:${ov.tmdbSeason}`
+                : (r.tmdb_season ?? '');
+
+              // Pre-compute TMDB episode options (SP uses override's tmdbShowId)
+              const lookupTmdbId = ov?.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
+              const lookupSeasons: Record<string, TmdbSeason> =
+                (lookupTmdbId && episodeData.tmdb?.[String(lookupTmdbId)]) || {};
+              const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
+              const selSeasonData = selSeasonKey ? lookupSeasons[selSeasonKey] : null;
+              const tmdbEpOpts: TmdbEpOption[] = (selSeasonData?.episodes || [])
+                .sort((a, b) => a.epNum - b.epNum);
+
               return (
-                <div key={i} className="bg-surface-light dark:bg-surface-dark border border-amber-500/20 dark:border-amber-500/20 rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md group">
-                  {/* Top row: file name + badges */}
-                  <div className="px-4 py-3 border-b border-slate-50 dark:border-white/5">
-                    <div className="flex items-center justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400 shrink-0">
-                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                            <polyline points="14 2 14 8 20 8" />
-                          </svg>
-                          <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{r.file_name}</h4>
-                        </div>
-                      </div>
-                      {hasMatchingSubtitle(r.file_name) && (
-                        <span className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">Sub</span>
-                      )}
-                    </div>
-                  </div>
-                  {/* Bottom row: mapping controls (all default empty — user selects manually) */}
-                  <div className="px-4 py-2.5 bg-slate-50/30 dark:bg-white/[0.02] flex flex-wrap items-center gap-x-6 gap-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Entry</span>
-                      <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[100px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={currentEntryId || ''}
-                        onChange={(e) => handleBgmEntryChange(i, e.target.value)}
-                      >
-                        {!currentEntryId && <option value="" disabled>-</option>}
-                        {bgmEntryOptions.map((opt) => (
-                          <option key={opt.id} value={opt.id}>{opt.name}</option>
-                        ))}
-                      </select>
-                      <div className="flex items-center gap-1 ml-1">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">#</span>
-                        <span className="text-[11px] font-mono text-slate-500">{r.bgm_sort ?? '-'}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Name</span>
-                      <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={r.bgm_ep_id ?? ''}
-                        onChange={(e) => handleBgmEpChange(i, currentEntryId, e.target.value)}
-                        title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
-                      >
-                        {currentEps.length === 0 && (
-                          <option value="" disabled>{r.bgm_ep_name || '-'}</option>
-                        )}
-                        {currentEps.map((ep) => (
-                          <option key={`${i}-bgm-${ep.id}`} value={ep.id}>
-                            E{ep.sort} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    {/* SP cards: TMDB S aggregates ALL TMDB seasons from all shows */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB S</span>
-                      <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[160px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={(() => {
-                          const ov = overrides[i];
-                          if (ov?.tmdbShowId && ov.tmdbSeason != null) return `${ov.tmdbShowId}:${ov.tmdbSeason}`;
-                          return r.tmdb_season ?? '';
-                        })()}
-                        onChange={(e) => handleTmdbSeasonChange(i, r.show_name, e.target.value)}
-                      >
-                        {r.tmdb_season == null && <option value="" disabled>-</option>}
-                        {(() => {
-                          const opts: { value: string; label: string }[] = [];
-                          for (const [tmdbIdStr, seasons] of Object.entries(episodeData.tmdb || {})) {
-                            const showTmdbId = Number(tmdbIdStr);
-                            let showLabel = '';
-                            for (const [, entry] of Object.entries(searchResults)) {
-                              if (entry.tmdb?.id === showTmdbId) {
-                                showLabel = entry.tmdb.name;
-                                break;
-                              }
-                            }
-                            if (!showLabel) showLabel = `TMDB ${showTmdbId}`;
-                            for (const [skey, sdata] of Object.entries(seasons)) {
-                              opts.push({
-                                value: `${showTmdbId}:${skey}`,
-                                label: `${showLabel}  ${sdata.name || `Season ${skey}`}`,
-                              });
-                            }
-                          }
-                          return opts.map((opt) => (
-                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                          ));
-                        })()}
-                      </select>
-                    </div>
-                    {/* SP cards: TMDB Ep looks up from the override's tmdbShowId */}
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TMDB Ep</span>
-                      <select
-                        className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={r.tmdb_ep ?? ''}
-                        onChange={(e) => handleTmdbEpChange(i, e.target.value)}
-                        title={r.tmdb_ep_name}
-                      >
-                        {(() => {
-                          const ov = overrides[i];
-                          const lookupTmdbId = ov?.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
-                          const lookupSeasons: Record<string, TmdbSeason> =
-                            (lookupTmdbId && episodeData.tmdb?.[String(lookupTmdbId)]) || {};
-                          const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
-                          const selSeasonData = selSeasonKey ? lookupSeasons[selSeasonKey] : null;
-                          const episodeOptions = (selSeasonData?.episodes || []).sort((a, b) => a.epNum - b.epNum);
-                          if (episodeOptions.length === 0) {
-                            return <option value="" disabled>{r.tmdb_ep_name || '-'}</option>;
-                          }
-                          return episodeOptions.map((ep) => (
-                            <option key={`${i}-tmdb-${ep.tmdbId}`} value={ep.epNum}>
-                              E{ep.epNum} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
-                            </option>
-                          ));
-                        })()}
-                      </select>
-                    </div>
-                    <div className="ml-auto">
-                      <button
-                        className="cursor-pointer select-none transition-all hover:scale-105 active:scale-95"
-                        onClick={() => handleToggleMatched(i, r.matched)}
-                        title="Click to toggle mapped/pending"
-                      >
-                        {r.matched ? (
-                          <span className="bg-primary/10 text-primary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Mapped</span>
-                        ) : (
-                          <span className="bg-secondary/10 text-secondary text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Pending</span>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </div>
+                <MappingCard
+                  key={i}
+                  row={r}
+                  rowIndex={i}
+                  variant="sp"
+                  hasSubtitle={hasMatchingSubtitle(r.file_name)}
+                  bgmEntryOptions={bgmEntryOptions}
+                  currentEps={currentEps}
+                  currentEntryId={currentEntryId}
+                  tmdbSeasonOptions={tmdbSeasonOpts}
+                  tmdbSeasonValue={tmdbSeasonVal}
+                  tmdbEpOptions={tmdbEpOpts}
+                  tmdbEpValue={r.tmdb_ep ?? ''}
+                  tmdbEpTitle={r.tmdb_ep_name}
+                  onBgmEntryChange={(v) => handleBgmEntryChange(i, v)}
+                  onBgmEpChange={(v) => handleBgmEpChange(i, currentEntryId, v)}
+                  onTmdbSeasonChange={(v) => handleTmdbSeasonChange(i, r.show_name, v)}
+                  onTmdbEpChange={(v) => handleTmdbEpChange(i, v)}
+                  onToggleMatched={() => handleToggleMatched(i, r.matched)}
+                />
               );
             })}
           </div>
