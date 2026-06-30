@@ -695,8 +695,7 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
     tmdb_ids: set[int] = set()
     # Track media_type per TMDB ID so we know which ones are movies
     tmdb_media_types: dict[int, str] = {}
-    bangumi_ids: set[int] = set()          # TV only — full episode fetching
-    bangumi_movie_ids: set[int] = set()    # movie — name only, no episodes
+    bangumi_ids: set[int] = set()
     # Track which bangumi IDs need sequel expansion: bangumi_id → set of show_names
     sequel_map: dict[int, list[str]] = {}
 
@@ -709,10 +708,6 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
             tmdb_media_types[t["id"]] = mt
         if b and b.get("id"):
             bid = b["id"]
-            if mt == "movie":
-                # Movies: store name only, skip episode fetching + sequel expansion
-                bangumi_movie_ids.add(bid)
-                continue
             bangumi_ids.add(bid)
             eps = b.get("eps", 0)
             fc = file_counts.get(key, 0)
@@ -804,12 +799,6 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
             bid_str, data = r
             bangumi_data[bid_str] = data
             print(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
-
-    # ── Movie Bangumi entries: name comes from search_results, no API needed ──
-    # The frontend already receives search_results with bangumi.name/name_cn;
-    # episode_data.bangumi is only used for episode dropdowns (not needed for movies).
-    if bangumi_movie_ids:
-        print(f"   Bangumi movie IDs (名称已在搜索结果中): {sorted(bangumi_movie_ids)}")
 
     # ── Sequel expansion: if parsed file count > eps, fetch sequel episodes ──
     for primary_bid, show_keys in sequel_map.items():

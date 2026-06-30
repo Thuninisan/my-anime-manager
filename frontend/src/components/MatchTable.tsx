@@ -378,10 +378,12 @@ export default function MatchTable({ data }: { data: any }) {
     return [...regularRows, ...spRows];
   }, [data]);
 
-  // ── Per-row overrides: rowIndex → { bgmEntryId, bgmEpSort, tmdbSeason?, tmdbEp? } ──
+  // ── Per-row overrides: rowIndex → { bgmEntryId, bgmEpSort, bgmEpId?, ... } ──
   // TMDB fields allow direct season/episode override independent of BGM matching.
+  // bgmEpId stores the exact episode ID for disambiguation when episodes share
+  // the same sort number (e.g. two specials both with sort=1).
   const [overrides, setOverrides] = useState<
-    Record<number, { bgmEntryId: number; bgmEpSort: number; tmdbSeason?: number; tmdbEp?: number; tmdbShowId?: number; manualMatched?: boolean }>
+    Record<number, { bgmEntryId: number; bgmEpSort: number; bgmEpId?: number; tmdbSeason?: number; tmdbEp?: number; tmdbShowId?: number; manualMatched?: boolean }>
   >({});
 
   // ── Get episodes for a specific BGM entry ──
@@ -394,19 +396,40 @@ export default function MatchTable({ data }: { data: any }) {
   const handleBgmEntryChange = (rowIndex: number, entryIdStr: string) => {
     const entryId = Number(entryIdStr);
     const eps = getBgmEpisodes(entryId);
-    const firstSort = eps[0]?.sort ?? 0;
-    setOverrides((prev) => ({
-      ...prev,
-      [rowIndex]: { bgmEntryId: entryId, bgmEpSort: firstSort },
-    }));
+    const firstEp = eps[0];
+    setOverrides((prev) => {
+      const existing = prev[rowIndex] || {};
+      return {
+        ...prev,
+        [rowIndex]: {
+          ...existing,
+          bgmEntryId: entryId,
+          bgmEpSort: firstEp?.sort ?? 0,
+          bgmEpId: firstEp?.id,  // store exact episode ID for disambiguation
+        },
+      };
+    });
   };
 
   // ── Handle BGM Name (episode) dropdown change ──
-  const handleBgmEpChange = (rowIndex: number, entryId: number, epSortStr: string) => {
-    setOverrides((prev) => ({
-      ...prev,
-      [rowIndex]: { bgmEntryId: entryId, bgmEpSort: Number(epSortStr) },
-    }));
+  // Uses episode ID as value (not sort) because sort numbers can be duplicated
+  // within the same BGM entry (e.g. two specials both with sort=1).
+  const handleBgmEpChange = (rowIndex: number, entryId: number, epIdStr: string) => {
+    const epId = Number(epIdStr);
+    const eps = getBgmEpisodes(entryId);
+    const ep = eps.find(e => e.id === epId);
+    setOverrides((prev) => {
+      const existing = prev[rowIndex] || {};
+      return {
+        ...prev,
+        [rowIndex]: {
+          ...existing,
+          bgmEntryId: entryId,
+          bgmEpSort: ep?.sort ?? 0,
+          bgmEpId: epId,  // store exact episode ID for disambiguation
+        },
+      };
+    });
   };
 
   // ── Handle TMDB Season dropdown change → auto-select first episode ──
@@ -507,7 +530,11 @@ export default function MatchTable({ data }: { data: any }) {
       // Look up the overridden BGM entry
       const ovEntry = bgmEntryOptions.find((e) => e.id === ov.bgmEntryId);
       const eps = getBgmEpisodes(ov.bgmEntryId);
-      const ovEp = eps.find((e) => e.sort === ov.bgmEpSort);
+      // Prefer exact episode ID lookup to disambiguate when multiple
+      // episodes share the same sort number (e.g. two specials both sort=1).
+      const ovEp = ov.bgmEpId != null
+        ? eps.find((e) => e.id === ov.bgmEpId)
+        : eps.find((e) => e.sort === ov.bgmEpSort);
 
       // Movies: override only updates BGM entry — no episodes to match against
       if (r.media_type === "movie") {
@@ -729,7 +756,7 @@ export default function MatchTable({ data }: { data: any }) {
                       <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Name</span>
                       <select
                         className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={r.bgm_sort ?? ''}
+                        value={r.bgm_ep_id ?? ''}
                         onChange={(e) => handleBgmEpChange(i, currentEntryId, e.target.value)}
                         title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
                       >
@@ -737,7 +764,7 @@ export default function MatchTable({ data }: { data: any }) {
                           <option value="" disabled>{r.bgm_ep_name || '-'}</option>
                         )}
                         {currentEps.map((ep) => (
-                          <option key={ep.sort} value={ep.sort}>
+                          <option key={`${i}-bgm-${ep.id}`} value={ep.id}>
                             E{ep.sort} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
                           </option>
                         ))}
@@ -780,7 +807,7 @@ export default function MatchTable({ data }: { data: any }) {
                             return <option value="" disabled>{r.tmdb_ep_name || '-'}</option>;
                           }
                           return episodeOptions.map((ep) => (
-                            <option key={ep.epNum} value={ep.epNum}>
+                            <option key={`${i}-tmdb-${ep.tmdbId}`} value={ep.epNum}>
                               E{ep.epNum} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
                             </option>
                           ));
@@ -867,7 +894,7 @@ export default function MatchTable({ data }: { data: any }) {
                       <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Name</span>
                       <select
                         className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-                        value={r.bgm_sort ?? ''}
+                        value={r.bgm_ep_id ?? ''}
                         onChange={(e) => handleBgmEpChange(i, currentEntryId, e.target.value)}
                         title={`${r.bgm_ep_name}${r.bgm_ep_name_cn ? ` / ${r.bgm_ep_name_cn}` : ''}`}
                       >
@@ -875,7 +902,7 @@ export default function MatchTable({ data }: { data: any }) {
                           <option value="" disabled>{r.bgm_ep_name || '-'}</option>
                         )}
                         {currentEps.map((ep) => (
-                          <option key={ep.sort} value={ep.sort}>
+                          <option key={`${i}-bgm-${ep.id}`} value={ep.id}>
                             E{ep.sort} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
                           </option>
                         ))}
@@ -940,7 +967,7 @@ export default function MatchTable({ data }: { data: any }) {
                             return <option value="" disabled>{r.tmdb_ep_name || '-'}</option>;
                           }
                           return episodeOptions.map((ep) => (
-                            <option key={ep.epNum} value={ep.epNum}>
+                            <option key={`${i}-tmdb-${ep.tmdbId}`} value={ep.epNum}>
                               E{ep.epNum} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
                             </option>
                           ));
