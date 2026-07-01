@@ -25,3 +25,6 @@ frontend/dist/
 # OS
 Thumbs.db
 .DS_Store
+
+# User-uploaded subtitles (runtime data)
+my_anime_manager/data/subtitles/

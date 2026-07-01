@@ -21,64 +21,42 @@ export default function TorrentPage() {
   const [searchResult, setSearchResult] = useState<any>(null);
   const [augmentedEpData, setAugmentedEpData] = useState<any>(null);
 
+  // Parse-and-search handler for the upload dropzone
+  const handleParseTorrent = async (file: File) => {
+    const result = await parseAndSearchTorrent(file);
+    setSearchResult(result);
+    setAugmentedEpData(null);
+  };
+
   return (
     <>
       {/* idle / uploading: show dropzone */}
       {(state === 'idle' || state === 'uploading') && (
-        <>
-          <TorrentUpload onUpload={uploadTorrent} uploading={state === 'uploading'} />
-          {/* Test: parse-and-search button */}
-          {state === 'idle' && (
-            <div className="flex justify-center mt-4">
-              <input
-                type="file"
-                accept=".torrent"
-                id="parse-search-input"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  try {
-                    const result = await parseAndSearchTorrent(file);
-                    setSearchResult(result);
-                  } catch (err: any) {
-                    console.error(err);
-                    setSearchResult({ error: err.message });
-                  }
-                }}
-              />
-              <button
-                className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground transition cursor-pointer"
-                onClick={() => document.getElementById('parse-search-input')?.click()}
-              >
-                Test: Parse &amp; Search
-              </button>
-            </div>
-          )}
-          {/* match table / preview */}
-          {searchResult && !searchResult.error && searchResult.parsed_files && (
-            <TorrentPreview
-              searchResult={searchResult}
-              augmentedEpData={augmentedEpData}
-              onEpisodeDataChange={setAugmentedEpData}
-              onClose={() => { setSearchResult(null); setAugmentedEpData(null); }}
-            />
-          )}
-          {searchResult?.error && (
-            <div className="max-w-4xl mx-auto mt-4 glass-card rounded-xl p-4">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-semibold text-destructive">Error</span>
-                <button
-                  className="text-muted-foreground hover:text-foreground text-lg leading-none cursor-pointer"
-                  onClick={() => setSearchResult(null)}
-                >
-                  ×
-                </button>
-              </div>
-              <pre className="text-xs text-muted-foreground">{searchResult.error}</pre>
-            </div>
-          )}
-        </>
+        <TorrentUpload onParse={handleParseTorrent} />
+      )}
+
+      {/* match table / preview (parse-and-search result) */}
+      {searchResult && !searchResult.error && searchResult.parsed_files && (
+        <TorrentPreview
+          searchResult={searchResult}
+          augmentedEpData={augmentedEpData}
+          onEpisodeDataChange={setAugmentedEpData}
+          onClose={() => { setSearchResult(null); setAugmentedEpData(null); }}
+        />
+      )}
+      {searchResult?.error && (
+        <div className="max-w-4xl mx-auto mt-4 glass-card rounded-xl p-4">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-semibold text-destructive">Error</span>
+            <button
+              className="text-muted-foreground hover:text-foreground text-lg leading-none cursor-pointer"
+              onClick={() => setSearchResult(null)}
+            >
+              &times;
+            </button>
+          </div>
+          <pre className="text-xs text-muted-foreground">{searchResult.error}</pre>
+        </div>
       )}
 
       {/* error */}
@@ -104,7 +82,7 @@ export default function TorrentPage() {
         </div>
       )}
 
-      {/* preview: cards + stats + footer */}
+      {/* preview: cards + stats + footer (main flow — still available via usePreviewFlow) */}
       {isPreviewState && (
         <PreviewDashboard data={previewData} onConfirm={confirmTorrent} onCancel={reset} />
       )}
