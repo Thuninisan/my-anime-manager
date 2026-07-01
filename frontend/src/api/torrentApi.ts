@@ -1,38 +1,6 @@
-import type { TorrentPreviewResponse, ConfirmResponse, AppConfig } from '../types/preview';
+import type { AppConfig } from '../types/preview';
 
 const API_BASE = '/api';
-
-export async function uploadPreview(file: File): Promise<TorrentPreviewResponse> {
-  const formData = new FormData();
-  formData.append('file', file);
-
-  const res = await fetch(`${API_BASE}/torrent/preview`, {
-    method: 'POST',
-    body: formData,
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `Upload failed (HTTP ${res.status})`);
-  }
-
-  return res.json();
-}
-
-export async function confirmTorrent(previewData: TorrentPreviewResponse): Promise<ConfirmResponse> {
-  const res = await fetch(`${API_BASE}/torrent/confirm`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(previewData),
-  });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(err.detail || `Confirm failed (HTTP ${res.status})`);
-  }
-
-  return res.json();
-}
 
 // ── Config ──
 
@@ -64,6 +32,8 @@ export async function getConfig(): Promise<AppConfig> {
   }
   return res.json();
 }
+
+// ── Parse & Search (primary torrent flow) ──
 
 export async function parseAndSearchTorrent(file: File): Promise<any> {
   const formData = new FormData();

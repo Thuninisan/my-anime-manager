@@ -34,7 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config
-from .services.batch_service import build_preview, execute_confirm, process_torrent
+from .services.batch_service import process_torrent
 from .services import rss as rss_service
 from .services import downloader
 from .services import tmdb as tmdb_service
@@ -106,94 +106,6 @@ async def on_startup():
 # ═══════════════════════════════════════════════════════════════════════
 # Pydantic response models
 # ═══════════════════════════════════════════════════════════════════════
-
-class EpisodePreview(BaseModel):
-    fileName: str
-    torrentPath: str
-    showName: str
-    season: int
-    episode: int
-
-
-class ExtraPreview(BaseModel):
-    fileName: str
-    torrentPath: str
-    type: str  # "oped" | "special" | "unknown"
-
-
-class TmdbEpisodeInfo(BaseModel):
-    epNum: int
-    name: str
-    tmdbId: int
-    overview: str = ""
-    airDate: str = ""
-    runtime: int = 0
-    stillPath: str = ""
-
-
-class SeasonInfo(BaseModel):
-    name: str
-    episodes: list[TmdbEpisodeInfo]
-
-
-class TmdbPreview(BaseModel):
-    id: int
-    name: str
-    originalName: str = ""
-    firstAirDate: str = ""
-    overview: str = ""
-    genres: list[str] = []
-    studios: list[str] = []
-    numSeasons: int = 0
-    posterPath: str = ""
-    backdropPath: str = ""
-    voteAverage: float = 0.0
-    status: str = ""
-    seasonMap: dict[str, SeasonInfo] = {}
-
-
-class BangumiEntryPreview(BaseModel):
-    id: int
-    name: str
-    nameCn: str | None = None
-    date: str | None = None
-    eps: int = 0
-
-
-class BangumiPreview(BaseModel):
-    chain: list[BangumiEntryPreview]
-    startEntryId: int
-
-
-class FileMappingPreview(BaseModel):
-    oldPath: str
-    newPath: str
-    type: str  # "episode" | "oped" | "special" | "unknown"
-
-
-class EpisodeMatchPreview(BaseModel):
-    """Per-episode matching detail for the frontend."""
-    fileName: str
-    torrentPath: str
-    showName: str
-    season: int
-    episode: int
-    seasonNumber: int
-    episodeNumber: int
-    bangumiSubjectName: str
-    bangumiEpId: int | None = None
-    tmdbEpName: str = ""
-    tmdbEpId: int = 0
-
-
-class ConfirmResponse(BaseModel):
-    ok: bool
-    nfoGenerated: int = 0
-    imagesDownloaded: int = 0
-    filesRenamed: int = 0
-    showDirName: str = ""
-    error: str = ""
-
 
 class RssSubtitleGroup(BaseModel):
     name: str
@@ -284,60 +196,6 @@ class ScanStatus(BaseModel):
     failed: int
     current_file: str
     errors: list[str]
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Helpers: convert internal dicts to Pydantic models
-# ═══════════════════════════════════════════════════════════════════════
-
-def _make_tmdb_preview(tv_show: dict, detail: dict, season_map: dict) -> TmdbPreview:
-    """Build a TmdbPreview from raw service-layer dicts."""
-    seasons: dict[str, SeasonInfo] = {}
-    for sk, sv in season_map.items():
-        eps = [
-            TmdbEpisodeInfo(
-                epNum=e["epNum"],
-                name=e["name"],
-                tmdbId=e["tmdbId"],
-                overview=e.get("overview", ""),
-                airDate=e.get("airDate", ""),
-                runtime=e.get("runtime", 0),
-                stillPath=e.get("stillPath", ""),
-            )
-            for e in sv.get("episodes", [])
-        ]
-        seasons[str(sk)] = SeasonInfo(name=sv.get("name", f"Season {sk}"), episodes=eps)
-
-    return TmdbPreview(
-        id=tv_show["id"],
-        name=tv_show["name"],
-        originalName=detail.get("original_name") or tv_show.get("original_name", "") or "",
-        firstAirDate=detail.get("first_air_date", ""),
-        overview=detail.get("overview", ""),
-        genres=detail.get("genres", []),
-        studios=detail.get("studios", []),
-        numSeasons=detail.get("number_of_seasons", 0),
-        posterPath=detail.get("poster_path", ""),
-        backdropPath=detail.get("backdrop_path", ""),
-        voteAverage=detail.get("vote_average", 0.0),
-        status=detail.get("status", ""),
-        seasonMap=seasons,
-    )
-
-
-def _make_bangumi_preview(chain: list[dict], start_entry_id: int) -> BangumiPreview:
-    """Build a BangumiPreview from the chain list."""
-    entries = [
-        BangumiEntryPreview(
-            id=e["id"],
-            name=e["name"],
-            nameCn=e.get("name_cn"),
-            date=e.get("date"),
-            eps=e.get("eps", 0),
-        )
-        for e in chain
-    ]
-    return BangumiPreview(chain=entries, startEntryId=start_entry_id)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -502,60 +360,6 @@ async def root():
             "failed": _watch_status["failed"],
         },
     }
-
-
-# ── /api/torrent/preview ──
-
-@app.post("/api/torrent/preview")
-async def torrent_preview(file: UploadFile = File(...)):
-    """Upload a .torrent file for preview analysis.
-
-    Returns the full preview JSON — the frontend may modify it before
-    posting it back to ``/api/torrent/confirm``.
-    """
-    if not file.filename or not file.filename.endswith(".torrent"):
-        raise HTTPException(400, "请上传 .torrent 文件")
-
-    # Save uploaded file to temp location
-    with tempfile.NamedTemporaryFile(suffix=".torrent", delete=False) as tmp:
-        tmp.write(await file.read())
-        tmp_path = tmp.name
-
-    try:
-        preview_data = await build_preview(tmp_path)
-    except Exception as e:
-        Path(tmp_path).unlink(missing_ok=True)
-        traceback.print_exc()
-        raise HTTPException(400, str(e))
-
-    # build_preview already returns the new {tvshow, seasons, episodes} format
-    return preview_data
-
-
-# ── /api/torrent/confirm ──
-
-@app.post("/api/torrent/confirm", response_model=ConfirmResponse)
-async def torrent_confirm(body: dict):
-    """Execute the confirmed plan.
-
-    Accepts the (possibly modified) preview JSON and performs all writes:
-    NFO generation, image downloads, qBittorrent renames, and torrent resume.
-    """
-    torrent_path = body.get("torrent_path", "")
-    summary = await execute_confirm(body)
-
-    # Clean up the temp .torrent file
-    if torrent_path:
-        Path(torrent_path).unlink(missing_ok=True)
-
-    return ConfirmResponse(
-        ok=not summary.get("error"),
-        nfoGenerated=summary.get("nfoGenerated", 0),
-        imagesDownloaded=summary.get("imagesDownloaded", 0),
-        filesRenamed=summary.get("filesRenamed", 0),
-        showDirName=summary.get("showDirName", ""),
-        error=summary.get("error", ""),
-    )
 
 
 # ── /api/torrent/subtitle/upload ──
