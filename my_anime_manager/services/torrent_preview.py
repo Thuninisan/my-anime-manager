@@ -253,9 +253,9 @@ async def _search_tmdb_for_name(show_name: str, search_as_movie: bool = False) -
     """
     cleaned_name, year = _extract_year(show_name)
     if search_as_movie:
-        res = await tmdb_client.search_movie(cleaned_name)
+        res = await tmdb_client.search_movie(cleaned_name, language="zh-CN")
     else:
-        res = await tmdb_client.search_tv(cleaned_name)
+        res = await tmdb_client.search_tv(cleaned_name, language="zh-CN")
     raw_results = res.json().get("results", [])
     first = raw_results[0] if raw_results else None
     # Build first_clean: TMDB /search/movie uses "title", /search/tv uses "name".

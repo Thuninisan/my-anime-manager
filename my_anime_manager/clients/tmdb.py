@@ -30,10 +30,13 @@ async def _tmdb_request(
     )
 
 
-async def search_tv(query: str) -> httpx.Response:
-    """Search for TV shows."""
+async def search_tv(query: str, language: str = "") -> httpx.Response:
+    """Search for TV shows.  Pass *language* (e.g. ``"zh-CN"``) to override."""
+    params: dict[str, str] = {"query": query}
+    if language:
+        params["language"] = language
     return await _tmdb_request(
-        "/search/tv", params={"query": query}, label=f"TMDB search"
+        "/search/tv", params=params, label=f"TMDB search"
     )
 
 
@@ -79,10 +82,13 @@ async def get_tv_images(tv_id: int, languages: str = "ja,zh,null") -> httpx.Resp
 
 # ── Movie endpoints ──
 
-async def search_movie(query: str) -> httpx.Response:
-    """Search for movies."""
+async def search_movie(query: str, language: str = "") -> httpx.Response:
+    """Search for movies.  Pass *language* (e.g. ``"zh-CN"``) to override."""
+    params: dict[str, str] = {"query": query}
+    if language:
+        params["language"] = language
     return await _tmdb_request(
-        "/search/movie", params={"query": query}, label=f"TMDB movie search"
+        "/search/movie", params=params, label=f"TMDB movie search"
     )
 
 
