@@ -11,10 +11,34 @@
    auto-matched entry and episode.
 */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef } from 'react';
 import MappingCard from '@/components/Cards/MappingCard';
 import type { TmdbSeasonOption, TmdbEpOption } from '@/components/Cards/MappingCard';
-import { deleteSubtitle } from '@/api/torrentApi';
+import { deleteSubtitle, uploadSubtitle } from '@/api/torrentApi';
+
+// Allowed subtitle extensions for batch folder upload
+const BATCH_SUB_EXTENSIONS = new Set(['.ass', '.ssa', '.srt', '.sub', '.idx', '.vtt', '.ttml', '.sbv', '.dfxp']);
+
+/** Extract a candidate episode number from a subtitle filename.
+ *  Tries several common anime naming patterns; returns the number or null. */
+function extractEpisodeNumber(filename: string): number | null {
+  const name = filename.replace(/\\/g, '/').split('/').pop() || filename;
+  const patterns = [
+    /[\[【\(（#](\d{1,3})(?:v\d+)?[\]】\)）]/,       // [01], (01), #01 etc.
+    /[Ee](\d{1,3})(?:\s|$|[._-])/,                     // E01, e01
+    /第\s*(\d{1,3})\s*[话話]/,                            // 第01话
+    /[-_\.\s](\d{1,3})(?:v\d+)?(?:\.[^.]+)?$/,          // trailing -01 before ext
+    /[-_\.\s](\d{1,3})(?:v\d+)?[-_\.\s]/,               // -01- or _01_ in the middle
+  ];
+  for (const re of patterns) {
+    const m = name.match(re);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (n >= 1 && n <= 999) return n;
+    }
+  }
+  return null;
+}
 
 interface ParsedFile {
   file_name: string;
@@ -670,6 +694,89 @@ export default function MatchTable({ data }: { data: any }) {
     [rows],
   );
 
+  // ── Batch folder subtitle upload ──
+  const batchFolderRef = useRef<HTMLInputElement>(null);
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchProgress, setBatchProgress] = useState('');
+
+  const handleBatchFolderUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    setBatchProcessing(true);
+    setBatchProgress('');
+
+    // Filter to subtitle files only, preserving relative paths
+    const subFiles: { file: File; relativePath: string }[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const ext = '.' + f.name.split('.').pop()?.toLowerCase();
+      if (BATCH_SUB_EXTENSIONS.has(ext)) {
+        // webkitRelativePath contains the folder-relative path; fall back to name
+        const relPath = (f as any).webkitRelativePath || f.name;
+        subFiles.push({ file: f, relativePath: relPath });
+      }
+    }
+
+    if (subFiles.length === 0) {
+      setBatchProgress('文件夹中未找到字幕文件');
+      setBatchProcessing(false);
+      if (batchFolderRef.current) batchFolderRef.current.value = '';
+      return;
+    }
+
+    // Build a map: episode number → TV row (use src_episode for matching)
+    const epToRow = new Map<number, typeof tvRows[0]>();
+    for (const row of tvRows) {
+      const ep = row.src_episode;
+      if (ep != null && ep > 0 && !epToRow.has(ep)) {
+        epToRow.set(ep, row);
+      }
+    }
+
+    let matched = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    for (const { file, relativePath } of subFiles) {
+      const epNum = extractEpisodeNumber(relativePath);
+      if (epNum === null) {
+        skipped++;
+        continue;
+      }
+
+      const targetRow = epToRow.get(epNum);
+      if (!targetRow) {
+        skipped++;
+        continue;
+      }
+
+      // Compute the video stem so the stored subtitle matches the badge logic
+      const videoStem = targetRow.file_name.replace(/\.[^.]+$/, '');
+
+      try {
+        const result = await uploadSubtitle(file, torrentName, videoStem);
+        // Add to state — the stored filename stem matches the video stem,
+        // so hasMatchingSubtitle will pick it up automatically
+        setUploadedSubtitles((prev) => [...prev, {
+          originalFilename: file.name,
+          storedFilename: result.filename,
+        }]);
+        matched++;
+      } catch (err: any) {
+        errors.push(`${file.name}: ${err.message}`);
+      }
+    }
+
+    let msg = `匹配 ${matched} 个字幕`;
+    if (skipped > 0) msg += `，跳过 ${skipped} 个`;
+    if (errors.length > 0) msg += `，${errors.length} 个失败`;
+    setBatchProgress(msg);
+
+    setBatchProcessing(false);
+    if (batchFolderRef.current) batchFolderRef.current.value = '';
+  }, [tvRows, torrentName]);
+
   return (
     <div className="space-y-10">
       {/* ── Movie Table ── */}
@@ -737,7 +844,39 @@ export default function MatchTable({ data }: { data: any }) {
               <h3 className="font-bold text-lg">TV Series</h3>
               <span className="text-xs text-slate-400 ml-2">({tvRows.length} files)</span>
             </div>
+            <div className="flex items-center gap-3">
+              {/* Batch folder upload */}
+              <input
+                ref={batchFolderRef}
+                type="file"
+                // @ts-ignore — webkitdirectory is widely supported but not in TS types
+                webkitdirectory=""
+                directory=""
+                accept=".ass,.ssa,.srt,.sub,.idx,.vtt,.ttml,.sbv,.dfxp"
+                className="hidden"
+                onChange={handleBatchFolderUpload}
+              />
+              <button
+                className="inline-flex items-center gap-1.5 bg-[#f09199]/10 text-[#f09199] text-[10px] px-3 py-1 rounded-full font-bold uppercase tracking-wider hover:bg-[#f09199]/25 transition-colors cursor-pointer disabled:opacity-50"
+                title="批量上传字幕文件夹 — 自动按集数匹配"
+                onClick={() => batchFolderRef.current?.click()}
+                disabled={batchProcessing}
+              >
+                {batchProcessing ? (
+                  <>
+                    <div className="w-3 h-3 border-2 border-[#f09199]/30 border-t-[#f09199] rounded-full animate-spin" />
+                    匹配中...
+                  </>
+                ) : (
+                  '+SUB'
+                )}
+              </button>
+            </div>
           </div>
+          {/* Batch progress message */}
+          {batchProgress && (
+            <p className="text-xs text-slate-500 mb-3 -mt-1">{batchProgress}</p>
+          )}
           <div className="space-y-3">
             {tvRows.map((r) => {
               const i = (r as any)._idx as number;

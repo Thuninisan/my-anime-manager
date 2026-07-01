@@ -568,11 +568,19 @@ _SUBTITLE_DIR = Path(__file__).parent / "data" / "subtitles"
 
 
 @app.post("/api/torrent/subtitle/upload")
-async def subtitle_upload(file: UploadFile = File(...), torrent_name: str = Form(...)):
+async def subtitle_upload(
+    file: UploadFile = File(...),
+    torrent_name: str = Form(...),
+    target_stem: str = Form(""),
+):
     """Upload a subtitle file for a specific torrent.
 
     The file is stored under ``data/subtitles/{torrent_name}/`` so it can be
     copied alongside the media files during the confirm phase.
+
+    If *target_stem* is provided the file is renamed to ``{target_stem}{ext}``
+    so the frontend can match it to a specific video file by filename stem
+    (used by batch folder upload).
 
     Only common subtitle formats are accepted (.ass, .srt, etc.).
     """
@@ -594,8 +602,17 @@ async def subtitle_upload(file: UploadFile = File(...), torrent_name: str = Form
     dest_dir = _SUBTITLE_DIR / safe_torrent_name
     dest_dir.mkdir(parents=True, exist_ok=True)
 
+    # Determine the stored filename: use target_stem if provided, else original name
+    if target_stem:
+        safe_stem = re.sub(r'[<>:"/\\|?*]', "_", target_stem).strip()
+        if not safe_stem:
+            raise HTTPException(400, "target_stem 无效")
+        dest_filename = f"{safe_stem}{ext}"
+    else:
+        dest_filename = file.filename
+
     # Avoid overwriting — append a counter if the file already exists
-    dest_path = dest_dir / file.filename
+    dest_path = dest_dir / dest_filename
     if dest_path.exists():
         stem, suffix = dest_path.stem, dest_path.suffix
         counter = 1

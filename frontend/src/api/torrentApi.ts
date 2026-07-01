@@ -95,10 +95,14 @@ export interface SubtitleUploadResult {
 export async function uploadSubtitle(
   file: File,
   torrentName: string,
+  targetStem: string = '',
 ): Promise<SubtitleUploadResult> {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('torrent_name', torrentName);
+  if (targetStem) {
+    formData.append('target_stem', targetStem);
+  }
 
   const res = await fetch(`${API_BASE}/torrent/subtitle/upload`, {
     method: 'POST',
