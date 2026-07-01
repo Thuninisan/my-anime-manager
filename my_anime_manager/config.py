@@ -27,6 +27,7 @@ _DEFAULTS: dict[str, Any] = {
     "RSS_DOWNLOAD_PATH": "/Media/番剧",
     "TORRENT_DOWNLOAD_PATH": "/data/downloads",
     "TORRENT_EXCLUDE_PATTERNS": "cds,scans,pv,cm,menu,iv,preview,mka,nced,ncop",
+    "TORRENT_HARDLINK_PATH": "/Media/BD",
 }
 
 # Runtime overrides (set via API) — empty dict means "use env / default"

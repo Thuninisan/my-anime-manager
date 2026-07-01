@@ -164,4 +164,5 @@ export interface AppConfig {
   RSS_DOWNLOAD_PATH: string;
   TORRENT_DOWNLOAD_PATH: string;
   TORRENT_EXCLUDE_PATTERNS: string;
+  TORRENT_HARDLINK_PATH: string;
 }

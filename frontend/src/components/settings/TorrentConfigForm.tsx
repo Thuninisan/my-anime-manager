@@ -57,6 +57,30 @@ export default function TorrentConfigForm({ config, dirty, onChange }: Props) {
         </div>
       </section>
 
+      {/* ── Hardlink Path ── */}
+      <section className="bg-card rounded-xl sakura-shadow border border-border/30 p-6">
+        <div className="flex items-center gap-2 mb-5">
+          <span className="text-lg">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+          </span>
+          <h3 className="text-base font-semibold text-foreground">Hardlink Path</h3>
+        </div>
+        <div className="grid grid-cols-1 gap-5">
+          <FieldRow label="Hardlink Path" hint="Target directory for creating hard links of processed media files (Jellyfin library path)">
+            <input
+              className={fieldClass('TORRENT_HARDLINK_PATH')}
+              type="text"
+              value={val('TORRENT_HARDLINK_PATH')}
+              placeholder="/Media/BD"
+              onChange={e => onChange('TORRENT_HARDLINK_PATH', e.target.value)}
+            />
+          </FieldRow>
+        </div>
+      </section>
+
       {/* ── Exclude Patterns ── */}
       <section className="bg-card rounded-xl sakura-shadow border border-border/30 p-6">
         <div className="flex items-center gap-2 mb-5">
