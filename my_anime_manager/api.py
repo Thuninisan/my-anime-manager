@@ -719,7 +719,8 @@ async def torrent_download(body: dict):
     if not files:
         raise HTTPException(400, "文件列表为空")
 
-    hardlink_root = config.TORRENT_HARDLINK_PATH
+    download_path = config.TORRENT_DOWNLOAD_PATH  # qBittorrent 下载暂存目录
+    hardlink_root = config.TORRENT_HARDLINK_PATH   # 下载完成后硬链接目标目录
 
     # ── Read the full file list from the torrent ──
     try:
@@ -742,7 +743,7 @@ async def torrent_download(body: dict):
 
     # ── Add torrent (paused) ──
     try:
-        info_hash = await add_torrent(client, torrent_path, hardlink_root, torrent_name)
+        info_hash = await add_torrent(client, torrent_path, download_path, torrent_name)
         logger.info("种子已添加 [%s]: hash=%s", torrent_name, info_hash[:12])
     except Exception as e:
         raise HTTPException(500, f"添加种子失败: {e}")
