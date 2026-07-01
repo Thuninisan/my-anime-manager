@@ -199,6 +199,34 @@ async def resume_torrent(
     return await asyncio.to_thread(_do_resume)
 
 
+async def set_file_priority(
+    client: qbittorrentapi.Client,
+    info_hash: str,
+    file_ids: list[int],
+    priority: int,
+) -> bool:
+    """Set download priority for specific files within a torrent.
+
+    Args:
+        client: Authenticated qbittorrentapi.Client
+        info_hash: Torrent info hash
+        file_ids: List of zero-based file indices within the torrent
+        priority: 0 = do not download, 1 = normal, 6 = maximum
+
+    Returns:
+        True on success
+    """
+    def _do_set():
+        client.torrents.file_priority(
+            torrent_hash=info_hash,
+            file_ids=file_ids,
+            priority=priority,
+        )
+        return True
+
+    return await asyncio.to_thread(_do_set)
+
+
 async def delete_torrent(
     client: qbittorrentapi.Client,
     info_hash: str,

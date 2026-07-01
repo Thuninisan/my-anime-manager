@@ -11,7 +11,7 @@
    auto-matched entry and episode.
 */
 
-import { useState, useMemo, useCallback, useRef } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import MappingCard from '@/components/Cards/MappingCard';
 import type { TmdbSeasonOption, TmdbEpOption } from '@/components/Cards/MappingCard';
 import { deleteSubtitle, uploadSubtitle } from '@/api/torrentApi';
@@ -80,6 +80,7 @@ interface BgmEntry {
 
 export interface MatchRow {
   file_name: string;
+  torrent_path: string;
   show_name: string;
   src_season: number;
   src_episode: number;
@@ -316,6 +317,7 @@ export function computeMatches(data: any): MatchRow[] {
 
     return {
       file_name: pf.file_name,
+      torrent_path: pf.torrent_path,
       show_name: pf.show_name,
       src_season: pf.season,
       src_episode: pf.episode,
@@ -334,7 +336,11 @@ export function computeMatches(data: any): MatchRow[] {
   });
 }
 
-export default function MatchTable({ data }: { data: any }) {
+export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: {
+  data: any;
+  onRowsComputed?: (rows: MatchRow[]) => void;
+  onSubtitlesChange?: (subs: { originalFilename: string; storedFilename: string }[]) => void;
+}) {
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
   const episodeData = data.episode_data || { tmdb: {}, bangumi: {} };
   const subtitles: string[] = data.subtitles || [];
@@ -431,6 +437,7 @@ export default function MatchTable({ data }: { data: any }) {
     // All dropdowns start empty — the user manually selects everything.
     const spRows: MatchRow[] = specials.map((s: any) => ({
       file_name: s.file_name,
+      torrent_path: s.torrent_path || s.file_name,
       show_name: s.show_name || '-',
       src_season: s.season ?? 0,
       src_episode: s.episode ?? 0,
@@ -679,6 +686,15 @@ export default function MatchTable({ data }: { data: any }) {
       }, finalMatched);
     });
   }, [initialRows, overrides, bgmEntryOptions, searchResults, episodeData]);
+
+  // Notify parent of effective rows and uploaded subtitles (for download button)
+  useEffect(() => {
+    onRowsComputed?.(rows);
+  }, [rows, onRowsComputed]);
+
+  useEffect(() => {
+    onSubtitlesChange?.(uploadedSubtitles);
+  }, [uploadedSubtitles, onSubtitlesChange]);
 
   // ── Split rows into movie / TV tables (preserve original indices for overrides) ──
   const movieRows = useMemo(

@@ -52,6 +52,52 @@ export async function parseAndSearchTorrent(file: File): Promise<any> {
   return res.json();
 }
 
+// ── Download (submit to qBittorrent) ──
+
+export interface DownloadFileEntry {
+  torrent_path: string;
+  is_subtitle: boolean;
+  tmdb_show_name: string;
+  bangumi_show_name: string;
+  bangumi_sort: number;
+}
+
+export interface UploadedSubEntry {
+  stored_filename: string;
+  original_filename: string;
+  tmdb_show_name: string;
+  bangumi_show_name: string;
+  bangumi_sort: number;
+}
+
+export interface DownloadRequest {
+  torrent_path: string;
+  torrent_name: string;
+  files: DownloadFileEntry[];
+  uploaded_subtitles: UploadedSubEntry[];
+}
+
+export interface DownloadResponse {
+  ok: boolean;
+  info_hash: string;
+  message: string;
+}
+
+export async function submitDownload(payload: DownloadRequest): Promise<DownloadResponse> {
+  const res = await fetch(`${API_BASE}/torrent/download`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Download request failed (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
 // ── Subtitle upload ──
 
 export interface SubtitleUploadResult {

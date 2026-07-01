@@ -18,6 +18,7 @@ import json as _json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -39,7 +40,7 @@ from .services import rss as rss_service
 from .services import downloader
 from .services import tmdb as tmdb_service
 from .services import image_downloader as image_service
-from .clients.qbittorrent import login as qb_login, get_torrents_by_hashes, delete_torrent, add_torrent, resume_torrent, get_torrent_files
+from .clients.qbittorrent import login as qb_login, get_torrents_by_hashes, delete_torrent, add_torrent, resume_torrent, get_torrent_files, set_file_priority
 from .utils.torrent_hash import compute_info_hash
 from .utils.torrent_file_reader import read_torrent_file_list
 import bencodepy
@@ -553,6 +554,231 @@ async def torrent_bangumi_episodes(bangumi_id: int):
         "id": bangumi_id,
         "name": name,
         "episodes": clean_eps,
+    }
+
+
+# ── /api/torrent/download ──
+
+# Track active download-monitor tasks so they don't get garbage-collected
+_download_tasks: dict[str, asyncio.Task] = {}
+
+
+def _sanitize_path_component(name: str) -> str:
+    """Remove characters that are illegal in directory / file names."""
+    return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
+
+
+async def _monitor_download(
+    info_hash: str,
+    torrent_name: str,
+    files: list[dict],
+    uploaded_subtitles: list[dict],
+    hardlink_root: str,
+):
+    """Background task: poll qBittorrent until download completes, then create hardlinks / copy subtitles."""
+    subtitle_dir = _SUBTITLE_DIR / _sanitize_path_component(torrent_name)
+
+    # Login for the background task
+    try:
+        client = await qb_login(
+            config.QBITTORRENT_URL,
+            config.QBITTORRENT_USERNAME,
+            config.QBITTORRENT_PASSWORD,
+        )
+    except Exception as e:
+        logger.error("下载监控登录失败 [%s]: %s", torrent_name, e)
+        return
+
+    import time
+    deadline = time.monotonic() + 86400  # 24h max
+    while time.monotonic() < deadline:
+        await asyncio.sleep(5)
+        try:
+            torrents = await get_torrents_by_hashes(client, [info_hash])
+        except Exception as e:
+            logger.warning("下载监控轮询失败 [%s]: %s", torrent_name, e)
+            continue
+
+        t = torrents.get(info_hash)
+        if not t:
+            continue
+
+        progress = t.get("progress", 0)
+        state = t.get("state", "")
+        logger.info("下载进度 [%s]: %.1f%% (%s)", torrent_name, progress * 100, state)
+
+        if progress >= 1.0 or "paused" in state.lower() or "stopped" in state.lower() or "completed" in state.lower():
+            if progress < 1.0:
+                logger.warning("种子状态异常 (progress=%.2f, state=%s), 仍然尝试创建文件", progress, state)
+
+            save_path = t.get("save_path", hardlink_root)
+            logger.info("下载完成 [%s], 开始创建硬链接/复制字幕...", torrent_name)
+
+            created = 0
+            for f in files:
+                torrent_path = f["torrent_path"]
+                is_sub = f.get("is_subtitle", False)
+                tmdb_name = _sanitize_path_component(f.get("tmdb_show_name", "Unknown"))
+                bgm_name = _sanitize_path_component(f.get("bangumi_show_name", torrent_name))
+                bgm_sort = f.get("bangumi_sort", 1)
+                src_ext = Path(torrent_path).suffix
+
+                # Destination: {hardlink_root}/{tmdb_name}/{bgm_name}/{bgm_name} {sort:02d}.ext
+                dest_dir = Path(hardlink_root) / tmdb_name / bgm_name
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest_filename = f"{bgm_name} {bgm_sort:02d}{src_ext}"
+                dest_path = dest_dir / dest_filename
+
+                # Source: qBittorrent save_path / torrent_path
+                src_path = Path(save_path) / torrent_path
+
+                try:
+                    if src_path.exists():
+                        if is_sub:
+                            shutil.copy2(src_path, dest_path)
+                        else:
+                            # Remove existing destination so os.link doesn't fail
+                            if dest_path.exists():
+                                dest_path.unlink()
+                            os.link(src_path, dest_path)
+                        created += 1
+                        logger.info("   %s → %s [%s]", src_path.name, dest_path, "copy" if is_sub else "hardlink")
+                    else:
+                        logger.warning("   源文件不存在: %s", src_path)
+                except OSError as e:
+                    logger.error("   创建文件失败: %s → %s — %s", src_path, dest_path, e)
+
+            # Copy user-uploaded subtitles
+            for usub in uploaded_subtitles:
+                stored_name = usub.get("stored_filename", "")
+                tmdb_name = _sanitize_path_component(usub.get("tmdb_show_name", "Unknown"))
+                bgm_name = _sanitize_path_component(usub.get("bangumi_show_name", torrent_name))
+                bgm_sort = usub.get("bangumi_sort", 1)
+                src_sub = subtitle_dir / stored_name
+
+                if not src_sub.exists():
+                    logger.warning("   上传的字幕文件不存在: %s", src_sub)
+                    continue
+
+                dest_dir = Path(hardlink_root) / tmdb_name / bgm_name
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest_ext = src_sub.suffix
+                dest_filename = f"{bgm_name} {bgm_sort:02d}{dest_ext}"
+                dest_path = dest_dir / dest_filename
+
+                try:
+                    shutil.copy2(src_sub, dest_path)
+                    created += 1
+                    logger.info("   [uploaded] %s → %s", stored_name, dest_path)
+                except OSError as e:
+                    logger.error("   复制上传字幕失败: %s → %s — %s", src_sub, dest_path, e)
+
+            logger.info("下载后处理完成 [%s]: 创建了 %d 个文件", torrent_name, created)
+
+            # Clean up the temp torrent file
+            # (kept for now; the original torrent_preview used to clean up here)
+
+            # Remove task from tracker
+            _download_tasks.pop(info_hash, None)
+            return
+
+    logger.warning("下载监控超时 [%s] (24h)", torrent_name)
+    _download_tasks.pop(info_hash, None)
+
+
+@app.post("/api/torrent/download")
+async def torrent_download(body: dict):
+    """Add a torrent to qBittorrent with selective file download.
+
+    Only the files listed in *files* (and their matching subtitles) are
+    downloaded.  After the download completes a background task creates
+    hardlinks for video files and copies subtitle files into the configured
+    ``TORRENT_HARDLINK_PATH`` directory.
+    """
+    torrent_path = body.get("torrent_path", "")
+    torrent_name = body.get("torrent_name", "")
+    files: list[dict] = body.get("files", [])
+    uploaded_subtitles: list[dict] = body.get("uploaded_subtitles", [])
+
+    if not torrent_path or not Path(torrent_path).is_file():
+        raise HTTPException(400, "种子文件不存在")
+    if not files:
+        raise HTTPException(400, "文件列表为空")
+
+    hardlink_root = config.TORRENT_HARDLINK_PATH
+
+    # ── Read the full file list from the torrent ──
+    try:
+        full_file_list = read_torrent_file_list(torrent_path)
+    except Exception as e:
+        raise HTTPException(400, f"无法读取种子文件: {e}")
+
+    # Build a set of torrent paths that should be downloaded
+    download_set: set[str] = {f["torrent_path"] for f in files}
+
+    # ── Login to qBittorrent ──
+    try:
+        client = await qb_login(
+            config.QBITTORRENT_URL,
+            config.QBITTORRENT_USERNAME,
+            config.QBITTORRENT_PASSWORD,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"qBittorrent 连接失败: {e}")
+
+    # ── Add torrent (paused) ──
+    try:
+        info_hash = await add_torrent(client, torrent_path, hardlink_root, torrent_name)
+        logger.info("种子已添加 [%s]: hash=%s", torrent_name, info_hash[:12])
+    except Exception as e:
+        raise HTTPException(500, f"添加种子失败: {e}")
+
+    # ── Set file priorities: 1 for files we want, 0 for the rest ──
+    try:
+        # Get file list from qBittorrent to map paths → indices
+        qb_files = await get_torrent_files(client, info_hash)
+        skip_indices: list[int] = []
+        download_indices: list[int] = []
+        for idx, f in enumerate(qb_files):
+            fname = f.get("name", "")
+            if fname in download_set:
+                download_indices.append(idx)
+            else:
+                skip_indices.append(idx)
+
+        if skip_indices:
+            await set_file_priority(client, info_hash, skip_indices, 0)
+            logger.info("跳过 %d 个文件", len(skip_indices))
+
+        if download_indices:
+            await set_file_priority(client, info_hash, download_indices, 1)
+            logger.info("下载 %d 个文件", len(download_indices))
+    except Exception as e:
+        logger.warning("设置文件优先级失败 (将继续下载所有文件): %s", e)
+
+    # ── Resume download ──
+    try:
+        await resume_torrent(client, info_hash)
+        logger.info("下载已恢复 [%s]", torrent_name)
+    except Exception as e:
+        raise HTTPException(500, f"恢复下载失败: {e}")
+
+    # ── Start background monitor ──
+    task = asyncio.create_task(
+        _monitor_download(
+            info_hash=info_hash,
+            torrent_name=torrent_name,
+            files=files,
+            uploaded_subtitles=uploaded_subtitles,
+            hardlink_root=hardlink_root,
+        )
+    )
+    _download_tasks[info_hash] = task
+
+    return {
+        "ok": True,
+        "info_hash": info_hash,
+        "message": f"种子已添加，选择性下载 {len(download_indices)}/{len(qb_files)} 个文件。下载完成后自动创建硬链接。",
     }
 
 
