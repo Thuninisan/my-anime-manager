@@ -108,6 +108,21 @@ async def on_startup():
 # Pydantic response models
 # ═══════════════════════════════════════════════════════════════════════
 
+class TmdbEpisodeInfo(BaseModel):
+    epNum: int
+    name: str
+    tmdbId: int
+    overview: str = ""
+    airDate: str = ""
+    runtime: int = 0
+    stillPath: str = ""
+
+
+class SeasonInfo(BaseModel):
+    name: str
+    episodes: list[TmdbEpisodeInfo]
+
+
 class RssSubtitleGroup(BaseModel):
     name: str
     subgroup_id: int
