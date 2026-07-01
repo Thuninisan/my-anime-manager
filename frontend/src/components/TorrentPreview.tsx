@@ -108,6 +108,14 @@ export default function TorrentPreview({
         const tmdbName = getTmdbShowName(searchResult, row.show_name);
         const bgmName = getBangumiShowName(searchResult, row);
 
+        // Common NFO metadata for this row
+        const nfoMeta = {
+          bangumi_id: row.bgm_entry_id ?? 0,
+          bangumi_ep_id: row.bgm_ep_id,
+          tmdb_season: row.tmdb_season ?? 0,
+          tmdb_episode: row.tmdb_ep ?? 0,
+        };
+
         // Video file
         files.push({
           torrent_path: row.torrent_path,
@@ -115,6 +123,7 @@ export default function TorrentPreview({
           tmdb_show_name: tmdbName,
           bangumi_show_name: bgmName,
           bangumi_sort: row.bgm_sort ?? row.src_episode,
+          ...nfoMeta,
         });
 
         // Matching subtitle files from the torrent
@@ -134,6 +143,7 @@ export default function TorrentPreview({
               tmdb_show_name: tmdbName,
               bangumi_show_name: bgmName,
               bangumi_sort: row.bgm_sort ?? row.src_episode,
+              ...nfoMeta,
             });
           }
         }
@@ -154,6 +164,10 @@ export default function TorrentPreview({
             tmdb_show_name: getTmdbShowName(searchResult, matchingRow.show_name),
             bangumi_show_name: getBangumiShowName(searchResult, matchingRow),
             bangumi_sort: matchingRow.bgm_sort ?? matchingRow.src_episode,
+            bangumi_id: matchingRow.bgm_entry_id ?? 0,
+            bangumi_ep_id: matchingRow.bgm_ep_id,
+            tmdb_season: matchingRow.tmdb_season ?? 0,
+            tmdb_episode: matchingRow.tmdb_ep ?? 0,
           });
         }
       }

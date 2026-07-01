@@ -687,10 +687,76 @@ async def _monitor_download(
                 except OSError as e:
                     logger.error("   复制上传字幕失败: %s → %s — %s", src_sub, dest_path, e)
 
-            logger.info("下载后处理完成 [%s]: 创建了 %d 个文件", torrent_name, created)
+            # ── Generate NFO files ──
+            nfo_generated = 0
+            seen_tvshow_nfos: set[str] = set()      # dedup by tmdb_name
+            seen_season_nfos: set[int] = set()       # dedup by bangumi_id
 
-            # Clean up the temp torrent file
-            # (kept for now; the original torrent_preview used to clean up here)
+            for f in files:
+                tmdb_n = _sanitize_path_component(f.get("tmdb_show_name", "Unknown"))
+                bgm_n = _sanitize_path_component(f.get("bangumi_show_name", torrent_name))
+                bgm_sort = f.get("bangumi_sort", 1)
+                bgm_id = f.get("bangumi_id", 0)
+                bgm_ep_id = f.get("bangumi_ep_id")
+                tmdb_season = f.get("tmdb_season", 0)
+                tmdb_episode = f.get("tmdb_episode", 0)
+                is_sub = f.get("is_subtitle", False)
+
+                # Skip subtitle files for episode NFO (only video files get episode NFO)
+                if is_sub:
+                    continue
+
+                dest_dir = Path(hardlink_root) / tmdb_n / bgm_n
+                dest_dir.mkdir(parents=True, exist_ok=True)
+
+                # tvshow.nfo (once per tmdb_name)
+                if tmdb_n not in seen_tvshow_nfos:
+                    seen_tvshow_nfos.add(tmdb_n)
+                    tvshow_dir = Path(hardlink_root) / tmdb_n
+                    tvshow_dir.mkdir(parents=True, exist_ok=True)
+                    tvshow_nfo = tvshow_dir / "tvshow.nfo"
+                    tvshow_nfo.write_text(
+                        '<?xml version="1.0" encoding="utf-8"?>\n'
+                        f'<tvshow>\n'
+                        f'  <title>{f.get("tmdb_show_name", "Unknown")}</title>\n'
+                        f'  <originaltitle>{f.get("bangumi_show_name", "")}</originaltitle>\n'
+                        f'</tvshow>\n',
+                        encoding="utf-8",
+                    )
+                    nfo_generated += 1
+                    logger.info("   tvshow.nfo → %s", tvshow_nfo)
+
+                # season.nfo (once per bangumi_id)
+                if bgm_id and bgm_id not in seen_season_nfos:
+                    seen_season_nfos.add(bgm_id)
+                    season_nfo = dest_dir / "season.nfo"
+                    season_nfo.write_text(
+                        '<?xml version="1.0" encoding="utf-8"?>\n'
+                        f'<season>\n'
+                        f'  <bangumiid>{bgm_id}</bangumiid>\n'
+                        f'</season>\n',
+                        encoding="utf-8",
+                    )
+                    nfo_generated += 1
+                    logger.info("   season.nfo → %s (bangumi_id=%d)", season_nfo, bgm_id)
+
+                # Episode NFO (next to video file, same stem)
+                src_ext = Path(f["torrent_path"]).suffix
+                video_stem = f"{bgm_n} {bgm_sort:02d}"
+                ep_nfo = dest_dir / f"{video_stem}.nfo"
+                ep_nfo.write_text(
+                    '<?xml version="1.0" encoding="utf-8"?>\n'
+                    f'<episodedetails>\n'
+                    f'  <bangumiid>{bgm_ep_id or ""}</bangumiid>\n'
+                    f'  <tmdbseason>{tmdb_season}</tmdbseason>\n'
+                    f'  <tmdepisode>{tmdb_episode}</tmdepisode>\n'
+                    f'</episodedetails>\n',
+                    encoding="utf-8",
+                )
+                nfo_generated += 1
+                logger.info("   episode.nfo → %s", ep_nfo)
+
+            logger.info("下载后处理完成 [%s]: 创建了 %d 个文件, 生成了 %d 个 NFO", torrent_name, created, nfo_generated)
 
             # Remove task from tracker
             _download_tasks.pop(info_hash, None)

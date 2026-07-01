@@ -60,6 +60,11 @@ export interface DownloadFileEntry {
   tmdb_show_name: string;
   bangumi_show_name: string;
   bangumi_sort: number;
+  // NFO metadata
+  bangumi_id: number;
+  bangumi_ep_id: number | null;
+  tmdb_season: number;
+  tmdb_episode: number;
 }
 
 export interface UploadedSubEntry {
@@ -68,6 +73,11 @@ export interface UploadedSubEntry {
   tmdb_show_name: string;
   bangumi_show_name: string;
   bangumi_sort: number;
+  // NFO metadata
+  bangumi_id: number;
+  bangumi_ep_id: number | null;
+  tmdb_season: number;
+  tmdb_episode: number;
 }
 
 export interface DownloadRequest {
