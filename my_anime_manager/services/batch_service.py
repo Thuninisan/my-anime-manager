@@ -7,6 +7,7 @@ Split into two phases:
 
 import re
 from pathlib import Path
+import shutil
 
 from ..clients import bangumi as bgm_client
 from ..clients.qbittorrent import (
@@ -32,6 +33,9 @@ from .nfo_generator import (
 )
 from ..utils.torrent_parser import parse_qbit_file_list
 from ..utils.torrent_file_reader import read_torrent_file_list
+
+# Subtitle file extensions (collected from torrent for the frontend Sub badge)
+_SUBTITLE_EXTENSIONS: set[str] = {".ass", ".ssa", ".srt", ".sub", ".idx", ".vtt", ".ttml", ".sbv", ".dfxp"}
 
 
 def _sanitize_dir_name(name: str | None) -> str:
@@ -101,6 +105,15 @@ async def build_preview(torrent_path: str) -> dict:
         print(f"   → {len(file_list)} 个文件\n")
     except Exception as e:
         raise RuntimeError(f"无法解析种子文件: {e}") from e
+
+    # ── Collect subtitle files from the torrent ──
+    subtitle_files: list[str] = [
+        Path(f["name"]).name
+        for f in file_list
+        if Path(f["name"]).suffix.lower() in _SUBTITLE_EXTENSIONS
+    ]
+    if subtitle_files:
+        print(f"   📝 {len(subtitle_files)} 个字幕文件\n")
 
     # ── Step 2: Parse file list ──
     result = parse_qbit_file_list(file_list, torrent_name)
@@ -531,6 +544,7 @@ async def build_preview(torrent_path: str) -> dict:
         "extras": extras_block,
         "tmdb_data": tmdb_data,
         "bangumi_data": bangumi_data,
+        "subtitles": subtitle_files,
     }
 
     print("━" * 55)
@@ -609,6 +623,44 @@ async def execute_confirm(
                     print(f"   ⚠️ 重命名失败: {mapping['oldPath']} → {mapping['newPath']} — {e}")
             summary["filesRenamed"] = renamed
             print(f"   已完成 {renamed}/{len(all_mappings)} 个")
+
+        # ── Copy user-uploaded subtitles alongside media files ──
+        # Subtitles are matched to video files by original filename stem.
+        subtitle_src_dir = Path(__file__).parent.parent / "data" / "subtitles" / torrent_name
+        if subtitle_src_dir.is_dir():
+            print(f"\n📝 复制用户上传的字幕文件...")
+            subtitle_files_list = list(subtitle_src_dir.iterdir())
+            if subtitle_files_list:
+                # Build a map of original filename stem → list of subtitle paths
+                sub_stem_map: dict[str, list[Path]] = {}
+                for sf in subtitle_files_list:
+                    if sf.suffix.lower() in _SUBTITLE_EXTENSIONS:
+                        stem = sf.stem.lower()
+                        sub_stem_map.setdefault(stem, []).append(sf)
+
+                copied = 0
+                for mapping in all_mappings:
+                    old_stem = Path(mapping["oldPath"]).stem.lower()
+                    matching_subs = sub_stem_map.get(old_stem, [])
+                    if not matching_subs:
+                        continue
+                    # The new path is relative; resolve it against output_root
+                    new_video_path = Path(output_root) / mapping["newPath"]
+                    new_video_dir = new_video_path.parent
+                    new_video_dir.mkdir(parents=True, exist_ok=True)
+                    new_video_stem = new_video_path.stem
+                    for sub_path in matching_subs:
+                        dest_sub = new_video_dir / f"{new_video_stem}{sub_path.suffix}"
+                        shutil.copy2(sub_path, dest_sub)
+                        print(f"   ✅ {sub_path.name} → {dest_sub}")
+                        copied += 1
+
+                if copied:
+                    print(f"   已复制 {copied} 个字幕文件")
+                else:
+                    print(f"   未找到匹配的字幕文件")
+            else:
+                print(f"   无字幕文件")
 
         # ── tvshow.nfo ──
         print("\n📄 生成 tvshow.nfo...")

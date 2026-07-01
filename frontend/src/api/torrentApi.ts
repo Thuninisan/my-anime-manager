@@ -82,6 +82,37 @@ export async function parseAndSearchTorrent(file: File): Promise<any> {
   return res.json();
 }
 
+// ── Subtitle upload ──
+
+export interface SubtitleUploadResult {
+  ok: boolean;
+  filename: string;
+  original_filename: string;
+  torrent_name: string;
+  stored_path: string;
+}
+
+export async function uploadSubtitle(
+  file: File,
+  torrentName: string,
+): Promise<SubtitleUploadResult> {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('torrent_name', torrentName);
+
+  const res = await fetch(`${API_BASE}/torrent/subtitle/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Subtitle upload failed (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
 // ── Episode data lookup by ID ──
 
 export async function fetchTmdbSeasonMap(tmdbId: number): Promise<Record<string, { name: string; episodes: { epNum: number; tmdbId: number; name: string }[] }>> {

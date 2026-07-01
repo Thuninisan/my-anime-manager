@@ -17,6 +17,7 @@ import asyncio
 import json as _json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -555,6 +556,65 @@ async def torrent_confirm(body: dict):
         showDirName=summary.get("showDirName", ""),
         error=summary.get("error", ""),
     )
+
+
+# ── /api/torrent/subtitle/upload ──
+
+# Allowed subtitle file extensions
+_ALLOWED_SUB_EXTENSIONS: set[str] = {".ass", ".ssa", ".srt", ".sub", ".idx", ".vtt", ".ttml", ".sbv", ".dfxp"}
+
+# Subtitle storage root (under the data directory)
+_SUBTITLE_DIR = Path(__file__).parent / "data" / "subtitles"
+
+
+@app.post("/api/torrent/subtitle/upload")
+async def subtitle_upload(file: UploadFile = File(...), torrent_name: str = Form(...)):
+    """Upload a subtitle file for a specific torrent.
+
+    The file is stored under ``data/subtitles/{torrent_name}/`` so it can be
+    copied alongside the media files during the confirm phase.
+
+    Only common subtitle formats are accepted (.ass, .srt, etc.).
+    """
+    if not file.filename:
+        raise HTTPException(400, "未提供文件名")
+
+    ext = Path(file.filename).suffix.lower()
+    if ext not in _ALLOWED_SUB_EXTENSIONS:
+        raise HTTPException(
+            400,
+            f"不支持的字幕格式: {ext}。支持的格式: {', '.join(sorted(_ALLOWED_SUB_EXTENSIONS))}",
+        )
+
+    # Sanitise torrent_name for use as directory name
+    safe_torrent_name = re.sub(r'[<>:"/\\|?*]', "_", torrent_name).strip()
+    if not safe_torrent_name:
+        raise HTTPException(400, "种子名称为空")
+
+    dest_dir = _SUBTITLE_DIR / safe_torrent_name
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    # Avoid overwriting — append a counter if the file already exists
+    dest_path = dest_dir / file.filename
+    if dest_path.exists():
+        stem, suffix = dest_path.stem, dest_path.suffix
+        counter = 1
+        while dest_path.exists():
+            dest_path = dest_dir / f"{stem}_{counter}{suffix}"
+            counter += 1
+
+    content = await file.read()
+    dest_path.write_bytes(content)
+
+    logger.info("字幕上传成功: %s → %s", file.filename, dest_path)
+
+    return {
+        "ok": True,
+        "filename": dest_path.name,
+        "original_filename": file.filename,
+        "torrent_name": safe_torrent_name,
+        "stored_path": str(dest_path),
+    }
 
 
 # ── /api/torrent/parse-and-search ──

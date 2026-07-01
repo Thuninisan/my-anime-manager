@@ -1,4 +1,6 @@
+import { useRef, useState } from 'react';
 import type { MatchRow, BgmEpisode } from '@/components/MatchTable';
+import { uploadSubtitle } from '@/api/torrentApi';
 
 export interface TmdbSeasonOption {
   value: string;
@@ -11,11 +13,18 @@ export interface TmdbEpOption {
   name_cn?: string;
 }
 
+// Allowed subtitle extensions and accept attribute
+const ALLOWED_SUB_EXTENSIONS = ['.ass', '.ssa', '.srt', '.sub', '.idx', '.vtt', '.ttml', '.sbv', '.dfxp'];
+const SUB_ACCEPT = '.ass,.ssa,.srt,.sub,.idx,.vtt,.ttml,.sbv,.dfxp';
+
 interface MappingCardProps {
   row: MatchRow;
   rowIndex: number;
   variant: 'tv' | 'sp' | 'movie';
   hasSubtitle: boolean;
+  // Subtitle upload
+  torrentName?: string;
+  onSubtitleUploaded?: (filename: string) => void;
   // Dropdown data
   bgmEntryOptions: { id: number; name: string }[];
   currentEps: BgmEpisode[];
@@ -39,6 +48,8 @@ export default function MappingCard({
   rowIndex: i,
   variant,
   hasSubtitle,
+  torrentName,
+  onSubtitleUploaded,
   bgmEntryOptions,
   currentEps,
   currentEntryId,
@@ -61,6 +72,37 @@ export default function MappingCard({
   const iconColor = isSp ? 'text-amber-400' : 'text-slate-300';
   const seasonSelectClass = isSp ? 'max-w-[160px] truncate' : '';
 
+  // Subtitle upload state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const handleSubUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !torrentName || !onSubtitleUploaded) return;
+
+    const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
+    if (!ALLOWED_SUB_EXTENSIONS.includes(fileExt)) {
+      setUploadError(`不支持的字幕格式: ${fileExt}`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setUploading(true);
+    setUploadError(null);
+    try {
+      await uploadSubtitle(file, torrentName);
+      onSubtitleUploaded(file.name);
+    } catch (err: any) {
+      setUploadError(err.message || '上传失败');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const showUploadButton = !hasSubtitle && torrentName && onSubtitleUploaded;
+
   return (
     <div className={`bg-surface-light dark:bg-surface-dark border ${borderClass} rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md group`}>
       {/* Top row: file name + badges */}
@@ -78,7 +120,30 @@ export default function MappingCard({
           {hasSubtitle && (
             <span className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">Sub</span>
           )}
+          {showUploadButton && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={SUB_ACCEPT}
+                className="hidden"
+                onChange={handleSubUpload}
+              />
+              <button
+                className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider hover:bg-[#f09199]/25 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+                title="上传字幕文件 (.ass, .srt 等)"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? '...' : '+Sub'}
+              </button>
+            </>
+          )}
         </div>
+        {/* Subtitle upload error */}
+        {uploadError && (
+          <p className="text-xs text-destructive mt-1">{uploadError}</p>
+        )}
       </div>
       {/* Bottom row: mapping controls */}
       <div className="px-4 py-2.5 bg-slate-50/30 dark:bg-white/[0.02] flex flex-wrap items-center gap-x-6 gap-y-2">

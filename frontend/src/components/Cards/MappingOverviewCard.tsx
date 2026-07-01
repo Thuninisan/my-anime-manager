@@ -1,9 +1,15 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import type { TorrentPreviewResponse, EpisodeBlock } from '../../types/preview';
 import EpisodeEditSheet from './EpisodeEditSheet';
+import { uploadSubtitle } from '../../api/torrentApi';
 
 /* ======== Constants ======== */
 const EXTRA_KEY_BASE = 900;
+
+// Allowed subtitle file extensions for upload validation
+const ALLOWED_SUB_EXTENSIONS = ['.ass', '.ssa', '.srt', '.sub', '.idx', '.vtt', '.ttml', '.sbv', '.dfxp'];
+// Corresponding MIME types and extensions for the file input accept attribute
+const SUB_ACCEPT = '.ass,.ssa,.srt,.sub,.idx,.vtt,.ttml,.sbv,.dfxp';
 
 /* ======== Helpers ======== */
 function sanitizeDirName(name: string): string {
@@ -56,14 +62,55 @@ interface Props { data: TorrentPreviewResponse; }
 /* ======== Episode Card — 1:1 template ======== */
 function EpisodeCard({
   filename, ep, hue, matchRate, onEdit,
+  subtitles, torrentName, onSubtitleUploaded,
 }: {
   filename: string; ep: EpisodeBlock; hue: number; matchRate: 'matched' | 'partial' | 'none';
   onEdit: (f: string) => void;
+  subtitles: string[];
+  torrentName: string;
+  onSubtitleUploaded: (filename: string) => void;
 }) {
   const isSpecial = ep.season_number === 0 || ep.season_number >= EXTRA_KEY_BASE;
   const ext = filename.split('.').pop()?.toUpperCase();
   const borderColor = matchRate === 'matched' ? 'border-l-accent' : matchRate === 'partial' ? 'border-l-warning/50' : 'border-l-destructive/50';
   const opacity = matchRate === 'none' ? 'opacity-70' : '';
+
+  // Check whether any subtitle filename stem matches this video's filename stem
+  const videoStem = filename.replace(/\.[^.]+$/, '').toLowerCase();
+  const hasMatchingSubtitle = subtitles.some(
+    (sub) => sub.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
+  );
+
+  // Subtitle upload state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  const handleSubUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Client-side extension validation
+    const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
+    if (!ALLOWED_SUB_EXTENSIONS.includes(fileExt)) {
+      setUploadError(`不支持的字幕格式: ${fileExt}`);
+      // Reset input so the same file can be re-selected after fixing
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setUploading(true);
+    setUploadError(null);
+    try {
+      await uploadSubtitle(file, torrentName);
+      onSubtitleUploaded(file.name);
+    } catch (err: any) {
+      setUploadError(err.message || '上传失败');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   return (
     <div className={`glass-card rounded-xl overflow-hidden sakura-shadow border-l-4 ${borderColor} ${opacity}`}>
@@ -89,6 +136,33 @@ function EpisodeCard({
               TMDB
             </div>
           )}
+          {/* Subtitle badge or upload button */}
+          <div className="absolute top-2 right-2">
+            {hasMatchingSubtitle ? (
+              <span className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                Sub
+              </span>
+            ) : (
+              <>
+                {/* Hidden file input for subtitle upload */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={SUB_ACCEPT}
+                  className="hidden"
+                  onChange={handleSubUpload}
+                />
+                <button
+                  className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider hover:bg-[#f09199]/25 transition-colors cursor-pointer disabled:opacity-50"
+                  title="上传字幕文件 (.ass, .srt 等)"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  {uploading ? '...' : '+Sub'}
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         {/* ── Info area ── */}
@@ -107,6 +181,10 @@ function EpisodeCard({
                 {isSpecial && ep.season_number === 0 && <> &bull; Specials</>}
                 {isSpecial && ep.season_number >= EXTRA_KEY_BASE && <> &bull; Extra</>}
               </p>
+              {/* Subtitle upload error */}
+              {uploadError && (
+                <p className="text-xs text-destructive mt-1">{uploadError}</p>
+              )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {ext && (
@@ -268,6 +346,17 @@ export default function MappingOverviewCard({ data }: Props) {
   const [episodes, setEpisodes] = useState(data.episodes);
   const [, setSeasonsState] = useState(data.seasons);
 
+  // User-uploaded subtitle filenames (appended to torrent subtitles for badge display)
+  const [uploadedSubtitles, setUploadedSubtitles] = useState<string[]>([]);
+  const combinedSubtitles = useMemo(
+    () => [...(data.subtitles || []), ...uploadedSubtitles],
+    [data.subtitles, uploadedSubtitles],
+  );
+
+  const handleSubtitleUploaded = useCallback((filename: string) => {
+    setUploadedSubtitles((prev) => [...prev, filename]);
+  }, []);
+
   const tmdbSeasonOptions = useMemo(() => Object.keys(data.tmdb_data || {}).map(Number).sort((a,b)=>a-b), [data.tmdb_data]);
   const bangumiEntryOptions = useMemo(() => Object.entries(data.bangumi_data || {}).map(([k,v])=>({key:Number(k),name:v.name})).sort((a,b)=>a.key-b.key), [data.bangumi_data]);
 
@@ -372,6 +461,9 @@ export default function MappingOverviewCard({ data }: Props) {
                   hue={hue}
                   matchRate={rate}
                   onEdit={setEditFilename}
+                  subtitles={combinedSubtitles}
+                  torrentName={data.torrent_name}
+                  onSubtitleUploaded={handleSubtitleUploaded}
                 />
               );
             })

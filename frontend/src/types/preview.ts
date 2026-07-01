@@ -80,6 +80,7 @@ export interface TorrentPreviewResponse {
   extras: ExtraBlock[];
   tmdb_data: Record<string, TmdbSeasonData>;
   bangumi_data: Record<string, BangumiSeasonData>;
+  subtitles: string[];
 }
 
 // Keep for ConfirmAction

@@ -11,7 +11,7 @@
    auto-matched entry and episode.
 */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import MappingCard from '@/components/Cards/MappingCard';
 import type { TmdbSeasonOption, TmdbEpOption } from '@/components/Cards/MappingCard';
 
@@ -313,12 +313,24 @@ export default function MatchTable({ data }: { data: any }) {
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
   const episodeData = data.episode_data || { tmdb: {}, bangumi: {} };
   const subtitles: string[] = data.subtitles || [];
+  const torrentName: string = data.torrent_name || '';
+
+  // User-uploaded subtitle filenames (combined with torrent subtitles for badge display)
+  const [uploadedSubtitles, setUploadedSubtitles] = useState<string[]>([]);
+  const combinedSubtitles = useMemo(
+    () => [...subtitles, ...uploadedSubtitles],
+    [subtitles, uploadedSubtitles],
+  );
+
+  const handleSubtitleUploaded = useCallback((filename: string) => {
+    setUploadedSubtitles((prev) => [...prev, filename]);
+  }, []);
 
   // ── Check whether a video file has a matching subtitle file ──
   // Match by filename stem (name without extension).
   const hasMatchingSubtitle = (videoFileName: string): boolean => {
     const videoStem = videoFileName.replace(/\.[^.]+$/, '').toLowerCase();
-    return subtitles.some(
+    return combinedSubtitles.some(
       (sub) => sub.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
     );
   };
@@ -659,6 +671,8 @@ export default function MatchTable({ data }: { data: any }) {
                   rowIndex={i}
                   variant="movie"
                   hasSubtitle={hasMatchingSubtitle(r.file_name)}
+                  torrentName={torrentName}
+                  onSubtitleUploaded={handleSubtitleUploaded}
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps}
                   currentEntryId={currentEntryId}
@@ -712,6 +726,8 @@ export default function MatchTable({ data }: { data: any }) {
                   rowIndex={i}
                   variant="tv"
                   hasSubtitle={hasMatchingSubtitle(r.file_name)}
+                  torrentName={torrentName}
+                  onSubtitleUploaded={handleSubtitleUploaded}
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps}
                   currentEntryId={currentEntryId}
@@ -792,6 +808,8 @@ export default function MatchTable({ data }: { data: any }) {
                   rowIndex={i}
                   variant="sp"
                   hasSubtitle={hasMatchingSubtitle(r.file_name)}
+                  torrentName={torrentName}
+                  onSubtitleUploaded={handleSubtitleUploaded}
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps}
                   currentEntryId={currentEntryId}
