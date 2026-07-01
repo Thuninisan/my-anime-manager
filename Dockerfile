@@ -8,15 +8,13 @@ RUN npm run build
 
 # Stage 2: Python backend + serve frontend
 FROM python:3.12-alpine
-ENV PYTHONUTF8=1
+ENV PYTHONIOENCODING=utf-8
 WORKDIR /app
 
-# Copy dependency file first for Docker layer caching
+# Copy Python source and install
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir .
-
-# Copy Python source code
 COPY my_anime_manager/ ./my_anime_manager/
+RUN pip install --no-cache-dir .
 
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist/
