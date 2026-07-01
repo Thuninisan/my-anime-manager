@@ -113,6 +113,23 @@ export async function uploadSubtitle(
   return res.json();
 }
 
+export async function deleteSubtitle(
+  torrentName: string,
+  filename: string,
+): Promise<{ ok: boolean; deleted: string }> {
+  const params = new URLSearchParams({ torrent_name: torrentName, filename });
+  const res = await fetch(`${API_BASE}/torrent/subtitle/delete?${params}`, {
+    method: 'DELETE',
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || `Subtitle delete failed (HTTP ${res.status})`);
+  }
+
+  return res.json();
+}
+
 // ── Episode data lookup by ID ──
 
 export async function fetchTmdbSeasonMap(tmdbId: number): Promise<Record<string, { name: string; episodes: { epNum: number; tmdbId: number; name: string }[] }>> {

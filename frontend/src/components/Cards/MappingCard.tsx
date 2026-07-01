@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { MatchRow, BgmEpisode } from '@/components/MatchTable';
-import { uploadSubtitle } from '@/api/torrentApi';
+import { uploadSubtitle, deleteSubtitle } from '@/api/torrentApi';
 
 export interface TmdbSeasonOption {
   value: string;
@@ -22,9 +22,11 @@ interface MappingCardProps {
   rowIndex: number;
   variant: 'tv' | 'sp' | 'movie';
   hasSubtitle: boolean;
-  // Subtitle upload
+  isUploadedSubtitle: boolean;
+  // Subtitle upload / delete
   torrentName?: string;
-  onSubtitleUploaded?: (filename: string) => void;
+  onSubtitleUploaded?: (originalFilename: string, storedFilename: string) => void;
+  onSubtitleDeleted?: () => void;
   // Dropdown data
   bgmEntryOptions: { id: number; name: string }[];
   currentEps: BgmEpisode[];
@@ -48,8 +50,10 @@ export default function MappingCard({
   rowIndex: i,
   variant,
   hasSubtitle,
+  isUploadedSubtitle,
   torrentName,
   onSubtitleUploaded,
+  onSubtitleDeleted,
   bgmEntryOptions,
   currentEps,
   currentEntryId,
@@ -75,6 +79,7 @@ export default function MappingCard({
   // Subtitle upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleSubUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -91,13 +96,25 @@ export default function MappingCard({
     setUploading(true);
     setUploadError(null);
     try {
-      await uploadSubtitle(file, torrentName);
-      onSubtitleUploaded(file.name);
+      const result = await uploadSubtitle(file, torrentName);
+      onSubtitleUploaded(file.name, result.filename);
     } catch (err: any) {
       setUploadError(err.message || '上传失败');
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSubDelete = async () => {
+    if (!torrentName || !onSubtitleDeleted) return;
+    setDeleting(true);
+    try {
+      await onSubtitleDeleted();
+    } catch (err: any) {
+      setUploadError(err.message || '删除失败');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -117,7 +134,23 @@ export default function MappingCard({
               <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{row.file_name}</h4>
             </div>
           </div>
-          {hasSubtitle && (
+          {hasSubtitle && isUploadedSubtitle && (
+            <span className="inline-flex items-center gap-1 bg-[#f09199]/10 text-[#f09199] text-[9px] pl-2 pr-1 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">
+              Sub
+              <button
+                className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-[#f09199]/25 transition-colors cursor-pointer disabled:opacity-50"
+                title="删除已上传的字幕"
+                onClick={handleSubDelete}
+                disabled={deleting}
+              >
+                <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </span>
+          )}
+          {hasSubtitle && !isUploadedSubtitle && (
             <span className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">Sub</span>
           )}
           {showUploadButton && (

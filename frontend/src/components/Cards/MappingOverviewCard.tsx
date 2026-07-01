@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo, useRef } from 'react';
 import type { TorrentPreviewResponse, EpisodeBlock } from '../../types/preview';
 import EpisodeEditSheet from './EpisodeEditSheet';
-import { uploadSubtitle } from '../../api/torrentApi';
+import { uploadSubtitle, deleteSubtitle } from '../../api/torrentApi';
 
 /* ======== Constants ======== */
 const EXTRA_KEY_BASE = 900;
@@ -62,13 +62,14 @@ interface Props { data: TorrentPreviewResponse; }
 /* ======== Episode Card — 1:1 template ======== */
 function EpisodeCard({
   filename, ep, hue, matchRate, onEdit,
-  subtitles, torrentName, onSubtitleUploaded,
+  subtitles, torrentName, onSubtitleUploaded, onSubtitleDeleted,
 }: {
   filename: string; ep: EpisodeBlock; hue: number; matchRate: 'matched' | 'partial' | 'none';
   onEdit: (f: string) => void;
   subtitles: string[];
   torrentName: string;
-  onSubtitleUploaded: (filename: string) => void;
+  onSubtitleUploaded: (originalFilename: string, storedFilename: string) => void;
+  onSubtitleDeleted: (originalFilename: string) => void;
 }) {
   const isSpecial = ep.season_number === 0 || ep.season_number >= EXTRA_KEY_BASE;
   const ext = filename.split('.').pop()?.toUpperCase();
@@ -80,11 +81,17 @@ function EpisodeCard({
   const hasMatchingSubtitle = subtitles.some(
     (sub) => sub.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
   );
+  // Find the user-uploaded subtitle that matches (if any) so we can delete it
+  const matchingUploaded = subtitles.find(
+    (sub) => sub.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
+  );
+  const isUploadedMatch = matchingUploaded != null;
 
   // Subtitle upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const handleSubUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -94,7 +101,6 @@ function EpisodeCard({
     const fileExt = '.' + file.name.split('.').pop()?.toLowerCase();
     if (!ALLOWED_SUB_EXTENSIONS.includes(fileExt)) {
       setUploadError(`不支持的字幕格式: ${fileExt}`);
-      // Reset input so the same file can be re-selected after fixing
       if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
@@ -102,13 +108,26 @@ function EpisodeCard({
     setUploading(true);
     setUploadError(null);
     try {
-      await uploadSubtitle(file, torrentName);
-      onSubtitleUploaded(file.name);
+      const result = await uploadSubtitle(file, torrentName);
+      onSubtitleUploaded(file.name, result.filename);
     } catch (err: any) {
       setUploadError(err.message || '上传失败');
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleSubDelete = async () => {
+    if (!matchingUploaded || !isUploadedMatch) return;
+    setDeleting(true);
+    try {
+      await deleteSubtitle(torrentName, matchingUploaded);
+      onSubtitleDeleted(matchingUploaded);
+    } catch (err: any) {
+      setUploadError(err.message || '删除失败');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -139,9 +158,28 @@ function EpisodeCard({
           {/* Subtitle badge or upload button */}
           <div className="absolute top-2 right-2">
             {hasMatchingSubtitle ? (
-              <span className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                Sub
-              </span>
+              isUploadedMatch ? (
+                /* User-uploaded subtitle — show badge with delete x */
+                <span className="inline-flex items-center gap-1 bg-[#f09199]/10 text-[#f09199] text-[9px] pl-2 pr-1 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                  Sub
+                  <button
+                    className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full hover:bg-[#f09199]/25 transition-colors cursor-pointer disabled:opacity-50"
+                    title="删除已上传的字幕"
+                    onClick={handleSubDelete}
+                    disabled={deleting}
+                  >
+                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </span>
+              ) : (
+                /* Torrent-included subtitle — static badge (no delete) */
+                <span className="bg-[#f09199]/10 text-[#f09199] text-[9px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                  Sub
+                </span>
+              )
             ) : (
               <>
                 {/* Hidden file input for subtitle upload */}
@@ -346,15 +384,26 @@ export default function MappingOverviewCard({ data }: Props) {
   const [episodes, setEpisodes] = useState(data.episodes);
   const [, setSeasonsState] = useState(data.seasons);
 
-  // User-uploaded subtitle filenames (appended to torrent subtitles for badge display)
-  const [uploadedSubtitles, setUploadedSubtitles] = useState<string[]>([]);
+  // User-uploaded subtitles: track both original name (for matching) and stored name (for deletion)
+  const [uploadedSubtitles, setUploadedSubtitles] = useState<
+    { originalFilename: string; storedFilename: string }[]
+  >([]);
+  // Combine torrent subtitles + uploaded original filenames for matching
+  // Also track uploaded original filenames separately so EpisodeCard knows which are deletable
   const combinedSubtitles = useMemo(
-    () => [...(data.subtitles || []), ...uploadedSubtitles],
+    () => [...(data.subtitles || []), ...uploadedSubtitles.map((u) => u.storedFilename)],
     [data.subtitles, uploadedSubtitles],
   );
 
-  const handleSubtitleUploaded = useCallback((filename: string) => {
-    setUploadedSubtitles((prev) => [...prev, filename]);
+  const handleSubtitleUploaded = useCallback(
+    (originalFilename: string, storedFilename: string) => {
+      setUploadedSubtitles((prev) => [...prev, { originalFilename, storedFilename }]);
+    },
+    [],
+  );
+
+  const handleSubtitleDeleted = useCallback((storedFilename: string) => {
+    setUploadedSubtitles((prev) => prev.filter((u) => u.storedFilename !== storedFilename));
   }, []);
 
   const tmdbSeasonOptions = useMemo(() => Object.keys(data.tmdb_data || {}).map(Number).sort((a,b)=>a-b), [data.tmdb_data]);
@@ -464,6 +513,7 @@ export default function MappingOverviewCard({ data }: Props) {
                   subtitles={combinedSubtitles}
                   torrentName={data.torrent_name}
                   onSubtitleUploaded={handleSubtitleUploaded}
+                  onSubtitleDeleted={handleSubtitleDeleted}
                 />
               );
             })

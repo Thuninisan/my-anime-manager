@@ -617,6 +617,45 @@ async def subtitle_upload(file: UploadFile = File(...), torrent_name: str = Form
     }
 
 
+@app.delete("/api/torrent/subtitle/delete")
+async def subtitle_delete(torrent_name: str, filename: str):
+    """Delete a user-uploaded subtitle file.
+
+    Only removes files under ``data/subtitles/{torrent_name}/`` — the endpoint
+    rejects paths that attempt directory traversal.
+    """
+    # Sanitise inputs to prevent directory traversal
+    safe_torrent_name = re.sub(r'[<>:"/\\|?*]', "_", torrent_name).strip()
+    safe_filename = Path(filename).name  # strip any directory components
+
+    if not safe_torrent_name or not safe_filename:
+        raise HTTPException(400, "种子名称或文件名为空")
+
+    file_path = _SUBTITLE_DIR / safe_torrent_name / safe_filename
+
+    # Resolve and verify the path stays within the subtitles directory
+    try:
+        file_path = file_path.resolve()
+        _SUBTITLE_DIR.resolve()
+        if not str(file_path).startswith(str(_SUBTITLE_DIR.resolve()) + os.sep):
+            raise HTTPException(403, "路径越界")
+    except (ValueError, OSError):
+        raise HTTPException(400, "无效的文件路径")
+
+    if not file_path.is_file():
+        raise HTTPException(404, f"字幕文件不存在: {safe_filename}")
+
+    file_path.unlink()
+    logger.info("字幕已删除: %s", file_path)
+
+    # Clean up empty parent directory
+    parent = file_path.parent
+    if parent != _SUBTITLE_DIR and not any(parent.iterdir()):
+        parent.rmdir()
+
+    return {"ok": True, "deleted": safe_filename}
+
+
 # ── /api/torrent/parse-and-search ──
 
 @app.post("/api/torrent/parse-and-search")

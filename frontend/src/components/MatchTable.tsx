@@ -14,6 +14,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import MappingCard from '@/components/Cards/MappingCard';
 import type { TmdbSeasonOption, TmdbEpOption } from '@/components/Cards/MappingCard';
+import { deleteSubtitle } from '@/api/torrentApi';
 
 interface ParsedFile {
   file_name: string;
@@ -315,16 +316,31 @@ export default function MatchTable({ data }: { data: any }) {
   const subtitles: string[] = data.subtitles || [];
   const torrentName: string = data.torrent_name || '';
 
-  // User-uploaded subtitle filenames (combined with torrent subtitles for badge display)
-  const [uploadedSubtitles, setUploadedSubtitles] = useState<string[]>([]);
+  // User-uploaded subtitles: {originalFilename, storedFilename}[]
+  const [uploadedSubtitles, setUploadedSubtitles] = useState<
+    { originalFilename: string; storedFilename: string }[]
+  >([]);
+  // Combine torrent subtitles + uploaded stored filenames for matching
   const combinedSubtitles = useMemo(
-    () => [...subtitles, ...uploadedSubtitles],
+    () => [...subtitles, ...uploadedSubtitles.map((u) => u.storedFilename)],
     [subtitles, uploadedSubtitles],
   );
 
-  const handleSubtitleUploaded = useCallback((filename: string) => {
-    setUploadedSubtitles((prev) => [...prev, filename]);
-  }, []);
+  const handleSubtitleUploaded = useCallback(
+    (originalFilename: string, storedFilename: string) => {
+      setUploadedSubtitles((prev) => [...prev, { originalFilename, storedFilename }]);
+    },
+    [],
+  );
+
+  // Delete callback: takes a stored filename, deletes from server + state
+  const makeHandleSubtitleDeleted = useCallback(
+    (storedFilename: string) => async () => {
+      await deleteSubtitle(torrentName, storedFilename);
+      setUploadedSubtitles((prev) => prev.filter((u) => u.storedFilename !== storedFilename));
+    },
+    [torrentName],
+  );
 
   // ── Check whether a video file has a matching subtitle file ──
   // Match by filename stem (name without extension).
@@ -333,6 +349,23 @@ export default function MatchTable({ data }: { data: any }) {
     return combinedSubtitles.some(
       (sub) => sub.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
     );
+  };
+
+  // Check whether the matching subtitle is user-uploaded (deletable)
+  const isUploadedMatch = (videoFileName: string): boolean => {
+    const videoStem = videoFileName.replace(/\.[^.]+$/, '').toLowerCase();
+    return uploadedSubtitles.some(
+      (u) => u.storedFilename.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
+    );
+  };
+
+  // Get the stored filename of the upload that matches this video
+  const getUploadedStoredFilename = (videoFileName: string): string | null => {
+    const videoStem = videoFileName.replace(/\.[^.]+$/, '').toLowerCase();
+    const match = uploadedSubtitles.find(
+      (u) => u.storedFilename.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
+    );
+    return match?.storedFilename ?? null;
   };
 
   // ── Build BGM entry dropdown options ──
@@ -671,8 +704,15 @@ export default function MatchTable({ data }: { data: any }) {
                   rowIndex={i}
                   variant="movie"
                   hasSubtitle={hasMatchingSubtitle(r.file_name)}
+                  isUploadedSubtitle={isUploadedMatch(r.file_name)}
                   torrentName={torrentName}
                   onSubtitleUploaded={handleSubtitleUploaded}
+                  onSubtitleDeleted={
+                    (() => {
+                      const sf = getUploadedStoredFilename(r.file_name);
+                      return sf ? makeHandleSubtitleDeleted(sf) : undefined;
+                    })()
+                  }
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps}
                   currentEntryId={currentEntryId}
@@ -726,8 +766,15 @@ export default function MatchTable({ data }: { data: any }) {
                   rowIndex={i}
                   variant="tv"
                   hasSubtitle={hasMatchingSubtitle(r.file_name)}
+                  isUploadedSubtitle={isUploadedMatch(r.file_name)}
                   torrentName={torrentName}
                   onSubtitleUploaded={handleSubtitleUploaded}
+                  onSubtitleDeleted={
+                    (() => {
+                      const sf = getUploadedStoredFilename(r.file_name);
+                      return sf ? makeHandleSubtitleDeleted(sf) : undefined;
+                    })()
+                  }
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps}
                   currentEntryId={currentEntryId}
@@ -808,8 +855,15 @@ export default function MatchTable({ data }: { data: any }) {
                   rowIndex={i}
                   variant="sp"
                   hasSubtitle={hasMatchingSubtitle(r.file_name)}
+                  isUploadedSubtitle={isUploadedMatch(r.file_name)}
                   torrentName={torrentName}
                   onSubtitleUploaded={handleSubtitleUploaded}
+                  onSubtitleDeleted={
+                    (() => {
+                      const sf = getUploadedStoredFilename(r.file_name);
+                      return sf ? makeHandleSubtitleDeleted(sf) : undefined;
+                    })()
+                  }
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps}
                   currentEntryId={currentEntryId}
