@@ -30,9 +30,9 @@ interface Props {
 
 export default function LeftSidebar({
   sub, data,
-  editingCard, editingExclude, deleteType,
+  editingCard, editingExclude, deleteType: _deleteType,
   onStartEdit, onExcludeChange, onSaveExclude,
-  onSetDeleteType, onConfirmDelete,
+  onSetDeleteType, onConfirmDelete: _onConfirmDelete,
 }: Props) {
   const isActive = sub?.active !== 0;
 

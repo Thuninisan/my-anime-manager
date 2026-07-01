@@ -62,7 +62,7 @@ interface Props {
 
 export default function EpisodeTable({
   data, loading, sub, fileInputRef, fileIntentRef,
-  expandedSort, tmdbForm, setTmdbForm, tmdbSeasonMap, onOpenTmdb, onSaveTmdb, onDeleteEpisode, onClose,
+  expandedSort, tmdbForm, setTmdbForm, tmdbSeasonMap, onOpenTmdb, onSaveTmdb, onDeleteEpisode, onClose: _onClose,
 }: Props) {
   if (loading) {
     return (
@@ -83,9 +83,6 @@ export default function EpisodeTable({
 
   const sortedEps = [...data.episodes].sort((a, b) => a.sort - b.sort);
   const missing = data.missing_sorts || [];
-  const totalSize = sortedEps.reduce((sum, e) => sum + (e.qbit?.size || 0), 0);
-  const totalEps = data.bgm_sortrange[1] - data.bgm_sortrange[0] + 1;
-  const downloaded = data.episodes.length;
 
   return (
     <div className="flex-1 overflow-y-auto">

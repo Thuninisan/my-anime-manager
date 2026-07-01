@@ -51,7 +51,7 @@ interface ParsedFile {
 interface SearchEntry {
   tmdb: { id: number; name: string; original_title?: string; original_name?: string } | null;
   bangumi: { id: number; name: string; name_cn?: string } | null;
-  media_type?: "tv" | "movie";
+  media_type?: "tv" | "movie" | "special";
 }
 
 interface TmdbEpisode {
@@ -94,7 +94,7 @@ export interface MatchRow {
   tmdb_ep: number | null;
   tmdb_ep_name: string;
   matched: boolean;
-  media_type?: "tv" | "movie";
+  media_type?: "tv" | "movie" | "special";
 }
 
 /**
@@ -216,6 +216,7 @@ export function computeMatches(data: any): MatchRow[] {
 
       return {
         file_name: pf.file_name,
+        torrent_path: pf.torrent_path,
         show_name: pf.show_name,
         src_season: pf.season,
         src_episode: pf.episode,
@@ -598,7 +599,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
       if (!ov) return r;
 
       // Helper: apply manualMatched toggle if set, otherwise keep computed value
-      const applyManualMatched = (row: MatchRow, computedMatched: boolean): MatchRow => {
+      const applyManualMatched = (row: MatchRow, _computedMatched: boolean): MatchRow => {
         if (ov.manualMatched !== undefined) {
           return { ...row, matched: ov.manualMatched };
         }
@@ -980,10 +981,10 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
                   }
                 }
                 if (!showLabel) showLabel = `TMDB ${showTmdbId}`;
-                for (const [skey, sdata] of Object.entries(seasons)) {
+                for (const [skey, sdata] of Object.entries(seasons as Record<string, any>)) {
                   tmdbSeasonOpts.push({
                     value: `${showTmdbId}:${skey}`,
-                    label: `${showLabel}  ${sdata.name || `Season ${skey}`}`,
+                    label: `${showLabel}  ${(sdata as any).name || `Season ${skey}`}`,
                   });
                 }
               }

@@ -54,7 +54,7 @@ function CopyButton({ url }: { url: string }) {
 }
 
 export default function SubtitleGroupTable({
-  result, subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
+  result, subscriptions: _subscriptions, expanded, loadingFeed, filterTags, tagBoxOpen,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe, getSubMode,
   takenRoles, onDeleteRss, subscribingId, excludePatterns, onExcludeChange,
 }: Props) {

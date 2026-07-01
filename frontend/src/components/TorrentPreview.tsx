@@ -51,7 +51,7 @@ export default function TorrentPreview({
   searchResult,
   augmentedEpData,
   onEpisodeDataChange,
-  onClose,
+  onClose: _onClose,
 }: TorrentPreviewProps) {
   const mergedResult = augmentedEpData && searchResult
     ? { ...searchResult, episode_data: augmentedEpData }

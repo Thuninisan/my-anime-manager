@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { MatchRow, BgmEpisode } from '@/components/MatchTable';
-import { uploadSubtitle, deleteSubtitle } from '@/api/torrentApi';
+import { uploadSubtitle } from '@/api/torrentApi';
 
 export interface TmdbSeasonOption {
   value: string;

@@ -52,7 +52,7 @@ export default function InfoCards({ searchResult, onEpisodeDataChange }: Props) 
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(-1);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const bgmContainerRef = useRef<HTMLDivElement>(null);
 
   // Click outside closes dropdown

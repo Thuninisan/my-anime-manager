@@ -125,7 +125,6 @@ export default function RssPage() {
           filterTags={filterTags}
           tagBoxOpen={tagBoxOpen}
           subscribingId={subscribingId}
-          filterTags={filterTags}
           excludePatterns={excludePatterns}
           onToggleFeed={toggleFeed}
           onToggleTag={toggleTag}

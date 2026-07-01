@@ -19,7 +19,7 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(-1);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
