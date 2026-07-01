@@ -523,8 +523,7 @@ async def torrent_parse_and_search(file: UploadFile = File(...)):
         traceback.print_exc()
         raise HTTPException(400, str(e))
 
-    # Clean up temp file
-    Path(tmp_path).unlink(missing_ok=True)
+    # Keep the temp file — the download endpoint needs it later
     return result
 
 
@@ -789,6 +788,9 @@ async def torrent_download(body: dict):
         )
     )
     _download_tasks[info_hash] = task
+
+    # Clean up the temp torrent file (already added to qBittorrent)
+    Path(torrent_path).unlink(missing_ok=True)
 
     return {
         "ok": True,
