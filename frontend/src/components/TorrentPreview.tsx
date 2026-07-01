@@ -36,14 +36,21 @@ function getTmdbShowName(searchResult: any, showName: string): string {
   return entry?.tmdb?.name || showName;
 }
 
-/** Extract bangumi show name from search results or from the row. */
+/** Extract bangumi show name — prefer Chinese (name_cn), fall back to Japanese (name), then row label. */
 function getBangumiShowName(searchResult: any, row: MatchRow): string {
-  // Use the BGM entry name from search results if available
+  // 1. search_results (最初搜索命中)
   for (const entry of Object.values(searchResult?.search_results || {}) as any[]) {
     if (entry?.bangumi?.id === row.bgm_entry_id) {
       return entry.bangumi.name_cn || entry.bangumi.name || row.bgm_entry;
     }
   }
+  // 2. episode_data.bangumi (续集链 / 番外篇 — augmented by InfoCards)
+  const bgmData: Record<string, any> = searchResult?.episode_data?.bangumi || {};
+  const bgmEntry = bgmData[String(row.bgm_entry_id)];
+  if (bgmEntry?.name) {
+    return bgmEntry.name;  // already Chinese (episode_data uses name_cn as name)
+  }
+  // 3. Fallback: row label
   return row.bgm_entry || 'Unknown';
 }
 
