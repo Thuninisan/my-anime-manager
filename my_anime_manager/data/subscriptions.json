@@ -1,1 +1,32 @@
-[]
+[
+  {
+    "name": "尼古喵喵",
+    "rss_url": "",
+    "bangumi_id": 622206,
+    "subgroup_id": 0,
+    "subgroup_name": "",
+    "filter_tags": [],
+    "backup_rss_url": "https://mikanani.me/RSS/Bangumi?bangumiId=3992&subgroupid=583",
+    "backup_subgroup_id": 583,
+    "backup_subgroup_name": "ANi",
+    "backup_filter_tags": [],
+    "download_path": "/{series_name}/Season {season}",
+    "exclude_patterns": [],
+    "backup_exclude_patterns": [],
+    "active": 1,
+    "created_at": "2026-07-03T11:35:29",
+    "poster_url": "https://lain.bgm.tv/r/400/pic/cover/l/6a/b3/622206_dpWcC.jpg",
+    "updated_at": "2026-07-03T11:35:33",
+    "bgm_season": 1,
+    "bgm_sortrange": [
+      1,
+      12
+    ],
+    "series_name": "尼古喵喵",
+    "tmdb_id": 312949,
+    "tmdb_season": null,
+    "bgm_rating": 6.9,
+    "bgm_rating_total": 146,
+    "air_date": "2026-07-02"
+  }
+]
