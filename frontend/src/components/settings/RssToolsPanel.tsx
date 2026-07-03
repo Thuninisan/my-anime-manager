@@ -81,7 +81,7 @@ export default function RssToolsPanel({ config, onChange }: Props) {
               : 'Not downloaded'}
           </span>
           <Button variant="secondary" size="sm" className="text-xs h-8"
-            onClick={dataStatus?.exists ? checkDataStatus : handleDownloadData}
+            onClick={handleDownloadData}
             disabled={downloading}>
             {downloading ? 'Downloading...' : dataStatus?.exists ? 'Refresh' : 'Download Data'}
           </Button>
