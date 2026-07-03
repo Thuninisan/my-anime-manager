@@ -540,6 +540,33 @@ async def _process_subscription(sub: dict):
         _worker_status["downloaded"] += new_downloads
 
 
+async def _refresh_sortrange(bangumi_id: int, sub: dict):
+    """Re-fetch Bangumi episode list and update bgm_sortrange in the subscription.
+
+    Bangumi entries for currently-airing shows often have incomplete episode
+    lists (fewer sorts than the final count).  After each successful download
+    we refresh the sort range so ``_check_completion`` always sees the latest
+    data and won't prematurely mark a subscription as completed.
+    """
+    sub_bak = sub.get("bgm_sortrange")
+    try:
+        # Clear cached episodes so we get the latest from the API
+        _bgm_ep_cache.pop(bangumi_id, None)
+        eps = await _get_bangumi_episodes(bangumi_id)
+        sorts = [e.get("sort") or e.get("ep", 0) for e in eps]
+        new_range = [min(sorts), max(sorts)] if sorts else [0, 0]
+
+        if sub_bak != new_range:
+            sub["bgm_sortrange"] = new_range
+            from ..data import update_subscription
+            update_subscription(bangumi_id, {"bgm_sortrange": new_range})
+            logger.info("bgm_sortrange refreshed: %s → %s", sub_bak, new_range)
+    except Exception:
+        logger.warning("Failed to refresh bgm_sortrange (non-fatal)", exc_info=True)
+        # Revert cache pop on error so next call can retry with existing cache
+        _bgm_ep_cache.pop(bangumi_id, None)
+
+
 async def _check_completion(bangumi_id: int, sub: dict):
     """If all episodes in bgm_sortrange are downloaded, mark active=0."""
     bgm_sortrange = sub.get("bgm_sortrange", [0, 0])
@@ -821,6 +848,10 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
 
     # Clear any previous failure count after a successful download
     reset_fail_count(bangumi_id, sort)
+
+    # Refresh sortrange from Bangumi (newly-airing shows often grow their
+    # episode list over time, so the initial range may be too small)
+    await _refresh_sortrange(bangumi_id, sub)
 
     # Check if all episodes in the sort range are now downloaded
     await _check_completion(bangumi_id, sub)
