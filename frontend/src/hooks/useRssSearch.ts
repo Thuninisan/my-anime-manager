@@ -9,6 +9,7 @@ interface UseRssSearchReturn {
   error: string;
   search: (bangumiId: string) => Promise<void>;
   clear: () => void;
+  setExternalResult: (result: BangumiRssResponse, meta: BangumiMeta | null) => void;
 }
 
 export function useRssSearch(): UseRssSearchReturn {
@@ -40,5 +41,13 @@ export function useRssSearch(): UseRssSearchReturn {
     setResult(null); setMeta(null); setError('');
   }, []);
 
-  return { result, meta, searching, error, search, clear };
+  // Set result/meta from external source (MikanSearchDialog flow)
+  const setExternalResult = useCallback((rssResult: BangumiRssResponse, bangumiMeta: BangumiMeta | null) => {
+    setResult(rssResult);
+    setMeta(bangumiMeta);
+    setError('');
+    setSearching(false);
+  }, []);
+
+  return { result, meta, searching, error, search, clear, setExternalResult };
 }

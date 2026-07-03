@@ -1,8 +1,8 @@
-import type { BangumiRssResponse, RssDataStatus, RssFeedResponse, RssSettings, SeasonInfo, SubscriptionIn, SubscriptionOut } from '../types/preview';
+import type { BangumiRssResponse, ManualSubscribeIn, MikanSearchResult, RssDataStatus, RssFeedResponse, RssSettings, SeasonInfo, SubscriptionIn, SubscriptionOut } from '../types/preview';
 
 const API_BASE = '/api/rss';
 
-export async function searchBangumi(query: string): Promise<{ bangumi_id: number; name: string }[]> {
+export async function searchBangumi(query: string): Promise<{ bangumi_id: number; name: string; has_mikan_id: boolean }[]> {
   const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
@@ -23,6 +23,47 @@ export async function lookupBangumiRss(bangumiId: number): Promise<BangumiRssRes
       const j = JSON.parse(text);
       msg = j.detail || text;
     } catch { /* not JSON */ }
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function searchMikan(query: string): Promise<MikanSearchResult[]> {
+  const res = await fetch(`${API_BASE}/mikan-search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try { const j = JSON.parse(text); msg = j.detail || text; } catch { /* */ }
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function assignMikanId(bangumiId: number, mikanId: number): Promise<BangumiRssResponse> {
+  const res = await fetch(`${API_BASE}/bangumi/${bangumiId}/assign-mikan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mikan_id: mikanId }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try { const j = JSON.parse(text); msg = j.detail || text; } catch { /* */ }
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function manualSubscribe(sub: ManualSubscribeIn): Promise<SubscriptionOut> {
+  const res = await fetch(`${API_BASE}/manual-subscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(sub),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try { const j = JSON.parse(text); msg = j.detail || text; } catch { /* */ }
     throw new Error(msg || `HTTP ${res.status}`);
   }
   return res.json();

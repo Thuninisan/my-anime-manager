@@ -78,6 +78,30 @@ def get_tmdb_season(bangumi_id: int) -> int | None:
     return entry.get("tmdb_season") if entry else None
 
 
+def _save_map() -> None:
+    """Persist the in-memory Bangumi-Mikan map back to JSON."""
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        return
+    raw = {str(k): v for k, v in _bangumi_mikan_map.items()}
+    _MAP_FILE.write_text(
+        json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def set_mikan_id(bangumi_id: int, mikan_id: int) -> bool:
+    """Set or update mikan_id for a Bangumi entry. Returns False if not found."""
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    entry = _bangumi_mikan_map.get(bangumi_id)
+    if entry is None:
+        return False
+    entry["mikan_id"] = mikan_id
+    _save_map()
+    return True
+
+
 def get_bangumi_id_by_tmdb_id(tmdb_id: int) -> int | None:
     """Reverse lookup: TMDB ID → Bangumi ID.
 
@@ -108,7 +132,11 @@ def search_by_name(query: str) -> list[dict]:
     for bid_str, entry in _bangumi_mikan_map.items():
         name = entry.get("name", "")
         if q in name.lower():
-            results.append({"bangumi_id": int(bid_str), "name": name})
+            results.append({
+                "bangumi_id": int(bid_str),
+                "name": name,
+                "has_mikan_id": entry.get("mikan_id") is not None,
+            })
     results.sort(key=lambda r: len(r["name"]))  # shorter = closer match
     return results[:20]
 

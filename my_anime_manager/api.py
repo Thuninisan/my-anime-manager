@@ -45,6 +45,7 @@ from .utils.torrent_hash import compute_info_hash
 from .utils.torrent_file_reader import read_torrent_file_list
 import bencodepy
 from .clients import bangumi as bgm_client
+from .clients import mikan as mikan_client
 from . import data
 
 logging.basicConfig(
@@ -135,6 +136,23 @@ class BangumiRssResponse(BaseModel):
     mikan_id: int
     global_rss: str
     groups: list[RssSubtitleGroup]
+
+
+class MikanSearchResult(BaseModel):
+    mikan_id: int
+    title: str
+    url: str
+
+
+class AssignMikanRequest(BaseModel):
+    mikan_id: int
+
+
+class ManualSubscribeIn(BaseModel):
+    name: str
+    rss_url: str
+    bangumi_id: int
+    backup_rss_url: str = ""
 
 
 class RssFeedItem(BaseModel):
@@ -922,6 +940,22 @@ async def search_bangumi(q: str):
     return data.search_by_name(q)
 
 
+@app.get("/api/rss/mikan-search")
+async def search_mikan(q: str = ""):
+    """Search Mikan by name and return matching anime entries.
+
+    Proxies to Mikan's own search page and parses the HTML.
+    Returns a list of {mikan_id, title, url} dicts.
+    """
+    if not q.strip():
+        return []
+    try:
+        results = await mikan_client.search_mikan(q.strip())
+        return [MikanSearchResult(**r) for r in results]
+    except Exception as e:
+        raise HTTPException(502, f"Mikan 搜索失败: {e}")
+
+
 @app.get("/api/rss/bangumi/{bangumi_id}/meta")
 async def get_bangumi_meta(bangumi_id: int):
     """Fetch Bangumi subject metadata (air_date, eps, rating, series_name).
@@ -954,6 +988,24 @@ async def get_bangumi_rss(bangumi_id: int):
     result = await rss_service.lookup_bangumi_rss(bangumi_id)
     if result is None:
         raise HTTPException(404, f"未找到 Bangumi ID {bangumi_id} 对应的 Mikan 条目")
+    return BangumiRssResponse(**result)
+
+
+@app.post("/api/rss/bangumi/{bangumi_id}/assign-mikan", response_model=BangumiRssResponse)
+async def assign_mikan_id(bangumi_id: int, body: AssignMikanRequest):
+    """Assign a Mikan ID to a Bangumi entry and return subtitle groups.
+
+    Saves the mapping to bangumi_mikan_map.json so future lookups work.
+    Then fetches subtitle groups from Mikan for the given mikan_id.
+    """
+    name = data.get_bangumi_name(bangumi_id)
+    if not name:
+        raise HTTPException(404, f"Bangumi ID {bangumi_id} 不存在于映射表中")
+
+    if not data.set_mikan_id(bangumi_id, body.mikan_id):
+        raise HTTPException(404, f"Bangumi ID {bangumi_id} 不存在于映射表中")
+
+    result = await rss_service.lookup_mikan_rss(body.mikan_id, bangumi_id, name)
     return BangumiRssResponse(**result)
 
 
@@ -1049,6 +1101,26 @@ async def create_subscription(body: SubscriptionIn):
         pass  # Non-fatal: frontend falls back to gradient placeholder
 
     return sub
+
+
+@app.post("/api/rss/manual-subscribe", response_model=SubscriptionOut, status_code=201)
+async def manual_subscribe(body: ManualSubscribeIn):
+    """Create a subscription with manually provided RSS URLs.
+
+    Used when Mikan search returns no results and the user enters RSS
+    URLs directly.  No subtitle group is associated (subgroup_id = 0).
+    """
+    sub = data.add_subscription(
+        name=body.name,
+        rss_url=body.rss_url,
+        bangumi_id=body.bangumi_id,
+        subgroup_id=0,
+        subgroup_name="手动",
+        backup_rss_url=body.backup_rss_url or "",
+    )
+    eps = data.get_all_episodes(sub["bangumi_id"])
+    sub["downloaded_count"] = len(eps)
+    return SubscriptionOut(**sub)
 
 
 ENRICH_FIELDS = ("bgm_season", "bgm_sortrange", "series_name", "tmdb_id", "tmdb_season", "bgm_rating", "bgm_rating_total")

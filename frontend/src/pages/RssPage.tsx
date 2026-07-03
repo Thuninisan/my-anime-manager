@@ -4,6 +4,7 @@ import * as rssApi from '@/api/rssApi';
 import { showLoadingToast, updateToast } from '@/lib/toast';
 import RssSearchBar from '@/components/rss/RssSearchBar';
 import SubtitleGroupDialog from '@/components/rss/SubtitleGroupDialog';
+import MikanSearchDialog from '@/components/rss/MikanSearchDialog';
 import SubscriptionList from '@/components/rss/SubscriptionList';
 import DownloadHistoryDialog from '@/components/rss/DownloadHistoryDialog';
 import UnsubscribeDialog from '@/components/rss/UnsubscribeDialog';
@@ -13,7 +14,7 @@ import { useDownloadHistory } from '@/hooks/useDownloadHistory';
 
 export default function RssPage() {
   const [bangumiId, setBangumiId] = useState('');
-  const { result, meta, searching, error: searchError, search, clear: clearSearch } = useRssSearch();
+  const { result, meta, searching, error: searchError, search, clear: clearSearch, setExternalResult } = useRssSearch();
   const { subscriptions, loading: subLoading, subscribe, unsubscribe, activate, refresh: refreshSubs } = useSubscriptions();
   const { open: historyOpen, data: historyData, loading: historyLoading, subscription: historySub, openHistory, closeHistory, refreshHistory } = useDownloadHistory();
 
@@ -25,7 +26,30 @@ export default function RssPage() {
   const [subscribingId, setSubscribingId] = useState<number | null>(null);
   const [excludePatterns, setExcludePatterns] = useState<Record<number, string[]>>({});
 
-  const handleSearch = (id: number) => search(String(id))
+  // Mikan fallback state — opened when search result has no mikan_id
+  const [mikanFallback, setMikanFallback] = useState<{ bangumi_id: number; name: string } | null>(null);
+  const [mikanMeta, setMikanMeta] = useState<import('@/types/preview').BangumiMeta | null>(null);
+
+  const handleSearch = (id: number, candidate?: { has_mikan_id: boolean; name: string }) => {
+    // Entry has bangumi_id but no mikan_id → trigger Mikan search fallback
+    if (candidate && !candidate.has_mikan_id) {
+      setMikanFallback({ bangumi_id: id, name: candidate.name });
+      // Fetch Bangumi meta in parallel for display in the dialog
+      rssApi.getBangumiMeta(id).then(setMikanMeta).catch(() => setMikanMeta(null));
+      return;
+    }
+    search(String(id));
+  };
+
+  const handleMikanAssigned = (rssResult: import('@/types/preview').BangumiRssResponse) => {
+    setExternalResult(rssResult, mikanMeta);
+    setMikanFallback(null);
+  };
+
+  const handleManualSubscribed = () => {
+    setMikanFallback(null);
+    refreshSubs();
+  };
 
   const toggleFeed = async (rssUrl: string) => {
     if (expanded[rssUrl] !== undefined) {
@@ -135,6 +159,18 @@ export default function RssPage() {
           takenRoles={takenRoles}
           onDeleteRss={handleDeleteGroupRss}
           onClose={clearSearch}
+        />
+      )}
+
+      {mikanFallback && (
+        <MikanSearchDialog
+          open={true}
+          bangumiId={mikanFallback.bangumi_id}
+          bangumiName={mikanFallback.name}
+          meta={mikanMeta}
+          onClose={() => { setMikanFallback(null); setMikanMeta(null); }}
+          onMikanAssigned={handleMikanAssigned}
+          onManualSubscribed={handleManualSubscribed}
         />
       )}
 

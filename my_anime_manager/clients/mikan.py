@@ -70,6 +70,54 @@ async def get_subtitle_groups(mikan_id: int) -> list[dict]:
     return sorted(groups.values(), key=lambda g: g["subgroup_id"])
 
 
+async def search_mikan(query: str) -> list[dict]:
+    """Search Mikan by name and return matching anime entries.
+
+    Args:
+        query: Search query (Chinese or Japanese anime name).
+
+    Returns:
+        List of dicts with keys: mikan_id, title, url.
+    """
+    import re
+    from urllib.parse import quote
+
+    base = config.MIKAN_BASE_URL
+    url = f"{base}/Home/Search?searchstr={quote(query)}"
+
+    resp = await fetch_with_retry(
+        url,
+        timeout=30.0,
+        headers={"Accept": "text/html,application/xhtml+xml"},
+        label="Mikan search",
+    )
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    results: list[dict] = []
+    seen_ids: set[int] = set()
+
+    # Mikan search results page has <a> tags linking to /Home/Bangumi/{id}
+    for a_tag in soup.find_all("a", href=True):
+        href = a_tag["href"]
+        match = re.search(r"/Home/Bangumi/(\d+)", href)
+        if not match:
+            continue
+        mikan_id = int(match.group(1))
+        if mikan_id in seen_ids:
+            continue
+        title = a_tag.get_text(strip=True)
+        if not title or len(title) < 2:
+            continue
+        seen_ids.add(mikan_id)
+        results.append({
+            "mikan_id": mikan_id,
+            "title": title,
+            "url": f"{base}/Home/Bangumi/{mikan_id}",
+        })
+
+    return results
+
+
 def _find_group_name_in_parent(a_tag) -> str | None:
     """Walk up a few levels looking for a group name text node."""
     current = a_tag.parent

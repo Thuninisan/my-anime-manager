@@ -7,12 +7,13 @@ interface Props {
   searching: boolean;
   searchError: string;
   onBangumiIdChange: (v: string) => void;
-  onSearch: (id: number) => void;
+  onSearch: (id: number, candidate?: Candidate) => void;
 }
 
 interface Candidate {
   bangumi_id: number;
   name: string;
+  has_mikan_id: boolean;
 }
 
 export default function RssSearchBar({ bangumiId, searching, searchError, onBangumiIdChange, onSearch }: Props) {
@@ -60,7 +61,7 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
     onBangumiIdChange(String(candidate.bangumi_id));
     setShowDropdown(false);
     setCandidates([]);
-    onSearch(candidate.bangumi_id);
+    onSearch(candidate.bangumi_id, candidate);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -128,7 +129,12 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
                 onMouseEnter={() => setHighlightIdx(idx)}
                 onClick={() => handleSelectCandidate(c)}
               >
-                <span className="truncate">{c.name}</span>
+                <span className="truncate flex items-center gap-2">
+                  {c.name}
+                  {!c.has_mikan_id && (
+                    <span className="text-[10px] text-amber-500 font-medium shrink-0">(未关联)</span>
+                  )}
+                </span>
                 <span className="text-[10px] text-muted-foreground ml-2 shrink-0">ID: {c.bangumi_id}</span>
               </div>
             ))}

@@ -41,6 +41,19 @@ export interface BangumiRssResponse {
   groups: RssSubtitleGroup[];
 }
 
+export interface MikanSearchResult {
+  mikan_id: number;
+  title: string;
+  url: string;
+}
+
+export interface ManualSubscribeIn {
+  name: string;
+  rss_url: string;
+  bangumi_id: number;
+  backup_rss_url?: string;
+}
+
 export interface RssDataStatus {
   exists: boolean;
   count: number;

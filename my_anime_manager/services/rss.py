@@ -66,6 +66,24 @@ async def lookup_bangumi_rss(bangumi_id: int) -> dict | None:
     }
 
 
+async def lookup_mikan_rss(mikan_id: int, bangumi_id: int, name: str) -> dict:
+    """Look up Mikan subtitle groups given an already-known mikan_id.
+
+    This is the entry point for the Mikan-search fallback flow — the
+    mikan_id comes from the user's selection in MikanSearchDialog
+    rather than from the bangumi_mikan_map.
+    """
+    base = config.MIKAN_BASE_URL
+    groups = await mikan_client.get_subtitle_groups(mikan_id)
+    return {
+        "bangumi_id": bangumi_id,
+        "name": name,
+        "mikan_id": mikan_id,
+        "global_rss": f"{base}/RSS/Bangumi?bangumiId={mikan_id}",
+        "groups": groups,
+    }
+
+
 async def fetch_and_parse_rss(
     rss_url: str,
     filter_tags: list[str] | None = None,
