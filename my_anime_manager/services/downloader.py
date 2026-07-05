@@ -300,6 +300,79 @@ async def _download_torrent_file(torrent_url: str, max_retries: int = 3) -> byte
 # NFO & file structure generation
 # ═══════════════════════════════════════════════════════════════════════
 
+async def write_episode_files(
+    tmdb_ep: dict,
+    *,
+    season_number: int,
+    episode_number: int,
+    bangumi_ep_id: int | None,
+    show_name: str,
+    original_name: str,
+    bangumi_subject_name: str,
+    studios: list[str] | None = None,
+    output_dir: str = ".",
+) -> dict:
+    """Download episode thumbnail and generate ``.nfo`` — no API calls.
+
+    All TMDB data must already be extracted into *tmdb_ep* before
+    calling.  Used by both the RSS flow (:func:`generate_metadata`)
+    and the torrent batch flow (:func:`generate_metadata_collection`).
+
+    Args:
+        tmdb_ep: Normalised dict with keys ``name``, ``overview``,
+            ``air_date``, ``runtime``, ``tmdb_id``, ``still_path``,
+            ``directors``, ``writers``, ``guest_stars``.
+        season_number:  Season number written into the NFO.
+        episode_number: Episode / sort number written into the NFO.
+        bangumi_ep_id:  Bangumi episode ID (or ``None``).
+        show_name:      TMDB show title → ``<showtitle>``.
+        original_name:  TMDB original name → ``<originaltitle>``.
+        bangumi_subject_name: Bangumi subject name (used for the NFO
+            filename prefix and thumbnail base name).
+        studios:        Network / studio names.
+        output_dir:     Directory to write NFO and thumbnail into.
+
+    Returns:
+        ``{"nfo_path": str, "thumb_path": str}``.
+    """
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # ── Thumbnail ───────────────────────────────────────────────────
+    thumb_base = f"{bangumi_subject_name or show_name} {episode_number:02d}"
+    thumb_path = ""
+    still = tmdb_ep.get("still_path", "")
+    if still:
+        try:
+            thumb_path = await download_episode_thumb(
+                still, output_dir, thumb_base,
+            ) or ""
+        except Exception:
+            logger.exception("thumbnail download failed (non-fatal)")
+
+    # ── Episode NFO ─────────────────────────────────────────────────
+    nfo_path = generate_episode_nfo(
+        tmdb_show_name=show_name,
+        tmdb_original_name=original_name,
+        tmdb_ep_name=tmdb_ep.get("name", ""),
+        tmdb_ep_overview=tmdb_ep.get("overview", ""),
+        tmdb_ep_air_date=tmdb_ep.get("air_date", ""),
+        tmdb_ep_runtime=tmdb_ep.get("runtime", 0),
+        tmdb_ep_id=tmdb_ep.get("tmdb_id", 0),
+        season_number=season_number,
+        episode_number=episode_number,
+        bangumi_ep_id=bangumi_ep_id,
+        bangumi_subject_name=bangumi_subject_name or show_name,
+        directors=tmdb_ep.get("directors", []),
+        writers=tmdb_ep.get("writers", []),
+        actors=tmdb_ep.get("guest_stars", []),
+        thumb_path=Path(thumb_path).name if thumb_path else "",
+        studios=studios or [],
+        output_dir=output_dir,
+    )
+
+    return {"nfo_path": nfo_path, "thumb_path": thumb_path}
+
+
 async def generate_metadata(
     qb_client, info_hash: str,
     bangumi_id: int, sort: int, bgm_subject_id: int,
@@ -337,29 +410,23 @@ async def generate_metadata(
         logger.exception("TMDB season API failed")
         return
 
-    # Build tmdb_ep dict from the matching episode
+    # Build normalised tmdb_ep dict from the matching episode
     tmdb_ep = None
     for ep in (season_data.get("episodes") or []):
         if ep.get("episode_number") == target_ep_num:
-            # Extract crew
-            directors = [c["name"] for c in ep.get("crew", []) if c.get("job") == "Director"]
-            writers = [c["name"] for c in ep.get("crew", []) if c.get("job") == "Writer"]
-            guest_stars = [
-                {"name": gs["name"], "character": gs.get("character", "")}
-                for gs in ep.get("guest_stars", [])
-            ]
             tmdb_ep = {
-                "epNum": ep["episode_number"],
                 "name": ep.get("name", ""),
-                "tmdbId": ep["id"],
                 "overview": ep.get("overview", ""),
-                "airDate": ep.get("air_date", ""),
+                "air_date": ep.get("air_date", ""),
                 "runtime": ep.get("runtime", 0),
-                "stillPath": ep.get("still_path", ""),
-                "voteAverage": ep.get("vote_average", 0),
-                "directors": directors,
-                "writers": writers,
-                "guestStars": guest_stars,
+                "tmdb_id": ep["id"],
+                "still_path": ep.get("still_path", ""),
+                "directors": [c["name"] for c in ep.get("crew", []) if c.get("job") == "Director"],
+                "writers": [c["name"] for c in ep.get("crew", []) if c.get("job") == "Writer"],
+                "guest_stars": [
+                    {"name": gs["name"], "character": gs.get("character", "")}
+                    for gs in ep.get("guest_stars", [])
+                ],
             }
             break
 
@@ -370,37 +437,18 @@ async def generate_metadata(
     # ── Season directory ──────────────────────────────────────────
     season_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Episode thumb ─────────────────────────────────────────────
-    thumb_path = ""
-    still = tmdb_ep.get("stillPath", "")
-    if still:
-        try:
-            thumb_path = await download_episode_thumb(
-                still, str(season_dir), f"{show_name} {sort:02d}",
-            ) or ""
-        except Exception:
-            pass
-
-    # ── Episode NFO ───────────────────────────────────────────────
-    ep_path = generate_episode_nfo(
-        tmdb_show_name=show_name,
-        tmdb_ep_name=tmdb_ep.get("name", ""),
-        tmdb_ep_overview=tmdb_ep.get("overview", ""),
-        tmdb_ep_air_date=tmdb_ep.get("airDate", ""),
-        tmdb_ep_runtime=tmdb_ep.get("runtime", 0),
-        tmdb_ep_id=tmdb_ep.get("tmdbId", 0),
+    # ── Episode thumb + NFO ───────────────────────────────────────
+    result = await write_episode_files(
+        tmdb_ep,
         season_number=bgm_season,
         episode_number=sort,
         bangumi_ep_id=None,
-        tmdb_original_name=show_name,
+        show_name=show_name,
+        original_name=show_name,
         bangumi_subject_name=show_name,
-        directors=tmdb_ep.get("directors", []),
-        writers=tmdb_ep.get("writers", []),
-        actors=tmdb_ep.get("guestStars", []),
-        thumb_path=Path(thumb_path).name if thumb_path else "",
         output_dir=str(season_dir),
     )
-    logger.info("episode NFO: %s", ep_path)
+    logger.info("episode NFO: %s", result["nfo_path"])
 
     # ── Show-level NFO + images (only once) ───────────────────────
     tvshow_nfo = show_dir / "tvshow.nfo"

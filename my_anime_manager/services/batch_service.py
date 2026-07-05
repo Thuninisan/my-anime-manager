@@ -20,14 +20,13 @@ from ..clients.qbittorrent import (
 from .. import config
 from . import tmdb as tmdb_service
 from . import bangumi as bangumi_service
+from .downloader import write_episode_files
 from .image_downloader import (
-    download_episode_thumb,
     download_season_poster,
     download_show_images,
 )
 from .mapper import find_target_entry
 from .nfo_generator import (
-    generate_episode_nfo,
     generate_season_nfo,
     generate_tv_show_nfo,
 )
@@ -559,6 +558,126 @@ async def build_preview(torrent_path: str) -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Shared NFO / image generator (used by both torrent and RSS flows)
+# ═══════════════════════════════════════════════════════════════════════
+
+async def generate_metadata_collection(
+    tvshow: dict,
+    seasons: dict,
+    episodes: dict,
+    output_root: str,
+) -> dict:
+    """Generate all NFO files and download images for a torrent batch.
+
+    Pure file-writing — no TMDB / Bangumi API calls.  All metadata
+    must already be present in *tvshow*, *seasons* and *episodes*
+    (exactly as built by :func:`build_preview`).
+
+    Args:
+        tvshow:  ``{title, original_title, tmdb_id, plot, premiered,
+            genres, studios, rating, status}``.
+        seasons: ``{sn: {bgm_id, bgm_title, bgm_original, bgm_plot,
+            bgm_premiered, bgm_images}}`` keyed by season number string.
+        episodes: ``{filename: {season_number, episode_number,
+            bangumi_ep_id, bangumi_subject_name, tmdb: {...}}}``.
+        output_root:  Show directory path (tvshow.nfo is written here,
+            season / episode content goes into ``Season N/`` subdirs).
+
+    Returns:
+        ``{nfoGenerated: int, imagesDownloaded: int}``.
+    """
+    summary = {"nfoGenerated": 0, "imagesDownloaded": 0}
+
+    # ── tvshow.nfo ──────────────────────────────────────────────────
+    print("\n📄 生成 tvshow.nfo...")
+    nfo_path = generate_tv_show_nfo(
+        title=tvshow["title"],
+        original_title=tvshow["original_title"],
+        plot=tvshow["plot"],
+        premiered=tvshow["premiered"],
+        tmdb_id=tvshow["tmdb_id"],
+        genres=tvshow.get("genres", []),
+        studios=tvshow.get("studios", []),
+        rating=tvshow.get("rating", 0),
+        status=tvshow.get("status", ""),
+        output_dir=output_root,
+    )
+    print(f"   ✅ tvshow.nfo: {nfo_path}")
+    summary["nfoGenerated"] += 1
+
+    # ── Show-level images ───────────────────────────────────────────
+    print("\n🖼️ 下载节目图片...")
+    show_imgs = await download_show_images(tvshow["tmdb_id"], output_root)
+    summary["imagesDownloaded"] += sum(1 for v in show_imgs.values() if v)
+
+    # ── Season NFOs + posters ───────────────────────────────────────
+    print("\n📄 生成季 NFO + 下载季海报...")
+    for sk, season in sorted(seasons.items(), key=lambda x: int(x[0])):
+        season_number = int(sk)
+        season_dir = str(Path(output_root) / f"Season {season_number}")
+
+        if season.get("bgm_images"):
+            poster = await download_season_poster(
+                {"images": season["bgm_images"]}, output_root, season_number,
+            )
+            if poster:
+                print(f"   🖼️ Season {season_number} poster → {poster}")
+                summary["imagesDownloaded"] += 1
+
+        nfo = generate_season_nfo(
+            title=season["bgm_title"],
+            original_title=season["bgm_original"],
+            plot=season.get("bgm_plot", ""),
+            premiered=season.get("bgm_premiered", ""),
+            season_number=season_number,
+            bangumi_id=season["bgm_id"],
+            output_dir=season_dir,
+        )
+        print(f"   📄 Season {season_number} nfo → {nfo}")
+        summary["nfoGenerated"] += 1
+
+    # ── Episode NFOs + thumbnails ───────────────────────────────────
+    print(f"\n📄 生成剧集 NFO + 下载缩略图 (共 {len(episodes)} 个)...\n")
+    for filename, ep in episodes.items():
+        tmdb = ep.get("tmdb")
+        if not tmdb or not tmdb.get("id"):
+            print(f"   ⚠️ 跳过 {filename}: 无 TMDB 剧集数据")
+            continue
+
+        season_dir = str(Path(output_root) / f"Season {ep['season_number']}")
+
+        # Adapt torrent's tmdb block → normalised format for write_episode_files
+        result = await write_episode_files(
+            {
+                "name": tmdb.get("name", ""),
+                "overview": tmdb.get("overview", ""),
+                "air_date": tmdb.get("air_date", ""),
+                "runtime": tmdb.get("runtime", 0),
+                "tmdb_id": tmdb["id"],  # torrent calls it "id", normalised is "tmdb_id"
+                "still_path": tmdb.get("still_path", ""),
+                "directors": tmdb.get("directors", []),
+                "writers": tmdb.get("writers", []),
+                "guest_stars": tmdb.get("guest_stars", []),
+            },
+            season_number=ep["season_number"],
+            episode_number=ep["episode_number"],
+            bangumi_ep_id=ep.get("bangumi_ep_id"),
+            show_name=tvshow["title"],
+            original_name=tvshow["original_title"],
+            bangumi_subject_name=ep["bangumi_subject_name"],
+            studios=tvshow.get("studios", []),
+            output_dir=season_dir,
+        )
+        if result["thumb_path"]:
+            summary["imagesDownloaded"] += 1
+        print(f"   ✅ {filename} → {result['nfo_path']}")
+        summary["nfoGenerated"] += 1
+
+    print()
+    return summary
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Phase 2: Write phase (qBittorrent + NFO + images)
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -662,91 +781,10 @@ async def execute_confirm(
             else:
                 print(f"   无字幕文件")
 
-        # ── tvshow.nfo ──
-        print("\n📄 生成 tvshow.nfo...")
-        tvshow_nfo_path = generate_tv_show_nfo(
-            title=tvshow["title"], original_title=tvshow["original_title"],
-            plot=tvshow["plot"], premiered=tvshow["premiered"],
-            tmdb_id=tvshow["tmdb_id"],
-            genres=tvshow.get("genres", []), studios=tvshow.get("studios", []),
-            rating=tvshow.get("rating", 0), status=tvshow.get("status", ""),
-            output_dir=output_root,
-        )
-        print(f"   ✅ tvshow.nfo: {tvshow_nfo_path}")
-        summary["nfoGenerated"] += 1
-
-        # ── Show-level images ──
-        print("\n🖼️ 下载节目图片...")
-        show_imgs = await download_show_images(tvshow["tmdb_id"], output_root)
-        summary["imagesDownloaded"] += sum(1 for v in show_imgs.values() if v)
-
-        # ── Season NFOs + posters ──
-        print("\n📄 生成季 NFO + 下载季海报...")
-        for sk, season in sorted(seasons.items(), key=lambda x: int(x[0])):
-            season_number = int(sk)
-            season_dir = str(Path(output_root) / f"Season {season_number}")
-
-            if season.get("bgm_images"):
-                poster = await download_season_poster(
-                    {"images": season["bgm_images"]}, output_root, season_number,
-                )
-                if poster:
-                    print(f"   🖼️ Season {season_number} poster → {poster}")
-                    summary["imagesDownloaded"] += 1
-
-            nfo = generate_season_nfo(
-                title=season["bgm_title"],
-                original_title=season["bgm_original"],
-                plot=season.get("bgm_plot", ""),
-                premiered=season.get("bgm_premiered", ""),
-                season_number=season_number,
-                bangumi_id=season["bgm_id"],
-                output_dir=season_dir,
-            )
-            print(f"   📄 Season {season_number} nfo → {nfo}")
-            summary["nfoGenerated"] += 1
-
-        # ── Episode NFOs + thumbnails ──
-        print(f"\n📄 生成剧集 NFO + 下载缩略图 (共 {len(episodes)} 个)...\n")
-        for filename, ep in episodes.items():
-            tmdb = ep.get("tmdb")
-            if not tmdb or not tmdb.get("id"):
-                print(f"   ⚠️ 跳过 {filename}: 无 TMDB 剧集数据")
-                continue
-
-            season_number = ep["season_number"]
-            episode_number = ep["episode_number"]
-            bangumi_subject_name = ep["bangumi_subject_name"]
-
-            season_dir = str(Path(output_root) / f"Season {season_number}")
-            episode_str = f"{episode_number:02d}"
-            nfo_base = f"{_sanitize_dir_name(bangumi_subject_name)} {episode_str}"
-            thumb = await download_episode_thumb(tmdb.get("still_path", ""), season_dir, nfo_base)
-            if thumb:
-                summary["imagesDownloaded"] += 1
-            thumb_filename = Path(thumb).name if thumb else ""
-
-            nfo_path = generate_episode_nfo(
-                tmdb_show_name=tvshow["title"],
-                tmdb_original_name=tvshow["original_title"],
-                tmdb_ep_name=tmdb["name"],
-                tmdb_ep_overview=tmdb.get("overview", ""),
-                tmdb_ep_air_date=tmdb.get("air_date", ""),
-                tmdb_ep_runtime=tmdb.get("runtime", 0),
-                tmdb_ep_id=tmdb["id"],
-                season_number=season_number,
-                episode_number=episode_number,
-                bangumi_ep_id=ep.get("bangumi_ep_id"),
-                bangumi_subject_name=bangumi_subject_name,
-                directors=tmdb.get("directors", []),
-                writers=tmdb.get("writers", []),
-                actors=tmdb.get("guest_stars", []),
-                thumb_path=thumb_filename,
-                studios=tvshow.get("studios", []),
-                output_dir=season_dir,
-            )
-            print(f"   ✅ {filename} → {nfo_path}")
-            summary["nfoGenerated"] += 1
+        # ── NFO + images (shared with RSS flow via write_episode_files) ──
+        meta = await generate_metadata_collection(tvshow, seasons, episodes, output_root)
+        summary["nfoGenerated"] += meta["nfoGenerated"]
+        summary["imagesDownloaded"] += meta["imagesDownloaded"]
 
         # ── Resume download ──
         print("\n▶️ 恢复种子下载...")
