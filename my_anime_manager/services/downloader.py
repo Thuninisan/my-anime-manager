@@ -650,18 +650,23 @@ async def _fetch_passed_items(
         if air_date and item_pub_date and item_pub_date < air_date:
             continue
 
-        # ── Assign sort: sequential fill of bgm_sortrange ──
-        # Use anitopy's episode_number only for dedup; the actual sort
-        # is assigned positionally — first undownloaded slot in sortrange.
-        sort = 0
+        # ── Assign sort: map RSS episode number to Bangumi sort ──
+        # Use _match_rss_ep_to_sort first for a deterministic rss_ep → sort
+        # mapping.  Only fall back to sequential fill when the mapped sort
+        # falls outside bgm_sortrange (e.g. RSS episode numbering doesn't
+        # align with Bangumi's sort order, or the episode belongs to a
+        # different season that happens to appear in this feed).
+        sort = _match_rss_ep_to_sort(episodes, rss_ep)
         if bgm_sortrange and bgm_sortrange[0] > 0:
-            for s in range(bgm_sortrange[0], bgm_sortrange[1] + 1):
-                if s not in covered:
-                    sort = s
-                    break
-        if sort == 0:
-            # Fallback: no sortrange or range is full — use legacy matching
-            sort = _match_rss_ep_to_sort(episodes, rss_ep)
+            if sort < bgm_sortrange[0] or sort > bgm_sortrange[1]:
+                # Mapped sort out of range — sequential fill as fallback
+                fallback = 0
+                for s in range(bgm_sortrange[0], bgm_sortrange[1] + 1):
+                    if s not in covered:
+                        fallback = s
+                        break
+                if fallback:
+                    sort = fallback
         item["sort"] = sort
 
         # ── Sort-range duplicate filter ──
