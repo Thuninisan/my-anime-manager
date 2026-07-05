@@ -161,7 +161,7 @@ async def enrich_subscription(
 
     Returns:
         dict with bgm_season, bgm_sortrange, tmdb_id, tmdb_season,
-        bgm_rating, air_date — or None on failure.
+        bgm_rating, air_date, bgm_subject_name — or None on failure.
     """
     def _emit(msg: str) -> None:
         if on_progress:
@@ -253,10 +253,24 @@ async def enrich_subscription(
         tmdb_id = get_tmdb_id(bangumi_id)
         tmdb_season = get_tmdb_season(bangumi_id)
 
+        # 5. Extract this season's Bangumi subject name for file naming
+        bgm_subject_name = ""
+        try:
+            if bangumi_id == root_id:
+                sd = root_subject
+            else:
+                sd = await get_subject(bangumi_id)
+            bgm_subject_name = (
+                sd.get("name_cn") or sd.get("name") or ""
+            ).strip()
+        except Exception:
+            pass
+
         return {
             "bgm_season": bgm_season,
             "bgm_sortrange": bgm_sortrange,
             "series_name": series_name,
+            "bgm_subject_name": bgm_subject_name,
             "tmdb_id": tmdb_id or 0,
             "tmdb_season": tmdb_season,
             "bgm_rating": bgm_rating,
@@ -381,6 +395,7 @@ async def generate_metadata(
     tmdb_season: int | None = None,
     base_path: str = "",
     sub_path: str = "",
+    bgm_subject_name: str = "",
 ):
     """Generate NFO files, download images, and rename in qBittorrent.
 
@@ -445,7 +460,7 @@ async def generate_metadata(
         bangumi_ep_id=None,
         show_name=show_name,
         original_name=show_name,
-        bangumi_subject_name=show_name,
+        bangumi_subject_name=bgm_subject_name or show_name,
         output_dir=str(season_dir),
     )
     logger.info("episode NFO: %s", result["nfo_path"])
@@ -495,7 +510,7 @@ async def generate_metadata(
 
     # ── Rename in qBittorrent ─────────────────────────────────────
     ext = Path(old_torrent_path).suffix
-    new_path = f"{sub_path}/{show_name} {sort:02d}{ext}"
+    new_path = f"{sub_path}/{bgm_subject_name or show_name} {sort:02d}{ext}"
     try:
         await rename_file(qb_client, info_hash, old_torrent_path, new_path)
         logger.info("renamed: %s → %s", old_torrent_path, new_path)
@@ -850,6 +865,9 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
 
     # ── Compute download paths ─────────────────────────────────────
     show_name = sub.get("name", str(bangumi_id))
+    # bgm_subject_name is this season's Bangumi subject title (name_cn),
+    # used for file naming — unified with torrent's naming convention
+    bgm_subject_name = sub.get("bgm_subject_name") or show_name
     # series_name is the root series name (chain[0].name_cn), set during enrichment.
     # Fall back to show_name for old subscriptions that haven't been enriched yet.
     series_name = sub.get("series_name") or show_name
@@ -886,6 +904,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
                 tmdb_season=tmdb_season,
                 base_path=rss_base,
                 sub_path=sub_path,
+                bgm_subject_name=bgm_subject_name,
             )
         except Exception as e:
             print(f"      ⚠️ NFO 生成失败: {e}")
