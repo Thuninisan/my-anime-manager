@@ -7,13 +7,27 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+# Bundled data (bangumi_mikan_map.json) stays in the Python package —
+# it ships with the image and should never be overlaid by a volume mount.
 _DATA_DIR = Path(__file__).parent
+
+# User data (subscriptions, download_history, rss_settings) can be
+# pointed at a separate directory via the MAM_DATA_DIR env var.  This
+# lets Docker users mount a volume for persistence without clobbering
+# the Python package's __init__.py.
+_USER_DATA_DIR = Path(os.environ["MAM_DATA_DIR"]) if os.environ.get("MAM_DATA_DIR") else _DATA_DIR
+
+# Ensure the user-data directory exists (relevant when MAM_DATA_DIR
+# points to a volume mount that may be empty on first boot).
+if _USER_DATA_DIR != _DATA_DIR:
+    _USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # ═══════════════════════════════════════════════════════════════════════
 # Bangumi → Mikan mapping
@@ -145,7 +159,7 @@ def search_by_name(query: str) -> list[dict]:
 # RSS Subscriptions
 # ═══════════════════════════════════════════════════════════════════════
 
-_SUBS_FILE = _DATA_DIR / "subscriptions.json"
+_SUBS_FILE = _USER_DATA_DIR / "subscriptions.json"
 _subs_lock = threading.Lock()
 
 
@@ -258,7 +272,7 @@ def update_subscription(bangumi_id: int, fields: dict) -> bool:
 # Download history (dedup by bangumi_id + episode_number)
 # ═══════════════════════════════════════════════════════════════════════
 
-_HIST_FILE = _DATA_DIR / "download_history.json"
+_HIST_FILE = _USER_DATA_DIR / "download_history.json"
 _hist_lock = threading.Lock()
 
 
@@ -446,7 +460,7 @@ def reset_fail_count(bangumi_id: int, ep_num: int) -> None:
 # Global RSS settings (exclude patterns, etc.)
 # ═══════════════════════════════════════════════════════════════════════
 
-_SETTINGS_FILE = _DATA_DIR / "rss_settings.json"
+_SETTINGS_FILE = _USER_DATA_DIR / "rss_settings.json"
 _settings_lock = threading.Lock()
 
 _DEFAULT_SETTINGS = {

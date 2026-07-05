@@ -9,6 +9,7 @@ RUN npm run build
 # Stage 2: Python backend + serve frontend
 FROM python:3.12-alpine
 ENV PYTHONIOENCODING=utf-8
+ENV MAM_DATA_DIR=/app/data
 WORKDIR /app
 
 # Copy Python source and install
