@@ -184,6 +184,12 @@ export default function TorrentPreview({
         torrent_name: searchResult.torrent_name,
         files,
         uploaded_subtitles: uploadedSubs,
+        // Pass through the parse-and-search metadata so the backend
+        // can generate full NFO + images before resuming the torrent.
+        preview_data: {
+          search_results: searchResult.search_results,
+          episode_data: searchResult.episode_data,
+        },
       });
 
       setDownloadResult(result.message);

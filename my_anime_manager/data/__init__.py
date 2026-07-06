@@ -11,6 +11,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -509,3 +510,101 @@ def update_rss_settings(changes: dict) -> dict:
             json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     return current
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Application settings (persisted to settings.json)
+# ═══════════════════════════════════════════════════════════════════════
+
+_APP_SETTINGS_FILE = _USER_DATA_DIR / "settings.json"
+_app_settings_lock = threading.Lock()
+
+# Defaults here mirror config.py _DEFAULTS — used as the base for
+# merge-on-read so that old files missing newly-added keys still work.
+_APP_SETTINGS_DEFAULTS: dict[str, Any] = {}
+
+
+def _load_app_settings() -> dict:
+    """Read the persisted settings file.  Returns {} if missing or corrupt."""
+    if _APP_SETTINGS_FILE.exists():
+        try:
+            return json.loads(_APP_SETTINGS_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            logger.warning("settings.json 损坏，将使用默认值")
+    return {}
+
+
+def get_app_settings() -> dict:
+    """Return the effective application settings.
+
+    Merges defaults on top of the persisted file so that keys added in
+    newer versions of the app are never missing.
+    """
+    file_values = _load_app_settings()
+    return {**_APP_SETTINGS_DEFAULTS, **file_values}
+
+
+def _atomic_write(path: Path, data: str) -> None:
+    """Write *data* to *path* atomically (tmp + rename)."""
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(data, encoding="utf-8")
+    # On Windows, os.replace fails if the target exists — but tmp is unique
+    # and target may not exist yet.  Use replace for atomicity when possible.
+    try:
+        os.replace(tmp, path)
+    except OSError:
+        # Fallback: some edge cases on Windows (different drives, etc.)
+        path.write_text(data, encoding="utf-8")
+        tmp.unlink(missing_ok=True)
+
+
+def update_app_settings(changes: dict) -> dict:
+    """Merge *changes* into the persisted settings file.
+
+    Keys set to ``None`` are removed from the file (reset to default).
+    Returns the full merged state.
+    """
+    current = _load_app_settings()
+    for k, v in list(changes.items()):
+        if v is None:
+            current.pop(k, None)
+        else:
+            current[k] = v
+    with _app_settings_lock:
+        _atomic_write(
+            _APP_SETTINGS_FILE,
+            json.dumps(current, ensure_ascii=False, indent=2),
+        )
+    return {**_APP_SETTINGS_DEFAULTS, **current}
+
+
+def init_app_settings_from_env() -> dict | None:
+    """One-shot: if settings.json does not exist, seed it from environment
+    variables that match known config keys.
+
+    Called once at startup.  After the file exists, environment variables
+    are never read again.
+
+    Returns the written dict, or None if the file already existed.
+    """
+    if _APP_SETTINGS_FILE.exists():
+        return None
+
+    # Import here to avoid circular imports (data → config → data)
+    from ..config import _DEFAULTS as CONFIG_DEFAULTS
+
+    seeded: dict[str, Any] = {}
+    for key in CONFIG_DEFAULTS:
+        env_val = os.environ.get(key)
+        if env_val is not None:
+            default = CONFIG_DEFAULTS[key]
+            seeded[key] = int(env_val) if isinstance(default, int) else env_val
+
+    if seeded:
+        _atomic_write(
+            _APP_SETTINGS_FILE,
+            json.dumps(seeded, ensure_ascii=False, indent=2),
+        )
+        logger.info("从环境变量初始化 settings.json: %s", list(seeded.keys()))
+
+    return seeded if seeded else None

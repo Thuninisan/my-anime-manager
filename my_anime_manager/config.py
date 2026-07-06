@@ -1,8 +1,13 @@
-"""Centralized configuration from environment variables.
+"""Centralized configuration.
 
-Supports runtime mutation via update() — values changed at runtime take
-precedence over environment variables, and all module-level attribute
-access (config.TMDB_API_KEY, etc.) reflects the current value.
+Resolution order (highest to lowest):
+1. Runtime override (set via API PUT /config) — in-memory only
+2. Persisted file (``data/settings.json``) — survives restarts
+3. Hard-coded defaults
+
+Environment variables are **only** used as a one-shot seed when
+``settings.json`` does not exist (first boot).  After that they are
+ignored — use the Settings UI or edit the JSON file directly.
 
 Sensitive keys (password, api key) are masked in get_all().
 """
@@ -30,20 +35,47 @@ _DEFAULTS: dict[str, Any] = {
     "TORRENT_HARDLINK_PATH": "/Media/BD",
 }
 
-# Runtime overrides (set via API) — empty dict means "use env / default"
+# Runtime overrides (set via API) — highest priority, in-memory only
 _overrides: dict[str, Any] = {}
+
+# Whether the one-shot env→file seed has been attempted
+_env_seeded = False
+
+
+def _ensure_env_seeded() -> None:
+    """One-shot: seed settings.json from env vars if the file is missing.
+
+    Called lazily on the first config access — avoids circular imports
+    that would occur if we imported from data at module level.
+    """
+    global _env_seeded
+    if _env_seeded:
+        return
+    _env_seeded = True
+    try:
+        from .data import init_app_settings_from_env
+        init_app_settings_from_env()
+    except Exception:
+        pass
 
 
 def _resolve(key: str) -> Any:
-    """Return the effective value: override > env var > default."""
+    """Return the effective value: override > file > default."""
+    _ensure_env_seeded()
     if key in _overrides:
         return _overrides[key]
-    env_val = os.environ.get(key)
-    if env_val is not None:
-        default = _DEFAULTS[key]
-        if isinstance(default, int):
-            return int(env_val)
-        return env_val
+    # Check persisted file
+    try:
+        from .data import get_app_settings
+        file_settings = get_app_settings()
+        if key in file_settings:
+            val = file_settings[key]
+            default = _DEFAULTS[key]
+            if isinstance(default, int) and not isinstance(val, int):
+                return int(val)
+            return val
+    except Exception:
+        pass
     return _DEFAULTS[key]
 
 
@@ -59,19 +91,43 @@ def get_all(*, mask_sensitive: bool = True) -> dict[str, Any]:
 
 
 def update(changes: dict[str, Any]) -> dict[str, Any]:
-    """Apply runtime config changes. Returns the new effective config."""
+    """Apply runtime config changes.  Persists to settings.json.
+
+    Returns the new effective config.
+    """
+    from .data import update_app_settings
+
+    cleaned: dict[str, Any] = {}
     for key, value in changes.items():
-        if key in _DEFAULTS:
-            _overrides[key] = value
+        if key not in _DEFAULTS:
+            continue
+        # Never overwrite a sensitive key with an empty string (the
+        # frontend sends "" for masked password fields when the user
+        # didn't type anything — we treat that as "keep existing").
+        if key in _SENSITIVE_KEYS and isinstance(value, str) and value == "":
+            continue
+        _overrides[key] = value
+        cleaned[key] = value
+
+    if cleaned:
+        update_app_settings(cleaned)
     return get_all()
 
 
 def reset(key: str | None = None) -> None:
-    """Reset overrides back to environment / default values."""
+    """Reset overrides back to persisted-file / default values."""
+    from .data import update_app_settings
+
     if key:
         _overrides.pop(key, None)
+        update_app_settings({key: None})  # None = remove from file
     else:
         _overrides.clear()
+        try:
+            from .data import _APP_SETTINGS_FILE, _atomic_write
+            _atomic_write(_APP_SETTINGS_FILE, "{}")
+        except Exception:
+            pass
 
 
 # Module-level attribute access — keeps 'from .config import TMDB_API_KEY' working

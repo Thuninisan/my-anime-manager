@@ -85,6 +85,17 @@ export interface DownloadRequest {
   torrent_name: string;
   files: DownloadFileEntry[];
   uploaded_subtitles: UploadedSubEntry[];
+  // Optional: full preview metadata for pre-download NFO generation.
+  // When present, NFO + images are written BEFORE the torrent resumes
+  // (matching the batch/scan flow).  When absent, legacy behaviour
+  // (simple inline NFO after download completes) is used.
+  preview_data?: {
+    search_results: Record<string, any>;
+    episode_data: {
+      tmdb: Record<string, Record<string, any>>;
+      bangumi: Record<string, { name: string; episodes: any[] }>;
+    };
+  };
 }
 
 export interface DownloadResponse {
