@@ -798,6 +798,7 @@ async def _monitor_download(
 
 def _build_metadata_from_preview(
     preview_data: dict,
+    files: list[dict],
 ) -> tuple[dict, dict, dict] | None:
     """Convert frontend preview data into the format expected by
     :func:`batch_service.generate_metadata_collection`.
@@ -885,6 +886,21 @@ def _build_metadata_from_preview(
                     },
                 }
 
+    # ── Enrich episodes with Bangumi metadata from the files array ──
+    # The frontend MatchTable already matched each file to a Bangumi
+    # episode — we just need to cross-reference by (season, episode).
+    for f in files:
+        if f.get("is_subtitle"):
+            continue
+        sn = f.get("tmdb_season", 0)
+        en = f.get("tmdb_episode", 0)
+        key = f"S{sn}E{str(en).zfill(2)}"
+        if key in episodes:
+            episodes[key]["bangumi_ep_id"] = f.get("bangumi_ep_id")
+            episodes[key]["bangumi_subject_name"] = f.get(
+                "bangumi_show_name", ""
+            )
+
     return tvshow, seasons, episodes
 
 
@@ -968,7 +984,7 @@ async def torrent_download(body: dict):
     nfo_generated = False
     if preview_data:
         try:
-            meta = _build_metadata_from_preview(preview_data)
+            meta = _build_metadata_from_preview(preview_data, files)
             if meta:
                 tvshow, seasons, episodes = meta
                 from .services.batch_service import generate_metadata_collection
