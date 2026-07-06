@@ -9,7 +9,7 @@ interface Props {
   onSetTmdb?: (bangumiId: number, name: string) => void;
 }
 
-export default function SubscriptionCard({ subscription: s, onOpenHistory, onUnsubscribe, onActivate }: Props) {
+export default function SubscriptionCard({ subscription: s, onOpenHistory, onUnsubscribe, onActivate, onSetTmdb }: Props) {
   const totalEps = s.bgm_sortrange ? s.bgm_sortrange[1] - s.bgm_sortrange[0] + 1 : 0;
   const downloaded = s.downloaded_count || 0;
   const progressPct = totalEps > 0 ? (downloaded / totalEps) * 100 : 0;
