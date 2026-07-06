@@ -890,17 +890,30 @@ def _build_metadata_from_preview(
     # ── Enrich episodes with Bangumi metadata from the files array ──
     # The frontend MatchTable already matched each file to a Bangumi
     # episode — we just need to cross-reference by (season, episode).
+    target_keys: set[str] = set()
+    target_seasons: set[int] = set()
     for f in files:
         if f.get("is_subtitle"):
             continue
         sn = f.get("tmdb_season", 0)
         en = f.get("tmdb_episode", 0)
-        key = f"S{sn}E{str(en).zfill(2)}"
-        if key in episodes:
-            episodes[key]["bangumi_ep_id"] = f.get("bangumi_ep_id")
-            episodes[key]["bangumi_subject_name"] = f.get(
-                "bangumi_show_name", ""
-            )
+        if sn and en:
+            key = f"S{sn}E{str(en).zfill(2)}"
+            target_keys.add(key)
+            target_seasons.add(sn)
+            if key in episodes:
+                episodes[key]["bangumi_ep_id"] = f.get("bangumi_ep_id")
+                episodes[key]["bangumi_subject_name"] = f.get(
+                    "bangumi_show_name", ""
+                )
+
+    # Only keep episodes and seasons that are actually being downloaded
+    episodes = {k: v for k, v in episodes.items() if k in target_keys}
+    seasons = {
+        str(sn): sd
+        for sn_str, sd in seasons.items()
+        if (sn := int(sn_str)) in target_seasons
+    }
 
     return tvshow, seasons, episodes
 
@@ -988,9 +1001,15 @@ async def torrent_download(body: dict):
             meta = _build_metadata_from_preview(preview_data, files)
             if meta:
                 tvshow, seasons, episodes = meta
+                # Place NFO under {hardlink_root}/{show_name}/ to match
+                # the RSS convention (parent dir per show).
+                nfo_root = str(
+                    Path(hardlink_root)
+                    / _sanitize_path_component(tvshow["title"])
+                )
                 from .services.batch_service import generate_metadata_collection
                 summary = await generate_metadata_collection(
-                    tvshow, seasons, episodes, output_root=hardlink_root,
+                    tvshow, seasons, episodes, output_root=nfo_root,
                 )
                 logger.info(
                     "预生成元数据完成 [%s]: NFO=%d, images=%d",
