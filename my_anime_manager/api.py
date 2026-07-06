@@ -954,10 +954,12 @@ async def _build_metadata_from_preview(
                     key = f"S{sn}E{str(zh_ep_num).zfill(2)}"
                     if key in episodes:
                         ep_data = episodes[key]["tmdb"]
+                        # Save the Japanese original name before overwriting
+                        ep_data["original_name"] = ep_data.get("name", "")
                         # Replace overview with Chinese version
                         if zh_ep.get("overview"):
                             ep_data["overview"] = zh_ep["overview"]
-                        # Also update name to Chinese for NFO title
+                        # Update name to Chinese for NFO title
                         if zh_ep.get("name"):
                             ep_data["name"] = zh_ep["name"]
             except Exception:

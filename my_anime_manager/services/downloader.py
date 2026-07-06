@@ -689,8 +689,21 @@ async def generate_metadata(
     target_tmdb_season = override_tmdb_season or tmdb_season or 1
     target_ep_num = override_tmdb_ep or sort
     logger.info("fetching TMDB S%d (tmdb_id=%d)", target_tmdb_season, tmdb_id)
+
+    # Fetch ja first to capture the Japanese original episode name
+    ja_name = ""
     try:
-        # Use zh-CN for Chinese episode titles / plots / cast names
+        ja_resp = await tmdb_get_season(tmdb_id, target_tmdb_season, language="ja")
+        ja_data = ja_resp.json()
+        for ep in (ja_data.get("episodes") or []):
+            if ep.get("episode_number") == target_ep_num:
+                ja_name = ep.get("name", "")
+                break
+    except Exception:
+        logger.warning("TMDB ja season fetch failed, original name will be empty")
+
+    # Fetch zh-CN for Chinese NFO fields (title, plot, cast)
+    try:
         resp = await tmdb_get_season(tmdb_id, target_tmdb_season, language="zh-CN")
         season_data = resp.json()
     except Exception:
@@ -704,6 +717,7 @@ async def generate_metadata(
         if ep.get("episode_number") == target_ep_num:
             tmdb_ep = {
                 "name": ep.get("name", ""),
+                "original_name": ja_name or ep.get("name", ""),
                 "overview": ep.get("overview", ""),
                 "air_date": ep.get("air_date", ""),
                 "runtime": ep.get("runtime", 0),
@@ -764,7 +778,7 @@ async def generate_metadata(
         episode_number=sort,
         bangumi_ep_id=bgm_ep_id,
         show_name=show_name,
-        original_name=show_name,
+        original_name=tmdb_ep.get("original_name") or show_name,
         bangumi_subject_name=bgm_subject_name or show_name,
         rating=ep_rating,
         output_dir=str(season_dir),

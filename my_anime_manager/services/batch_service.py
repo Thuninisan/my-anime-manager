@@ -647,6 +647,9 @@ async def generate_metadata_collection(
         season_dir = str(Path(output_root) / f"Season {ep['season_number']}")
 
         # Adapt torrent's tmdb block → normalised format for write_episode_files
+        # Prefer per-episode original_name (Japanese title saved before
+        # zh-CN overwrite), fall back to show-level original_title.
+        ep_original = tmdb.get("original_name") or tvshow["original_title"]
         result = await write_episode_files(
             {
                 "name": tmdb.get("name", ""),
@@ -663,7 +666,7 @@ async def generate_metadata_collection(
             episode_number=ep["episode_number"],
             bangumi_ep_id=ep.get("bangumi_ep_id"),
             show_name=tvshow["title"],
-            original_name=tvshow["original_title"],
+            original_name=ep_original,
             bangumi_subject_name=ep["bangumi_subject_name"],
             studios=tvshow.get("studios", []),
             rating=tmdb.get("vote_average", 0) or 0,
