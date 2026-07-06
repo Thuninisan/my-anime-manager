@@ -920,7 +920,7 @@ async def _build_metadata_from_preview(
     # parse-and-search, saving API quota for unconfirmed previews.
     tmdb_id = tvshow.get("tmdb_id", 0)
     if tmdb_id and target_seasons:
-        from ..clients.tmdb import (
+        from .clients.tmdb import (
             get_season_credits,
             get_season_detail,
         )
