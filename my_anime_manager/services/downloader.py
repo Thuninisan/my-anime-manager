@@ -564,6 +564,7 @@ async def write_episode_files(
     original_name: str,
     bangumi_subject_name: str,
     studios: list[str] | None = None,
+    rating: float = 0.0,
     output_dir: str = ".",
 ) -> dict:
     """Download episode thumbnail and generate ``.nfo`` — no API calls.
@@ -621,6 +622,7 @@ async def write_episode_files(
         actors=tmdb_ep.get("guest_stars", []),
         thumb_path=Path(thumb_path).name if thumb_path else "",
         studios=studios or [],
+        rating=rating,
         output_dir=output_dir,
     )
 
@@ -696,6 +698,7 @@ async def generate_metadata(
 
     # Build normalised tmdb_ep dict from the matching episode
     tmdb_ep = None
+    ep_rating = 0.0
     for ep in (season_data.get("episodes") or []):
         if ep.get("episode_number") == target_ep_num:
             tmdb_ep = {
@@ -712,16 +715,46 @@ async def generate_metadata(
                     for gs in ep.get("guest_stars", [])
                 ],
             }
+            ep_rating = ep.get("vote_average", 0) or 0
             break
 
     if not tmdb_ep:
         logger.warning("TMDB S%d missing episode sort=%d, skipping NFO", target_tmdb_season, sort)
         return
 
+    # ── Fetch full episode credits for main voice cast ──
+    # The /season/{n} endpoint only returns guest stars; the /credits
+    # endpoint includes the main cast (voice actors).
+    from ..clients.tmdb import get_episode_credits as tmdb_get_ep_credits
+    actors: list[dict] = list(tmdb_ep.get("guest_stars", []))
+    try:
+        cred_resp = await tmdb_get_ep_credits(
+            tmdb_id, target_tmdb_season, target_ep_num,
+        )
+        cred = cred_resp.json()
+        cast = cred.get("cast", [])
+        if cast:
+            actors = [
+                {"name": c["name"], "character": c.get("character", "")}
+                for c in cast
+            ]
+            # Also append actual guest stars if any
+            for gs in cred.get("guest_stars", []):
+                actors.append(
+                    {"name": gs["name"], "character": gs.get("character", "")}
+                )
+    except Exception:
+        logger.warning("episode credits fetch failed, falling back to guest_stars")
+
     # ── Season directory ──────────────────────────────────────────
     season_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Episode thumb + NFO ───────────────────────────────────────
+    # Use full credits cast if available, otherwise fall back to
+    # the episode's guest_stars (which only has actual guests).
+    if actors:
+        tmdb_ep["guest_stars"] = actors
+
     # Look up the Bangumi episode ID from the cached episode list
     bgm_ep_id = await _get_bangumi_ep_id(bangumi_id, sort)
     result = await write_episode_files(
@@ -732,6 +765,7 @@ async def generate_metadata(
         show_name=show_name,
         original_name=show_name,
         bangumi_subject_name=bgm_subject_name or show_name,
+        rating=ep_rating,
         output_dir=str(season_dir),
     )
     logger.info("episode NFO: %s", result["nfo_path"])

@@ -55,6 +55,7 @@ def generate_episode_nfo(
     actors: list[dict] | None = None,
     thumb_path: str = "",
     studios: list[str] | None = None,
+    rating: float = 0.0,
     output_dir: str = ".",
 ) -> str:
     """Generate an episode NFO file.
@@ -128,6 +129,7 @@ def generate_episode_nfo(
     studio_tags = "\n".join(
         f"  <studio>{_escape_xml(s)}</studio>" for s in studios
     )
+    rating_tag = f"  <rating>{rating:.1f}</rating>" if rating > 0 else ""
     thumb_tag = f"  <thumb>{_escape_xml(thumb_path)}</thumb>" if thumb_path else ""
 
     xml = f"""<?xml version="1.0" encoding="utf-8" standalone="yes"?>
@@ -143,7 +145,7 @@ def generate_episode_nfo(
   <aired>{tmdb_ep_air_date or ''}</aired>
   <premiered>{tmdb_ep_air_date or ''}</premiered>
   <runtime>{tmdb_ep_runtime or ''}</runtime>
-{director_tags + chr(10) if director_tags else ''}{credits_tags + chr(10) if credits_tags else ''}{actor_tags + chr(10) if actor_tags else ''}{studio_tags + chr(10) if studio_tags else ''}{thumb_tag + chr(10) if thumb_tag else ''}  <uniqueid type="tmdb" default="true">{tmdb_ep_id}</uniqueid>
+{rating_tag + chr(10) if rating_tag else ''}{director_tags + chr(10) if director_tags else ''}{credits_tags + chr(10) if credits_tags else ''}{actor_tags + chr(10) if actor_tags else ''}{studio_tags + chr(10) if studio_tags else ''}{thumb_tag + chr(10) if thumb_tag else ''}  <uniqueid type="tmdb" default="true">{tmdb_ep_id}</uniqueid>
 </episodedetails>
 """
     file_path.write_text(xml, encoding="utf-8")

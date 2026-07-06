@@ -666,6 +666,7 @@ async def generate_metadata_collection(
             original_name=tvshow["original_title"],
             bangumi_subject_name=ep["bangumi_subject_name"],
             studios=tvshow.get("studios", []),
+            rating=tmdb.get("vote_average", 0) or 0,
             output_dir=season_dir,
         )
         if result["thumb_path"]:

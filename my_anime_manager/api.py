@@ -880,6 +880,7 @@ def _build_metadata_from_preview(
                         "air_date": ep.get("airDate", ""),
                         "runtime": ep.get("runtime", 0),
                         "still_path": ep.get("stillPath", ""),
+                        "vote_average": ep.get("voteAverage", 0) or 0,
                         "directors": ep.get("directors", []),
                         "writers": ep.get("writers", []),
                         "guest_stars": ep.get("guestStars", []),

@@ -80,6 +80,31 @@ async def get_tv_images(tv_id: int, languages: str = "ja,zh,null") -> httpx.Resp
     )
 
 
+async def get_episode_credits(
+    tv_id: int, season_number: int, episode_number: int,
+) -> httpx.Response:
+    """Get full cast + crew for a single episode.
+
+    The ``/season/{n}`` endpoint only returns guest stars — this endpoint
+    returns the main voice cast (``cast``) plus directors/writers (``crew``)
+    and actual guest stars (``guest_stars``).
+    """
+    return await _tmdb_request(
+        f"/tv/{tv_id}/season/{season_number}/episode/{episode_number}/credits",
+        label=f"TMDB S{season_number}E{episode_number} credits",
+    )
+
+
+async def get_season_credits(
+    tv_id: int, season_number: int,
+) -> httpx.Response:
+    """Get full cast for an entire season (one call, reused for all episodes)."""
+    return await _tmdb_request(
+        f"/tv/{tv_id}/season/{season_number}/credits",
+        label=f"TMDB S{season_number} credits",
+    )
+
+
 # ── Movie endpoints ──
 
 async def search_movie(query: str, language: str = "") -> httpx.Response:
