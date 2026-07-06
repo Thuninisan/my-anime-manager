@@ -690,7 +690,8 @@ async def generate_metadata(
     target_ep_num = override_tmdb_ep or sort
     logger.info("fetching TMDB S%d (tmdb_id=%d)", target_tmdb_season, tmdb_id)
     try:
-        resp = await tmdb_get_season(tmdb_id, target_tmdb_season)
+        # Use zh-CN for Chinese episode titles / plots / cast names
+        resp = await tmdb_get_season(tmdb_id, target_tmdb_season, language="zh-CN")
         season_data = resp.json()
     except Exception:
         logger.exception("TMDB season API failed")
@@ -729,7 +730,7 @@ async def generate_metadata(
     actors: list[dict] = list(tmdb_ep.get("guest_stars", []))
     try:
         cred_resp = await tmdb_get_ep_credits(
-            tmdb_id, target_tmdb_season, target_ep_num,
+            tmdb_id, target_tmdb_season, target_ep_num, language="zh-CN",
         )
         cred = cred_resp.json()
         cast = cred.get("cast", [])

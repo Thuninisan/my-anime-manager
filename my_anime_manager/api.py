@@ -915,6 +915,54 @@ def _build_metadata_from_preview(
         if (sn := int(sn_str)) in target_seasons
     }
 
+    # ── Fetch zh-CN credits + Chinese episode data for NFO ──
+    # These API calls run AFTER the user confirms download, not during
+    # parse-and-search, saving API quota for unconfirmed previews.
+    tmdb_id = tvshow.get("tmdb_id", 0)
+    if tmdb_id and target_seasons:
+        from ..clients.tmdb import (
+            get_season_credits,
+            get_season_detail,
+        )
+
+        for sn in sorted(target_seasons):
+            # Fetch season credits with zh-CN for Chinese actor names
+            try:
+                cred = await get_season_credits(tmdb_id, sn, language="zh-CN")
+                cast_list = cred.json().get("cast", [])
+                if cast_list:
+                    cast = [
+                        {"name": c["name"],
+                         "character": c.get("character", "")}
+                        for c in cast_list
+                    ]
+                    # Attach to every downloaded episode in this season
+                    for ep in episodes.values():
+                        if ep["season_number"] == sn:
+                            ep["tmdb"]["guest_stars"] = cast
+            except Exception:
+                pass  # non-fatal
+
+            # Fetch season detail with zh-CN for Chinese episode plots
+            try:
+                detail = await get_season_detail(
+                    tmdb_id, sn, language="zh-CN",
+                )
+                zh_season = detail.json()
+                for zh_ep in zh_season.get("episodes", []):
+                    zh_ep_num = zh_ep.get("episode_number", 0)
+                    key = f"S{sn}E{str(zh_ep_num).zfill(2)}"
+                    if key in episodes:
+                        ep_data = episodes[key]["tmdb"]
+                        # Replace overview with Chinese version
+                        if zh_ep.get("overview"):
+                            ep_data["overview"] = zh_ep["overview"]
+                        # Also update name to Chinese for NFO title
+                        if zh_ep.get("name"):
+                            ep_data["name"] = zh_ep["name"]
+            except Exception:
+                pass  # non-fatal; keep Japanese fallback
+
     return tvshow, seasons, episodes
 
 

@@ -727,25 +727,6 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                         "name": s_data["name"],
                         "episodes": clean_eps,
                     }
-                # ── Fetch season-level credits for cast ──
-                # One call per season avoids N×M per-episode calls.
-                for s_num_str, s_data in output_seasons.items():
-                    try:
-                        cred_res = await tmdb_client.get_season_credits(
-                            tid, int(s_num_str),
-                        )
-                        cred = cred_res.json()
-                        cast_list = cred.get("cast", [])
-                        if cast_list:
-                            for ep in s_data["episodes"]:
-                                ep["guestStars"] = [
-                                    {"name": c["name"],
-                                     "character": c.get("character", "")}
-                                    for c in cast_list
-                                ]
-                    except Exception:
-                        pass  # non-fatal: cast is nice-to-have
-
                 tmdb_data[str(tid)] = output_seasons
                 total_eps = sum(len(v["episodes"]) for v in season_map.values())
                 print(f"   TMDB {tid}: {len(season_map)} 季, {total_eps} 集")
