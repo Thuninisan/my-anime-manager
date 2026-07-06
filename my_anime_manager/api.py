@@ -660,10 +660,11 @@ async def _monitor_download(
                 tmdb_name = _sanitize_path_component(f.get("tmdb_show_name", "Unknown"))
                 bgm_name = _sanitize_path_component(f.get("bangumi_show_name", torrent_name))
                 bgm_sort = f.get("bangumi_sort", 1)
+                tmdb_season = f.get("tmdb_season", 1)
                 src_ext = Path(torrent_path).suffix
 
-                # Destination: {hardlink_root}/{tmdb_name}/{bgm_name}/{bgm_name} {sort:02d}.ext
-                dest_dir = Path(hardlink_root) / tmdb_name / bgm_name
+                # Destination: align with NFO path {hardlink_root}/{tmdb_name}/Season {N}/
+                dest_dir = Path(hardlink_root) / tmdb_name / f"Season {tmdb_season}"
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 dest_filename = f"{bgm_name} {bgm_sort:02d}{src_ext}"
                 dest_path = dest_dir / dest_filename
@@ -693,13 +694,14 @@ async def _monitor_download(
                 tmdb_name = _sanitize_path_component(usub.get("tmdb_show_name", "Unknown"))
                 bgm_name = _sanitize_path_component(usub.get("bangumi_show_name", torrent_name))
                 bgm_sort = usub.get("bangumi_sort", 1)
+                tmdb_season = usub.get("tmdb_season", 1)
                 src_sub = subtitle_dir / stored_name
 
                 if not src_sub.exists():
                     logger.warning("   上传的字幕文件不存在: %s", src_sub)
                     continue
 
-                dest_dir = Path(hardlink_root) / tmdb_name / bgm_name
+                dest_dir = Path(hardlink_root) / tmdb_name / f"Season {tmdb_season}"
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 dest_ext = src_sub.suffix
                 dest_filename = f"{bgm_name} {bgm_sort:02d}{dest_ext}"
@@ -734,7 +736,7 @@ async def _monitor_download(
                     if is_sub:
                         continue
 
-                    dest_dir = Path(hardlink_root) / tmdb_n / bgm_n
+                    dest_dir = Path(hardlink_root) / tmdb_n / f"Season {tmdb_season}"
                     dest_dir.mkdir(parents=True, exist_ok=True)
 
                     # tvshow.nfo (once per tmdb_name)
