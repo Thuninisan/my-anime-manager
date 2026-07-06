@@ -627,6 +627,35 @@ async def write_episode_files(
     return {"nfo_path": nfo_path, "thumb_path": thumb_path}
 
 
+# Simple in-memory cache: {bangumi_id: {sort: episode_id}}
+_bgm_ep_id_cache: dict[int, dict[int, int]] = {}
+
+
+async def _get_bangumi_ep_id(bangumi_id: int, sort: int) -> int | None:
+    """Look up the Bangumi episode ID for a given *sort* number.
+
+    Fetches the full episode list on first call for a *bangumi_id* and
+    caches the mapping in memory for subsequent calls.
+    """
+    if bangumi_id in _bgm_ep_id_cache:
+        return _bgm_ep_id_cache[bangumi_id].get(sort)
+
+    try:
+        eps = await bgm_client.get_episodes(bangumi_id, ep_type=0)
+    except Exception:
+        logger.warning("Failed to fetch Bangumi episodes for id=%d", bangumi_id)
+        return None
+
+    sort_to_id: dict[int, int] = {}
+    for ep in eps:
+        ep_sort = ep.get("sort") or ep.get("ep", 0)
+        if ep_sort:
+            sort_to_id[ep_sort] = ep["id"]
+    _bgm_ep_id_cache[bangumi_id] = sort_to_id
+
+    return sort_to_id.get(sort)
+
+
 async def generate_metadata(
     qb_client, info_hash: str,
     bangumi_id: int, sort: int, bgm_subject_id: int,
@@ -693,11 +722,13 @@ async def generate_metadata(
     season_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Episode thumb + NFO ───────────────────────────────────────
+    # Look up the Bangumi episode ID from the cached episode list
+    bgm_ep_id = await _get_bangumi_ep_id(bangumi_id, sort)
     result = await write_episode_files(
         tmdb_ep,
         season_number=bgm_season,
         episode_number=sort,
-        bangumi_ep_id=None,
+        bangumi_ep_id=bgm_ep_id,
         show_name=show_name,
         original_name=show_name,
         bangumi_subject_name=bgm_subject_name or show_name,
