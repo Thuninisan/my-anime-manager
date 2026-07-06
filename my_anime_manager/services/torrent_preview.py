@@ -882,16 +882,8 @@ async def parse_and_search(torrent_path: str) -> dict:
         RuntimeError: If no files can be parsed from the torrent.
     """
     # Read the real torrent name from the info dict, not the temp filename
-    torrent_name = Path(torrent_path).stem
-    try:
-        import bencodepy
-        with open(torrent_path, "rb") as f:
-            raw = bencodepy.decode(f.read())
-        name_bytes = raw.get(b"info", {}).get(b"name", b"")
-        if name_bytes:
-            torrent_name = name_bytes.decode("utf-8", errors="replace")
-    except Exception:
-        pass  # fall back to filename stem
+    from ..utils.torrent_file_reader import read_torrent_name
+    torrent_name = read_torrent_name(torrent_path)
 
     # ── Step 1: Bencode extraction ──
     print("📋 读取种子文件内容 (bencode)...")

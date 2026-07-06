@@ -62,6 +62,25 @@ def decode_bencode(data: bytes) -> dict:
 # Torrent file reading
 # ═══════════════════════════════════════════════════════════════════════
 
+def read_torrent_name(torrent_path: str) -> str:
+    """Read the display name from a .torrent file's info dict.
+
+    Returns the ``name`` field from the info dictionary, or the filename
+    stem as a fallback.
+    """
+    try:
+        data = Path(torrent_path).read_bytes()
+        torrent = decode_bencode(data)
+        info = torrent.get("info")
+        if isinstance(info, dict):
+            name = _b2s(info.get("name", b""))
+            if name:
+                return name
+    except Exception:
+        pass
+    return Path(torrent_path).stem
+
+
 def read_torrent_file_list(torrent_path: str) -> list[dict]:
     """Read a .torrent file and return a qBittorrent-compatible file list.
 
