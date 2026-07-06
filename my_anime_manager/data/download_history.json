@@ -1,3 +1,16 @@
 {
-  "episodes": {}
+  "episodes": {
+    "622206": {
+      "1": {
+        "rss_url": "",
+        "guid": "[ANi] Chainsmoker Cat /  尼古喵喵 - 01 [1080P][Baha][WEB-DL][AAC AVC][CHT][MP4]",
+        "source": "backup",
+        "pub_date": "2026-07-03T00:02:54.905362",
+        "info_hash": "718ad3f98dea8e2861521993a000c1a4545629b7",
+        "at": "2026-07-04T13:57:11",
+        "tmdb_ep": null,
+        "tmdb_season": null
+      }
+    }
+  }
 }

@@ -19,8 +19,5 @@ dependencies = [
     "bencodepy>=0.9.0",
 ]
 
-[project.scripts]
-anime-manager = "my_anime_manager.main:main_entry"
-
 [tool.setuptools.packages.find]
 where = ["."]

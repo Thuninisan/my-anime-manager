@@ -20,5 +20,5 @@ RUN pip install --no-cache-dir .
 # Copy built frontend from stage 1
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist/
 
-ENTRYPOINT ["python", "-m", "my_anime_manager"]
-CMD ["--serve", "0.0.0.0:8000"]
+ENTRYPOINT ["uvicorn", "my_anime_manager.api:app"]
+CMD ["--host", "0.0.0.0", "--port", "8000"]
