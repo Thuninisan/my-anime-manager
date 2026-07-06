@@ -88,7 +88,6 @@ async def add_torrent(
     torrent_name = rename or Path(torrent_file_path).stem
 
     def _do_add():
-        # Snapshot hashes before adding so we can detect the new one
         before_hashes = {t.hash for t in client.torrents.info()}
 
         with open(torrent_file_path, "rb") as f:
@@ -101,17 +100,21 @@ async def add_torrent(
                 rename=rename,
             )
 
-        # 1. Look for a newly appeared hash (fresh add)
-        for torrent in client.torrents.info():
-            if torrent.hash not in before_hashes:
-                return torrent.hash
-
-        # 2. If already existed (duplicate / re-add), match by name fragment
-        for torrent in client.torrents.info():
-            internal = torrent.name.lower().replace(" ", "")
-            needle = torrent_name.lower().replace(" ", "")
-            if needle in internal or internal in needle:
-                return torrent.hash
+        # Retry a few times — qBittorrent may need a moment to register
+        # the new torrent before it appears in torrents.info().
+        for attempt in range(5):
+            import time
+            if attempt > 0:
+                time.sleep(0.5)
+            for torrent in client.torrents.info():
+                if torrent.hash not in before_hashes:
+                    return torrent.hash
+            # Also try name match as fallback
+            for torrent in client.torrents.info():
+                internal = torrent.name.lower().replace(" ", "")
+                needle = torrent_name.lower().replace(" ", "")
+                if needle in internal or internal in needle:
+                    return torrent.hash
 
         raise RuntimeError(f"添加种子后未找到 torrent: {torrent_name}")
 
