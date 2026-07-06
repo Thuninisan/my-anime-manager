@@ -851,7 +851,10 @@ def _build_metadata_from_preview(
         }
 
     # ── episodes ──
-    # Map each matched file to its TMDB episode details
+    # Map each matched file to its TMDB episode details.
+    # IMPORTANT: the preview data uses camelCase keys (from JSON
+    # serialization), but generate_metadata_collection expects
+    # snake_case.  We normalise here.
     episodes: dict[str, dict] = {}
     tmdb_data: dict = episode_data.get("tmdb", {})
     for tmdb_id_str, season_map in tmdb_data.items():
@@ -861,13 +864,25 @@ def _build_metadata_from_preview(
             if not isinstance(season_info, dict):
                 continue
             for ep in season_info.get("episodes", []):
-                ep_key = f"S{season_str}E{str(ep.get('epNum', 0)).zfill(2)}"
+                ep_num = ep.get("epNum", 0)
+                ep_key = f"S{season_str}E{str(ep_num).zfill(2)}"
+                # Normalise camelCase → snake_case for downstream consumers
                 episodes[ep_key] = {
                     "season_number": int(season_str),
-                    "episode_number": ep.get("epNum", 0),
+                    "episode_number": ep_num,
                     "bangumi_ep_id": None,
                     "bangumi_subject_name": "",
-                    "tmdb": ep,
+                    "tmdb": {
+                        "id": ep.get("tmdbId"),
+                        "name": ep.get("name", ""),
+                        "overview": ep.get("overview", ""),
+                        "air_date": ep.get("airDate", ""),
+                        "runtime": ep.get("runtime", 0),
+                        "still_path": ep.get("stillPath", ""),
+                        "directors": ep.get("directors", []),
+                        "writers": ep.get("writers", []),
+                        "guest_stars": ep.get("guestStars", []),
+                    },
                 }
 
     return tvshow, seasons, episodes
