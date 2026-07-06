@@ -8,6 +8,7 @@ import MikanSearchDialog from '@/components/rss/MikanSearchDialog';
 import SubscriptionList from '@/components/rss/SubscriptionList';
 import DownloadHistoryDialog from '@/components/rss/DownloadHistoryDialog';
 import UnsubscribeDialog from '@/components/rss/UnsubscribeDialog';
+import TmdbSearchDialog from '@/components/rss/TmdbSearchDialog';
 import { useRssSearch } from '@/hooks/useRssSearch';
 import { useSubscriptions } from '@/hooks/useSubscriptions';
 import { useDownloadHistory } from '@/hooks/useDownloadHistory';
@@ -30,6 +31,9 @@ export default function RssPage() {
   const [mikanFallback, setMikanFallback] = useState<{ bangumi_id: number; name: string } | null>(null);
   const [mikanMeta, setMikanMeta] = useState<import('@/types/preview').BangumiMeta | null>(null);
 
+  // TMDB manual override state — Tier-2 fallback when auto-inference fails
+  const [tmdbDialog, setTmdbDialog] = useState<{ bangumi_id: number; name: string } | null>(null);
+
   const handleSearch = (id: number, candidate?: { has_mikan_id: boolean; name: string }) => {
     // Entry has bangumi_id but no mikan_id → trigger Mikan search fallback
     if (candidate && !candidate.has_mikan_id) {
@@ -48,6 +52,15 @@ export default function RssPage() {
 
   const handleManualSubscribed = () => {
     setMikanFallback(null);
+    refreshSubs();
+  };
+
+  const handleSetTmdb = (bangumiId: number, name: string) => {
+    setTmdbDialog({ bangumi_id: bangumiId, name });
+  };
+
+  const handleTmdbAssigned = (_tmdbId: number, _tmdbSeason: number | null) => {
+    setTmdbDialog(null);
     refreshSubs();
   };
 
@@ -181,6 +194,7 @@ export default function RssPage() {
           onOpenHistory={openHistory}
           onUnsubscribe={(_bangumiId, sub) => setUnsubTarget(sub)}
           onActivate={activate}
+          onSetTmdb={handleSetTmdb}
         />
       </div>
 
@@ -202,6 +216,16 @@ export default function RssPage() {
           setUnsubTarget(null);
         }}
       />
+
+      {tmdbDialog && (
+        <TmdbSearchDialog
+          open={true}
+          bangumiId={tmdbDialog.bangumi_id}
+          bangumiName={tmdbDialog.name}
+          onClose={() => setTmdbDialog(null)}
+          onAssigned={handleTmdbAssigned}
+        />
+      )}
     </>
   );
 }

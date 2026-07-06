@@ -6,6 +6,7 @@ interface Props {
   onOpenHistory: (bangumiId: number, subscription: SubscriptionOut) => void;
   onUnsubscribe: (bangumiId: number, subscription: SubscriptionOut) => void;
   onActivate: (bangumiId: number) => Promise<void>;
+  onSetTmdb?: (bangumiId: number, name: string) => void;
 }
 
 export default function SubscriptionCard({ subscription: s, onOpenHistory, onUnsubscribe, onActivate }: Props) {
@@ -135,6 +136,19 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
             </span>
           )}
         </div>
+        {/* Missing TMDB warning — Tier-2 manual override trigger */}
+        {(!s.tmdb_id || s.tmdb_id === 0) && (
+          <button
+            className="w-full text-[10px] px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors font-medium"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSetTmdb?.(s.bangumi_id, s.name);
+            }}
+            title="TMDB ID missing — metadata (NFO, images) will not be generated. Click to set manually."
+          >
+            Missing TMDB ID — click to set
+          </button>
+        )}
       </div>
     </div>
   );

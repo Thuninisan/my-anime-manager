@@ -341,6 +341,38 @@ export function getDownloadHistoryStream(
   return ctrl;
 }
 
+export interface TmdbSearchResult {
+  id: number;
+  name: string;
+  original_name: string;
+  first_air_date: string;
+  poster_path: string;
+}
+
+export async function searchTmdbShows(query: string): Promise<TmdbSearchResult[]> {
+  const res = await fetch(`/api/rss/tmdb-search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+export async function setSubscriptionTmdb(
+  bangumiId: number,
+  tmdbId: number,
+  tmdbSeason: number | null,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}/tmdb`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tmdb_id: tmdbId, tmdb_season: tmdbSeason }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let msg = text;
+    try { const j = JSON.parse(text); msg = j.detail || text; } catch { /* */ }
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+}
+
 export async function getTmdbSeasonMap(tmdbId: number): Promise<Record<string, SeasonInfo>> {
   const res = await fetch(`/api/rss/tmdb/${tmdbId}/seasons`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

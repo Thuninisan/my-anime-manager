@@ -1193,6 +1193,70 @@ async def enrich_subscription_stream(bangumi_id: int):
     )
 
 
+class TmdbSearchResult(BaseModel):
+    id: int
+    name: str
+    original_name: str = ""
+    first_air_date: str = ""
+    poster_path: str = ""
+
+
+@app.get("/api/rss/tmdb-search")
+async def search_tmdb_shows(q: str) -> list[TmdbSearchResult]:
+    """Search TMDB for TV shows (for manual TMDB ID assignment).
+
+    Used by the frontend Tier-2 manual fallback when a subscription's
+    TMDB ID could not be auto-inferred during enrichment.
+    """
+    from .clients import tmdb as tmdb_client
+    try:
+        res = await tmdb_client.search_tv(q, language="zh-CN")
+        data_json = res.json()
+    except Exception as e:
+        raise HTTPException(502, f"TMDB search failed: {e}")
+
+    results: list[TmdbSearchResult] = []
+    for r in data_json.get("results", [])[:10]:
+        results.append(TmdbSearchResult(
+            id=r["id"],
+            name=r.get("name", ""),
+            original_name=r.get("original_name", ""),
+            first_air_date=r.get("first_air_date", ""),
+            poster_path=r.get("poster_path", ""),
+        ))
+    return results
+
+
+class SetTmdbRequest(BaseModel):
+    tmdb_id: int
+    tmdb_season: int | None = None
+
+
+@app.patch("/api/rss/subscriptions/{bangumi_id}/tmdb")
+async def set_subscription_tmdb(bangumi_id: int, body: SetTmdbRequest):
+    """Manually set the TMDB ID (and optional season) for a subscription.
+
+    Persists to both subscriptions.json and bangumi_mikan_map.json.
+    Used by the Tier-2 manual override in the frontend.
+    """
+    # Update the subscription record
+    fields: dict = {"tmdb_id": body.tmdb_id}
+    if body.tmdb_season is not None:
+        fields["tmdb_season"] = body.tmdb_season
+    ok = data.update_subscription(bangumi_id, fields)
+    if not ok:
+        raise HTTPException(404, f"Subscription not found: {bangumi_id}")
+
+    # Also persist to bangumi_mikan_map so future auto-lookups work
+    data.set_tmdb_id(bangumi_id, body.tmdb_id, body.tmdb_season)
+
+    logger.info(
+        "manual tmdb override: bangumi=%d → tmdb_id=%d season=%s",
+        bangumi_id, body.tmdb_id, body.tmdb_season,
+    )
+    return {"ok": True}
+
+
 @app.delete("/api/rss/subscriptions/{bangumi_id}")
 async def delete_subscription(bangumi_id: int, delete_files: bool = False):
     """Remove an RSS subscription by Bangumi ID.

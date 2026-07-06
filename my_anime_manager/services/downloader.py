@@ -17,7 +17,7 @@ from ..clients.qbittorrent import (
 from ..clients import bangumi as bgm_client
 from ..clients.bangumi import get_episodes as bgm_get_episodes, get_subject
 from ..data import (
-    get_tmdb_id, get_tmdb_season, get_bangumi_name,
+    get_tmdb_id, get_tmdb_season, get_bangumi_name, set_tmdb_id as data_set_tmdb_id,
     list_subscriptions, mark_downloaded, get_episode_source,
     get_episode_pub_date, remove_episode_record,
     get_all_episodes,
@@ -139,6 +139,225 @@ def _match_rss_ep_to_sort(episodes: list[dict], rss_ep: int) -> int:
     return rss_ep
 
 
+# ═══════════════════════════════════════════════════════════════════════
+# Tier-1 TMDB auto-inference helpers (used by enrich_subscription)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def _build_chain_ids(root_id: int) -> list[int]:
+    """Walk forward from *root_id* through sequel relations.
+
+    Returns the ordered list of Bangumi subject IDs in the chain
+    (including *root_id*).  Stops at 30 entries to prevent infinite loops.
+    """
+    chain_ids = [root_id]
+    visited = {root_id}
+    current_id = root_id
+    for _ in range(30):
+        try:
+            relations = await bgm_client.get_relations(current_id)
+        except Exception:
+            break
+        sequel = next(
+            (r for r in relations if r.get("relation") == "续集"), None
+        )
+        if not sequel or sequel["id"] in visited:
+            break
+        visited.add(sequel["id"])
+        chain_ids.append(sequel["id"])
+        current_id = sequel["id"]
+    return chain_ids
+
+
+async def _auto_infer_tmdb(
+    bangumi_id: int,
+    root_id: int,
+    root_subject: dict | None,
+    _emit: Callable[[str], None],
+) -> dict | None:
+    """Try to infer a missing TMDB ID via name-based matching.
+
+    Called when ``get_tmdb_id(bangumi_id)`` returns ``None`` / 0.
+
+    Strategy:
+    1. Build the full chain from *root_id* forward through sequels.
+    2. If the chain has only one entry, search TMDB directly with the
+       subject's original Japanese name — take the first result as
+       ``tmdb_id`` with ``tmdb_season=1``.
+    3. If the chain has multiple entries, collect TMDB IDs from sibling
+       entries already present in ``bangumi_mikan_map.json``.  If none
+       are found, fall back to searching TMDB with ``chain[0]``'s name.
+    4. For each candidate TMDB ID, fetch all seasons in the show's
+       original language, then fuzzy-match the first Bangumi main-story
+       episode name against each season's first episode name.
+    5. Return the best ``(tmdb_id, tmdb_season)`` whose score exceeds
+       the threshold, or ``None``.
+
+    Returns:
+        ``{"tmdb_id": int, "tmdb_season": int}`` or ``None``.
+    """
+    from ..clients import tmdb as tmdb_client
+    from ..services import tmdb as tmdb_service
+    from ..utils.episode_name_match import match_first_episode
+
+    # ── Step 1: Build chain & determine strategy ──
+    chain_ids = await _build_chain_ids(root_id)
+    is_single = len(chain_ids) == 1
+
+    if is_single:
+        # 1a: Single-entry chain — search TMDB directly
+        subject = root_subject
+        if subject is None:
+            try:
+                subject = await get_subject(bangumi_id)
+            except Exception:
+                pass
+        if subject is None:
+            return None
+
+        original_name = (subject.get("name") or "").strip()
+        if not original_name:
+            return None
+
+        _emit(f"   🔍 单条目链，直接搜索 TMDB: {original_name}")
+        try:
+            res = await tmdb_client.search_tv(original_name)
+            results = res.json().get("results", [])
+        except Exception:
+            _emit("   ⚠️ TMDB 搜索请求失败")
+            return None
+
+        if not results:
+            _emit("   ❌ TMDB 搜索无结果")
+            return None
+
+        best = results[0]
+        _emit(
+            f"   ✅ 匹配到: {best['name']} "
+            f"({best.get('original_name', '')}) [id={best['id']}]"
+        )
+        return {"tmdb_id": best["id"], "tmdb_season": 1}
+
+    # 1b: Multi-entry chain — collect candidates from siblings
+    candidates: list[int] = []
+    for cid in chain_ids:
+        if cid == bangumi_id:
+            continue
+        ctid = get_tmdb_id(cid)
+        if ctid:
+            candidates.append(ctid)
+
+    # Deduplicate while preserving order
+    seen: set[int] = set()
+    unique_candidates: list[int] = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            unique_candidates.append(c)
+
+    if not unique_candidates:
+        # Fall back to searching TMDB with chain[0]'s name
+        _emit("   🔍 链中无已知 TMDB ID，用 chain[0] 名称搜索...")
+        root_name = ""
+        try:
+            if root_subject:
+                root_name = (root_subject.get("name") or "").strip()
+            if not root_name:
+                root_subj = await get_subject(root_id)
+                root_name = (root_subj.get("name") or "").strip()
+        except Exception:
+            pass
+
+        if not root_name:
+            _emit("   ⚠️ 无法获取 chain[0] 名称")
+            return None
+
+        try:
+            res = await tmdb_client.search_tv(root_name)
+            results = res.json().get("results", [])
+        except Exception:
+            _emit("   ⚠️ TMDB 搜索请求失败")
+            return None
+
+        if not results:
+            _emit("   ❌ TMDB 搜索无结果")
+            return None
+
+        unique_candidates = [results[0]["id"]]
+        _emit(
+            f"   ✅ TMDB 搜索命中: {results[0]['name']} "
+            f"(id={results[0]['id']})"
+        )
+
+    if not unique_candidates:
+        return None
+
+    # ── Step 2: Get Bangumi first main-story episode name ──
+    _emit(f"   📡 候选 TMDB ID: {unique_candidates}")
+
+    try:
+        bgm_eps = await bgm_client.get_episodes(bangumi_id, ep_type=0)
+    except Exception:
+        _emit("   ⚠️ 获取 Bangumi 剧集列表失败")
+        return None
+
+    if not bgm_eps:
+        _emit("   ⚠️ Bangumi 无剧集数据")
+        return None
+
+    first_bgm_ep_name = (bgm_eps[0].get("name") or "").strip()
+    if not first_bgm_ep_name:
+        _emit("   ⚠️ 首个剧集名为空")
+        return None
+
+    _emit(f"   📺 Bangumi 首个剧集: {first_bgm_ep_name}")
+
+    # ── Step 3: Fetch TMDB seasons & match ──
+    best_result: tuple[int, int, float] | None = None  # (tmdb_id, season, score)
+
+    for ctid in unique_candidates:
+        # Determine request language from TMDB original_language
+        try:
+            detail_res = await tmdb_client.get_tv_detail(ctid)
+            detail = detail_res.json()
+            orig_lang = (detail.get("original_language") or "ja").strip().lower()
+        except Exception:
+            orig_lang = "ja"
+
+        # Map to TMDB API language parameter
+        lang = "ja" if orig_lang == "ja" else (
+            "zh-CN" if orig_lang == "zh" else "ja"
+        )
+        _emit(
+            f"   🌐 TMDB {ctid} original_language={orig_lang}"
+            f" → 请求语言={lang}"
+        )
+
+        try:
+            season_map = await tmdb_service.build_season_episode_map(
+                ctid, language=lang,
+            )
+        except Exception:
+            _emit(f"   ⚠️ TMDB {ctid} 获取季数据失败")
+            continue
+
+        match = match_first_episode(first_bgm_ep_name, season_map)
+        if match:
+            season_num, score = match
+            _emit(
+                f"   📊 TMDB {ctid} S{season_num:02d}: "
+                f"匹配分数={score:.3f}"
+            )
+            if best_result is None or score > best_result[2]:
+                best_result = (ctid, season_num, score)
+
+    if best_result is None:
+        _emit("   ❌ 所有候选均未达到匹配阈值")
+        return None
+
+    return {"tmdb_id": best_result[0], "tmdb_season": best_result[1]}
+
+
 async def enrich_subscription(
     bangumi_id: int,
     on_progress: Callable[[str], Any] | None = None,
@@ -252,6 +471,27 @@ async def enrich_subscription(
         # 4. TMDB info from bangumi_mikan_map.json
         tmdb_id = get_tmdb_id(bangumi_id)
         tmdb_season = get_tmdb_season(bangumi_id)
+
+        # ── Tier-1 fallback: auto-infer missing TMDB ID ──
+        if not tmdb_id:
+            _emit("🔍 TMDB ID 缺失，启动自动推断...")
+            try:
+                fallback_result = await _auto_infer_tmdb(
+                    bangumi_id, root_id, root_subject, _emit,
+                )
+                if fallback_result:
+                    tmdb_id = fallback_result["tmdb_id"]
+                    tmdb_season = fallback_result["tmdb_season"]
+                    # Persist so future lookups are instant
+                    data_set_tmdb_id(bangumi_id, tmdb_id, tmdb_season)
+                    _emit(
+                        f"✅ 自动推断成功: "
+                        f"tmdb_id={tmdb_id}, tmdb_season={tmdb_season}"
+                    )
+                else:
+                    _emit("⚠️ 自动匹配 TMDB 失败，请在订阅卡片中手动设置")
+            except Exception as e:
+                _emit(f"⚠️ TMDB 自动推断异常: {e}")
 
         # 5. Extract this season's Bangumi subject name for file naming
         bgm_subject_name = ""

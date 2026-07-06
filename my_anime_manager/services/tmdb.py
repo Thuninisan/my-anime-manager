@@ -219,7 +219,9 @@ def find_best_episode_group(groups: list[dict]) -> dict | None:
     return sorted_groups[0]
 
 
-async def build_season_episode_map(tv_id: int) -> dict[int, dict]:
+async def build_season_episode_map(
+    tv_id: int, language: str = "",
+) -> dict[int, dict]:
     """Build a TMDB season→episodes mapping using the default Season API.
 
     Does NOT compute cross-season absolute episode numbers — each season
@@ -229,7 +231,9 @@ async def build_season_episode_map(tv_id: int) -> dict[int, dict]:
     Season 0 (Specials) is fetched last and only when regular seasons exist.
 
     Args:
-        tv_id: TMDB show ID
+        tv_id: TMDB show ID.
+        language: Optional language override for episode names (e.g. ``"ja"``,
+                  ``"zh-CN"``).  When empty, uses the client default (``"ja"``).
 
     Returns:
         dict mapping season_number to {name, episodes: [{epNum, name, ...}]}
@@ -257,7 +261,7 @@ async def build_season_episode_map(tv_id: int) -> dict[int, dict]:
 
     for s in range(1, total_seasons + 1):
         try:
-            res = await tmdb_client.get_season_detail(tv_id, s)
+            res = await tmdb_client.get_season_detail(tv_id, s, language=language)
         except Exception as exc:
             print(f"   ⚠️ S{s:02d} 请求失败: {exc}")
             continue
@@ -325,7 +329,7 @@ async def build_season_episode_map(tv_id: int) -> dict[int, dict]:
     # ── Fetch season 0 (Specials) ──
     if season_map:
         try:
-            res = await tmdb_client.get_season_detail(tv_id, 0)
+            res = await tmdb_client.get_season_detail(tv_id, 0, language=language)
             data = res.json()
             if data and data.get("episodes"):
                 episodes = []

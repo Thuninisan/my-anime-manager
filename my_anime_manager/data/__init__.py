@@ -116,6 +116,30 @@ def set_mikan_id(bangumi_id: int, mikan_id: int) -> bool:
     return True
 
 
+def set_tmdb_id(
+    bangumi_id: int, tmdb_id: int, tmdb_season: int | None = None
+) -> bool:
+    """Set tmdb_id (and optionally tmdb_season) for a Bangumi entry.
+
+    Updates the in-memory map and persists to JSON.  Used by the Tier-1
+    auto-inference fallback and the Tier-2 manual override endpoint so
+    that subsequent lookups are instant.
+
+    Returns False if the Bangumi entry is not found in the map.
+    """
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    entry = _bangumi_mikan_map.get(bangumi_id)
+    if entry is None:
+        return False
+    entry["tmdb_id"] = tmdb_id
+    if tmdb_season is not None:
+        entry["tmdb_season"] = tmdb_season
+    _save_map()
+    return True
+
+
 def get_bangumi_id_by_tmdb_id(tmdb_id: int) -> int | None:
     """Reverse lookup: TMDB ID → Bangumi ID.
 
