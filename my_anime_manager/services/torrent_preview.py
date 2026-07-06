@@ -705,7 +705,7 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                 season_map = await tmdb_service.build_season_episode_map(tid)
                 # TMDB now uses language=ja as the base, so episode names are
                 # already Japanese originals — no second fetch needed.
-                # Trim to the fields needed for the API response.
+                # Include all fields needed for downstream NFO generation.
                 output_seasons: dict = {}
                 for s_num, s_data in season_map.items():
                     clean_eps = []
@@ -714,6 +714,14 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                             "epNum": ep["epNum"],
                             "tmdbId": ep["tmdbId"],
                             "name": ep["name"],
+                            "overview": ep.get("overview", ""),
+                            "airDate": ep.get("airDate", ""),
+                            "runtime": ep.get("runtime", 0),
+                            "stillPath": ep.get("stillPath", ""),
+                            "voteAverage": ep.get("voteAverage", 0),
+                            "directors": ep.get("directors", []),
+                            "writers": ep.get("writers", []),
+                            "guestStars": ep.get("guestStars", []),
                         })
                     output_seasons[str(s_num)] = {
                         "name": s_data["name"],
