@@ -644,9 +644,9 @@ async def _monitor_download(
 
         progress = t.get("progress", 0)
         state = t.get("state", "")
-        logger.info("下载进度 [%s]: %.1f%% (%s)", torrent_name, progress * 100, state)
 
         if progress >= 1.0 or "paused" in state.lower() or "stopped" in state.lower() or "completed" in state.lower():
+            logger.info("下载完成 [%s] (%.1f%%)", torrent_name, progress * 100)
             if progress < 1.0:
                 logger.warning("种子状态异常 (progress=%.2f, state=%s), 仍然尝试创建文件", progress, state)
 
