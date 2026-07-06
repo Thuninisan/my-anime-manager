@@ -796,7 +796,7 @@ async def _monitor_download(
     _download_tasks.pop(info_hash, None)
 
 
-def _build_metadata_from_preview(
+async def _build_metadata_from_preview(
     preview_data: dict,
     files: list[dict],
 ) -> tuple[dict, dict, dict] | None:
@@ -1046,7 +1046,7 @@ async def torrent_download(body: dict):
     nfo_generated = False
     if preview_data:
         try:
-            meta = _build_metadata_from_preview(preview_data, files)
+            meta = await _build_metadata_from_preview(preview_data, files)
             if meta:
                 tvshow, seasons, episodes = meta
                 # Place NFO under {hardlink_root}/{show_name}/ to match
