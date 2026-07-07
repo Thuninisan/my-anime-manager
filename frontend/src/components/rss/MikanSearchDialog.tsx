@@ -30,6 +30,10 @@ export default function MikanSearchDialog({ open, bangumiId, bangumiName, meta, 
   const [manualBackupUrl, setManualBackupUrl] = useState('');
   const [manualSubscribing, setManualSubscribing] = useState(false);
   const [manualError, setManualError] = useState('');
+  // Mikan ID direct association
+  const [mikanIdInput, setMikanIdInput] = useState('');
+  const [assigningMikanId, setAssigningMikanId] = useState(false);
+  const [assignMikanIdError, setAssignMikanIdError] = useState('');
 
   // Auto-search Mikan when dialog opens
   useEffect(() => {
@@ -108,6 +112,24 @@ export default function MikanSearchDialog({ open, bangumiId, bangumiName, meta, 
       setManualError(msg);
     } finally {
       setManualSubscribing(false);
+    }
+  };
+
+  const handleAssignMikanId = async () => {
+    const id = parseInt(mikanIdInput.trim(), 10);
+    if (!id || id <= 0) {
+      setAssignMikanIdError('请输入有效的 Mikan ID');
+      return;
+    }
+    setAssigningMikanId(true);
+    setAssignMikanIdError('');
+    try {
+      const result = await rssApi.assignMikanId(bangumiId, id);
+      onMikanAssigned(result);
+    } catch (e: unknown) {
+      setAssignMikanIdError(e instanceof Error ? e.message : '关联失败');
+    } finally {
+      setAssigningMikanId(false);
     }
   };
 
@@ -294,6 +316,34 @@ export default function MikanSearchDialog({ open, bangumiId, bangumiName, meta, 
                 {manualSubscribing && Spinner}
                 {manualSubscribing ? '订阅中...' : '订阅'}
               </button>
+
+              {/* ── Mikan ID 直接关联 ── */}
+              <div className="border-t border-border pt-4 mt-4">
+                <p className="text-xs text-muted-foreground mb-3">
+                  或者如果你知道该番剧的 Mikan ID，可以直接关联：
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground outline-none focus:border-primary"
+                    placeholder="输入 Mikan ID (数字)"
+                    value={mikanIdInput}
+                    onChange={e => { setMikanIdInput(e.target.value); setAssignMikanIdError(''); }}
+                    onKeyDown={e => { if (e.key === 'Enter') handleAssignMikanId(); }}
+                  />
+                  <button
+                    className="shrink-0 px-4 py-2 bg-primary text-primary-foreground rounded-lg text-xs font-semibold cursor-pointer hover:brightness-110 transition-all disabled:opacity-50 flex items-center gap-1.5"
+                    disabled={assigningMikanId || !mikanIdInput.trim()}
+                    onClick={handleAssignMikanId}
+                  >
+                    {assigningMikanId && Spinner}
+                    {assigningMikanId ? '关联中...' : '关联'}
+                  </button>
+                </div>
+                {assignMikanIdError && (
+                  <p className="text-sm text-destructive mt-2">{assignMikanIdError}</p>
+                )}
+              </div>
             </div>
           )}
         </div>

@@ -1225,6 +1225,8 @@ async def assign_mikan_id(bangumi_id: int, body: AssignMikanRequest):
         raise HTTPException(404, f"Bangumi ID {bangumi_id} 不存在于映射表中")
 
     result = await rss_service.lookup_mikan_rss(body.mikan_id, bangumi_id, name)
+    if not result["groups"]:
+        raise HTTPException(404, "该 Mikan ID 对应的条目为空")
     return BangumiRssResponse(**result)
 
 
