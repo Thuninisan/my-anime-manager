@@ -37,24 +37,32 @@ export function useSubscriptions(): UseSubscriptionsReturn {
 
     let body: SubscriptionIn;
     if (role === 'primary') {
+      // Preserve existing backup info: check backup fields first,
+      // then fall back to primary fields (existing may have only backup).
       body = {
         name: result.name, rss_url: group.rss_url, bangumi_id: result.bangumi_id,
         subgroup_id: group.subgroup_id, subgroup_name: group.name, filter_tags: tags,
-        backup_rss_url: existing?.rss_url || '', backup_subgroup_id: existing?.subgroup_id || 0,
-        backup_subgroup_name: existing?.subgroup_name || '', backup_filter_tags: existing?.filter_tags || [],
+        backup_rss_url: existing?.backup_rss_url || existing?.rss_url || '',
+        backup_subgroup_id: existing?.backup_subgroup_id || existing?.subgroup_id || 0,
+        backup_subgroup_name: existing?.backup_subgroup_name || existing?.subgroup_name || '',
+        backup_filter_tags: existing?.backup_filter_tags || existing?.filter_tags || [],
         download_path: existing?.download_path || '',
         exclude_patterns: excludes,
-        backup_exclude_patterns: existing?.backup_exclude_patterns || [],
+        backup_exclude_patterns: existing?.backup_exclude_patterns || existing?.exclude_patterns || [],
       };
     } else {
+      // Preserve existing primary info: check primary fields first,
+      // then fall back to backup fields (existing may have only primary).
       body = {
-        name: result.name, rss_url: existing?.rss_url || '', bangumi_id: result.bangumi_id,
-        subgroup_id: existing?.subgroup_id || 0, subgroup_name: existing?.subgroup_name || '',
-        filter_tags: existing?.filter_tags || [],
+        name: result.name, rss_url: existing?.rss_url || existing?.backup_rss_url || '',
+        bangumi_id: result.bangumi_id,
+        subgroup_id: existing?.subgroup_id || existing?.backup_subgroup_id || 0,
+        subgroup_name: existing?.subgroup_name || existing?.backup_subgroup_name || '',
+        filter_tags: existing?.filter_tags || existing?.backup_filter_tags || [],
         backup_rss_url: group.rss_url, backup_subgroup_id: group.subgroup_id,
         backup_subgroup_name: group.name, backup_filter_tags: tags,
         download_path: existing?.download_path || '',
-        exclude_patterns: existing?.exclude_patterns || [],
+        exclude_patterns: existing?.exclude_patterns || existing?.backup_exclude_patterns || [],
         backup_exclude_patterns: excludes,
       };
     }
