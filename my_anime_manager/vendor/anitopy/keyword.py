@@ -110,6 +110,12 @@ class KeywordManager:
             'R2DVD', 'R2J', 'R2JDVD', 'R2JDVDRIP',
             'HDTV', 'HDTVRIP', 'TVRIP', 'TV-RIP',
             'WEBCAST', 'WEBRIP'])
+        self.add(ElementCategory.SOURCE, options_default, [
+            'BAHA', 'BAHAMUT',           # 巴哈姆特動畫瘋
+            'CR', 'CRUNCHYROLL',         # Crunchyroll
+            'BILIBILI',                  # Bilibili
+            'IQIYI',                     # iQiyi (愛奇藝)
+            'ABEMA'])                    # Abema
 
         self.add(ElementCategory.SUBTITLES, options_default, [
             'ASS', 'BIG5', 'DUB', 'DUBBED', 'HARDSUB', 'HARDSUBS', 'RAW',

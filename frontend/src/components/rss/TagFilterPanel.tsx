@@ -1,4 +1,4 @@
-const AVAILABLE_TAGS = ['简体', '繁体', '日语', '内封', '内嵌', '双语', '1080p', '720p'];
+const AVAILABLE_TAGS = ['简体', '繁体', '日语', '内封', '内嵌', '双语', '1080p', '720p', 'Baha', 'CR', 'Bilibili', 'iQiyi', 'Abema'];
 
 export const TAG_COLORS: Record<string, string> = {
   '简体': 'bg-sky-500/15 text-sky-600 dark:text-sky-400',
@@ -9,6 +9,11 @@ export const TAG_COLORS: Record<string, string> = {
   '双语': 'bg-cyan-500/15 text-cyan-600 dark:text-cyan-400',
   '1080p': 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
   '720p': 'bg-orange-500/15 text-orange-600 dark:text-orange-400',
+  'Baha': 'bg-red-500/15 text-red-600 dark:text-red-400',
+  'CR': 'bg-yellow-500/15 text-yellow-600 dark:text-yellow-400',
+  'Bilibili': 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  'iQiyi': 'bg-green-500/15 text-green-600 dark:text-green-400',
+  'Abema': 'bg-violet-500/15 text-violet-600 dark:text-violet-400',
 };
 
 interface Props {

@@ -1,5 +1,6 @@
 """RSS subscription service — Bangumi ID → Mikan subtitle groups, feed parsing."""
 
+import re
 import xml.etree.ElementTree as ET
 
 from .. import config
@@ -13,7 +14,20 @@ from ..utils.http_retry import fetch_with_retry
 # Filter logic — tag-based matching
 # ═══════════════════════════════════════════════════════════════════════
 
-def _derive_tags(parsed: dict) -> list[str]:
+# Streaming platform identifiers → unified tag display names.
+# anitopy SOURCE keywords cover the common (non-hyphenated) forms;
+# this mapping handles both keyword matches and regex fallback for
+# hyphenated variants (B-Global, B-TI) that split across tokens.
+_STREAMING_TAGS: dict[str, str] = {
+    "baha": "Baha", "bahamut": "Baha",
+    "crunchyroll": "CR", "cr": "CR",
+    "bilibili": "Bilibili", "b-global": "Bilibili", "b-ti": "Bilibili",
+    "iqiyi": "iQiyi", "iq": "iQiyi",
+    "abema": "Abema",
+}
+
+
+def _derive_tags(parsed: dict, text: str = "") -> list[str]:
     tags: list[str] = []
     lang_raw = parsed.get("language", "")
     lang_str = ", ".join(lang_raw) if isinstance(lang_raw, list) else str(lang_raw)
@@ -33,6 +47,36 @@ def _derive_tags(parsed: dict) -> list[str]:
         tags.append("1080p")
     elif "720" in res_str:
         tags.append("720p")
+
+    # ── Streaming source tags ───────────────────────────────────────
+    # Tier 1: anitopy SOURCE keywords already matched (e.g. BAHA, CR, IQIYI)
+    source_val = parsed.get("source", "")
+    if isinstance(source_val, list):
+        sources = [s.lower() for s in source_val]
+    elif source_val:
+        sources = [str(source_val).lower()]
+    else:
+        sources = []
+
+    seen: set[str] = set()
+    for s in sources:
+        tag = _STREAMING_TAGS.get(s)
+        if tag and tag not in seen:
+            tags.append(tag)
+            seen.add(tag)
+
+    # Tier 2: regex fallback — catches hyphenated forms (B-Global, B-TI)
+    # and edge cases where the keyword wasn't tokenised correctly.
+    if text:
+        text_lower = text.lower()
+        for key, tag in _STREAMING_TAGS.items():
+            if tag in seen:
+                continue
+            pattern = r'(?<![a-z])' + re.escape(key) + r'(?![a-z])'
+            if re.search(pattern, text_lower):
+                tags.append(tag)
+                seen.add(tag)
+
     return tags
 
 
@@ -133,7 +177,7 @@ async def fetch_and_parse_rss(
 
         text_to_parse = guid or title
         parsed = anitopy_parse(text_to_parse) or {}
-        item_tags = _derive_tags(parsed)
+        item_tags = _derive_tags(parsed, text_to_parse)
         ep_num = _extract_ep_num(parsed)
         excluded = any(p in text_to_parse for p in exclude_patterns)
 

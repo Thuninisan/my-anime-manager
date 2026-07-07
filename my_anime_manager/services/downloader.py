@@ -493,6 +493,52 @@ async def enrich_subscription(
             except Exception as e:
                 _emit(f"⚠️ TMDB 自动推断异常: {e}")
 
+        # 4b. Calculate tmdb_ep_offset — match first Bangumi episode name
+        #     against TMDB season episodes to find the numbering offset.
+        #     Once stored in the subscription, subsequent downloads just
+        #     compute target_ep_num = sort - offset (zero API calls).
+        tmdb_ep_offset = 0
+        if tmdb_id and tmdb_season:
+            try:
+                from ..clients.tmdb import get_season_detail as _tmdb_season_detail
+                from ..utils.episode_name_match import fuzzy_match_episode
+
+                # First main-story Bangumi episode (ep_type=0 filters SPs)
+                first_bgm_eps = await bgm_client.get_episodes(
+                    bangumi_id, ep_type=0,
+                )
+                if first_bgm_eps:
+                    first_bgm = first_bgm_eps[0]
+                    first_bgm_name = (first_bgm.get("name") or "").strip()
+                    first_bgm_sort = first_bgm.get("sort") or first_bgm.get("ep", 0)
+
+                    if first_bgm_name and first_bgm_sort:
+                        resp = await _tmdb_season_detail(
+                            tmdb_id, tmdb_season, language="ja",
+                        )
+                        season_data = resp.json()
+
+                        best_score = 0.0
+                        best_ep_num = 0
+                        for ep in season_data.get("episodes", []):
+                            tmdb_name = ep.get("name", "").strip()
+                            if not tmdb_name:
+                                continue
+                            score = fuzzy_match_episode(first_bgm_name, tmdb_name)
+                            if score > best_score and score >= 0.6:
+                                best_score = score
+                                best_ep_num = ep["episode_number"]
+
+                        if best_ep_num and best_ep_num != first_bgm_sort:
+                            tmdb_ep_offset = first_bgm_sort - best_ep_num
+                            _emit(
+                                f"✅ tmdb_ep_offset={tmdb_ep_offset} "
+                                f"(bgm_sort={first_bgm_sort} → "
+                                f"tmdb_ep={best_ep_num}, score={best_score:.2f})"
+                            )
+            except Exception as e:
+                _emit(f"⚠️ tmdb_ep_offset 计算失败（非致命）: {e}")
+
         # 5. Extract this season's Bangumi subject name for file naming
         bgm_subject_name = ""
         try:
@@ -513,6 +559,7 @@ async def enrich_subscription(
             "bgm_subject_name": bgm_subject_name,
             "tmdb_id": tmdb_id or 0,
             "tmdb_season": tmdb_season,
+            "tmdb_ep_offset": tmdb_ep_offset,
             "bgm_rating": bgm_rating,
             "bgm_rating_total": bgm_rating_total,
             "air_date": air_date,
@@ -664,10 +711,11 @@ async def generate_metadata(
     tmdb_id: int, show_name: str, old_torrent_path: str, guid: str,
     bgm_season: int = 1,
     tmdb_season: int | None = None,
+    tmdb_ep_offset: int = 0,
     base_path: str = "",
     sub_path: str = "",
     bgm_subject_name: str = "",
-):
+) -> bool:
     """Generate NFO files, download images, and rename in qBittorrent.
 
     *base_path* + *sub_path* form the season directory (e.g.
@@ -687,8 +735,14 @@ async def generate_metadata(
 
     # ── TMDB: fetch the single target season ──────────────────────
     target_tmdb_season = override_tmdb_season or tmdb_season or 1
-    target_ep_num = override_tmdb_ep or sort
-    logger.info("fetching TMDB S%d (tmdb_id=%d)", target_tmdb_season, tmdb_id)
+    # Apply episode offset: when TMDB resets numbering per season but
+    # Bangumi sort continues across seasons (e.g. Dorohedoro S2:
+    # sort=13 → target_ep=1 with offset=12)
+    target_ep_num = (override_tmdb_ep or sort) - tmdb_ep_offset
+    if target_ep_num < 1:
+        target_ep_num = 1
+    logger.info("fetching TMDB S%d E%d (tmdb_id=%d, offset=%d)",
+                target_tmdb_season, target_ep_num, tmdb_id, tmdb_ep_offset)
 
     # Fetch ja first to capture the Japanese original episode name
     ja_name = ""
@@ -708,7 +762,7 @@ async def generate_metadata(
         season_data = resp.json()
     except Exception:
         logger.exception("TMDB season API failed")
-        return
+        return False
 
     # Build normalised tmdb_ep dict from the matching episode
     tmdb_ep = None
@@ -735,7 +789,7 @@ async def generate_metadata(
 
     if not tmdb_ep:
         logger.warning("TMDB S%d missing episode sort=%d, skipping NFO", target_tmdb_season, sort)
-        return
+        return False
 
     # ── Fetch full episode credits for main voice cast ──
     # The /season/{n} endpoint only returns guest stars; the /credits
@@ -836,6 +890,8 @@ async def generate_metadata(
         logger.info("renamed: %s → %s", old_torrent_path, new_path)
     except Exception:
         logger.exception("rename failed")
+
+    return True
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1118,10 +1174,14 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
             from ..data import update_subscription
             update_subscription(bangumi_id, enriched)
         else:
-            bgm_season = 1  # fallback
+            print(f"         ❌ 丰富化失败，将在下次轮询重试")
+            return False
 
     bgm_season = sub.get("bgm_season", 1)
     tmdb_season = sub.get("tmdb_season")
+    # Re-read tmdb_id: enrichment may have just persisted it
+    if not tmdb_id:
+        tmdb_id = get_tmdb_id(bangumi_id) or sub.get("tmdb_id") or 0
 
     # ── Match RSS episode to Bangumi sort ──────────────────────────
     # Prefer the sort already assigned by _fetch_passed_items (sequential
@@ -1132,6 +1192,14 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
         sort = _match_rss_ep_to_sort(episodes, rss_ep_num)
     if sort != rss_ep_num:
         print(f"         📐 rss_ep={rss_ep_num} → sort={sort}")
+
+    # ⛔ Guard: cannot generate NFO without TMDB mapping
+    if not tmdb_id:
+        print(f"         ⛔ TMDB ID 缺失，无法生成 NFO，跳过下载")
+        print(f"         💡 请在订阅卡片中手动设置 TMDB ID")
+        increment_fail_count(bangumi_id, sort)
+        return False
+
     bgm_sortrange = sub.get("bgm_sortrange", [0, 0])
     if bgm_sortrange[0] > 0 and (sort < bgm_sortrange[0] or sort > bgm_sortrange[1]):
         print(f"         ⚠️ sort={sort} 超出 bgm_sortrange={bgm_sortrange}，但仍继续处理")
@@ -1216,18 +1284,25 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
             from ..clients.qbittorrent import get_torrent_files
             files = await get_torrent_files(qb, info_hash)
             old_path = files[0]["name"] if files else guid
-            await generate_metadata(
+            success = await generate_metadata(
                 qb, info_hash, bangumi_id, sort,
                 bgm_subject_id, tmdb_id, show_name,
                 old_path, guid,
                 bgm_season=bgm_season,
                 tmdb_season=tmdb_season,
+                tmdb_ep_offset=sub.get("tmdb_ep_offset", 0),
                 base_path=rss_base,
                 sub_path=sub_path,
                 bgm_subject_name=bgm_subject_name,
             )
+            if not success:
+                print(f"      ❌ NFO 生成失败：TMDB 未找到对应剧集，种子已删除")
+                await delete_torrent(qb, info_hash, delete_files=False)
+                return False
         except Exception as e:
-            print(f"      ⚠️ NFO 生成失败: {e}")
+            print(f"      ❌ NFO 生成失败: {e}，种子已删除")
+            await delete_torrent(qb, info_hash, delete_files=False)
+            return False
 
     # ── Resume download ────────────────────────────────────────────
     try:

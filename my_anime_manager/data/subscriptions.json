@@ -1,1 +1,65 @@
-[]
+[
+  {
+    "name": "无职转生 第三季 ～到了异世界就拿出真本事～",
+    "rss_url": "",
+    "bangumi_id": 501963,
+    "subgroup_id": 0,
+    "subgroup_name": "",
+    "filter_tags": [],
+    "backup_rss_url": "https://mikanani.me/RSS/Bangumi?bangumiId=3995&subgroupid=583",
+    "backup_subgroup_id": 583,
+    "backup_subgroup_name": "ANi",
+    "backup_filter_tags": [],
+    "download_path": "/{series_name}/Season {season}",
+    "exclude_patterns": [],
+    "backup_exclude_patterns": [],
+    "active": 1,
+    "created_at": "2026-07-07T01:08:57",
+    "poster_url": "https://lain.bgm.tv/r/400/pic/cover/l/1f/9e/501963_bXlEP.jpg",
+    "updated_at": "2026-07-07T01:09:09",
+    "bgm_season": 5,
+    "bgm_sortrange": [
+      1,
+      14
+    ],
+    "series_name": "无职转生～到了异世界就拿出真本事～",
+    "bgm_subject_name": "无职转生 第三季 ～到了异世界就拿出真本事～",
+    "tmdb_id": 94664,
+    "tmdb_season": 3,
+    "bgm_rating": 8.0,
+    "bgm_rating_total": 1383,
+    "air_date": "2026-07-04"
+  },
+  {
+    "name": "BanG Dream! YUME∞MITA",
+    "rss_url": "https://mikanani.me/RSS/Bangumi?bangumiId=4038&subgroupid=583",
+    "bangumi_id": 583729,
+    "subgroup_id": 583,
+    "subgroup_name": "ANi",
+    "filter_tags": [],
+    "backup_rss_url": "",
+    "backup_subgroup_id": 0,
+    "backup_subgroup_name": "",
+    "backup_filter_tags": [],
+    "download_path": "/{series_name}/Season {season}",
+    "exclude_patterns": [],
+    "backup_exclude_patterns": [],
+    "active": 1,
+    "created_at": "2026-07-07T23:53:08",
+    "poster_url": "https://lain.bgm.tv/r/400/pic/cover/l/1c/e4/583729_KxOZV.jpg",
+    "updated_at": "2026-07-07T23:53:19",
+    "bgm_season": 1,
+    "bgm_sortrange": [
+      1,
+      13
+    ],
+    "series_name": "BanG Dream! YUME∞MITA",
+    "bgm_subject_name": "BanG Dream! YUME∞MITA",
+    "tmdb_id": 300112,
+    "tmdb_season": null,
+    "tmdb_ep_offset": 0,
+    "bgm_rating": 6.8,
+    "bgm_rating_total": 841,
+    "air_date": "2026-07-02"
+  }
+]
