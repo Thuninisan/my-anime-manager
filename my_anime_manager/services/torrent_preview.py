@@ -986,6 +986,20 @@ async def parse_and_search(torrent_path: str) -> dict:
     search_results = organized["search_results"]
     search_results_backup = organized["search_results_backup"]
 
+    # ── Fallback: TMDB not found but Bangumi found → look up map ──
+    from .. import data as data_store
+
+    for key, entry in search_results.items():
+        if entry["tmdb"] is None and entry["bangumi"] is not None:
+            bgm_id = entry["bangumi"]["id"]
+            mapped_tmdb_id = data_store.get_tmdb_id(bgm_id)
+            if mapped_tmdb_id:
+                entry["tmdb"] = {
+                    "id": mapped_tmdb_id,
+                    "name": f"TMDB {mapped_tmdb_id}",
+                }
+                print(f"   [{key}] TMDB 回退: Bangumi {bgm_id} → TMDB {mapped_tmdb_id}")
+
     # Summary
     for key, entry in search_results.items():
         t = entry["tmdb"]
