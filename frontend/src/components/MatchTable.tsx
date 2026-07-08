@@ -190,6 +190,29 @@ function fuzzyMatchTmdb(
   return null;
 }
 
+/** Merge seasons from every loaded TMDB entry into one flat map.
+ *  Episodes from different entries that share the same season number are
+ *  combined (deduplicated by epNum).  Sentinel keys like `_name` are
+ *  skipped.  The caller gets a plain `Record<string, TmdbSeason>` that
+ *  ``fuzzyMatchTmdb`` can search — the matched season falls out naturally. */
+function mergeAllTmdbSeasons(episodeData: any): Record<string, TmdbSeason> {
+  const merged: Record<string, TmdbSeason> = {};
+  for (const seasons of Object.values(episodeData.tmdb || {})) {
+    for (const [skey, sdata] of Object.entries(seasons as Record<string, any>)) {
+      if (!sdata?.episodes) continue; // skip _name and other sentinel keys
+      if (!merged[skey]) {
+        merged[skey] = { name: sdata.name, episodes: [...sdata.episodes] };
+      } else {
+        const seen = new Set(merged[skey].episodes.map((e: any) => e.epNum));
+        for (const ep of sdata.episodes || []) {
+          if (!seen.has(ep.epNum)) merged[skey].episodes.push({ ...ep });
+        }
+      }
+    }
+  }
+  return merged;
+}
+
 export function computeMatches(data: any): MatchRow[] {
   const parsedFiles: ParsedFile[] = data.parsed_files || [];
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
@@ -198,9 +221,16 @@ export function computeMatches(data: any): MatchRow[] {
   return parsedFiles.map((pf) => {
     const searchEntry = searchResults[pf.show_name];
 
+    // Prefer the auto-matched TMDB ID; when that yields nothing (e.g.
+    // the user manually added a TMDB entry via InfoCards), merge ALL
+    // loaded entries so fuzzyMatchTmdb can find episodes across them.
     const tmdbId = searchEntry?.tmdb?.id;
-    const tmdbSeasons: Record<string, TmdbSeason> =
+    const autoSeasons: Record<string, TmdbSeason> =
       (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+    const tmdbSeasons: Record<string, TmdbSeason> =
+      Object.keys(autoSeasons).length > 0
+        ? autoSeasons
+        : mergeAllTmdbSeasons(episodeData);
 
     // Collect all BGM episodes across ALL bangumi entries (primary + sequels)
     const allBgmEntries = Object.entries(episodeData.bangumi || {}) as [string, BgmEntry][];
@@ -630,9 +660,15 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
 
       // ── Resolve TMDB lookup data shared by BGM→TMDB and direct overrides ──
       // SP rows may have a cross-show tmdbShowId override for manual mapping.
-      const tmdbId = ov.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
+      // Falls back to merging all loaded entries when the targeted ID has no
+      // season data (same strategy as computeMatches).
+      const resolveTmdbId = ov.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
+      const resolveAutoSeasons: Record<string, TmdbSeason> =
+        (resolveTmdbId && episodeData.tmdb?.[String(resolveTmdbId)]) || {};
       const tmdbSeasons: Record<string, TmdbSeason> =
-        (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+        Object.keys(resolveAutoSeasons).length > 0
+          ? resolveAutoSeasons
+          : mergeAllTmdbSeasons(episodeData);
 
       if (!ovEp) {
         // No BGM episode matched — TMDB override may still apply independently
@@ -900,14 +936,22 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
               const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
               const currentEntryId = r.bgm_entry_id ?? 0;
 
-              // Pre-compute TMDB season options for this TV card
-              const tmdbId = searchResults[r.show_name]?.tmdb?.id;
+              // Pre-compute TMDB season options: prefer the auto-matched ID,
+              // fall back to merging all loaded entries (same strategy as
+              // computeMatches so dropdown values always match r.tmdb_season).
+              const tvTmdbId = searchResults[r.show_name]?.tmdb?.id;
+              const tvAutoSeasons: Record<string, TmdbSeason> =
+                (tvTmdbId && episodeData.tmdb?.[String(tvTmdbId)]) || {};
               const rowTmdbSeasons: Record<string, TmdbSeason> =
-                (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
-              const tmdbSeasonOpts: TmdbSeasonOption[] = Object.entries(rowTmdbSeasons).map(([skey, sdata]) => ({
-                value: String(Number(skey)),
-                label: sdata.name || `Season ${skey}`,
-              }));
+                Object.keys(tvAutoSeasons).length > 0
+                  ? tvAutoSeasons
+                  : mergeAllTmdbSeasons(episodeData);
+              const tmdbSeasonOpts: TmdbSeasonOption[] = Object.entries(rowTmdbSeasons)
+                .filter(([, sdata]) => sdata?.episodes) // skip sentinel keys
+                .map(([skey, sdata]) => ({
+                  value: String(Number(skey)),
+                  label: sdata.name || `Season ${skey}`,
+                }));
 
               // Pre-compute TMDB episode options
               const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
@@ -982,6 +1026,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
                 }
                 if (!showLabel) showLabel = `TMDB ${showTmdbId}`;
                 for (const [skey, sdata] of Object.entries(seasons as Record<string, any>)) {
+                  if (!sdata?.episodes) continue; // skip sentinel keys like _name
                   tmdbSeasonOpts.push({
                     value: `${showTmdbId}:${skey}`,
                     label: `${showLabel}  ${(sdata as any).name || `Season ${skey}`}`,

@@ -249,6 +249,7 @@ export default function TorrentPreview({
       {/* ── Metadata Source Overrides ── */}
       <InfoCards
         searchResult={searchResult}
+        episodeDataOverride={mergedResult.episode_data}
         onEpisodeDataChange={onEpisodeDataChange}
       />
 

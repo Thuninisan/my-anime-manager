@@ -4,6 +4,9 @@ import { searchBangumi } from '@/api/rssApi';
 
 interface Props {
   searchResult: any;
+  /** The current (merged) episode_data from the parent, including the user's
+   *  own additions.  Falls back to searchResult.episode_data when omitted. */
+  episodeDataOverride?: any;
   onEpisodeDataChange: (augmented: any) => void;
 }
 
@@ -12,9 +15,11 @@ interface Candidate {
   name: string;
 }
 
-export default function InfoCards({ searchResult, onEpisodeDataChange }: Props) {
+export default function InfoCards({ searchResult, episodeDataOverride, onEpisodeDataChange }: Props) {
   const searchResults = searchResult?.search_results || {};
-  const episodeData = searchResult?.episode_data || { tmdb: {}, bangumi: {} };
+  // Use the parent-merged data when available so the TMDB/Bangumi Match
+  // display reflects the user's own additions immediately.
+  const episodeData = episodeDataOverride ?? (searchResult?.episode_data || { tmdb: {}, bangumi: {} });
 
   // Collect unique TMDB / Bangumi entries from search_results
   const tmdbEntries = new Map<number, string>();
@@ -30,10 +35,15 @@ export default function InfoCards({ searchResult, onEpisodeDataChange }: Props) 
       );
     }
   }
-  // Also from episode_data (sequels / specials)
+  // Also from episode_data (sequels / specials / manually added).
+  // Manual additions store the show name under a `_name` sentinel key;
+  // auto-fetched data uses `.name` at the top level (same shape as Bangumi).
   for (const [idStr, data] of Object.entries(episodeData.tmdb || {})) {
     const id = Number(idStr);
-    if (!tmdbEntries.has(id)) tmdbEntries.set(id, (data as any)?.name || `ID ${id}`);
+    if (!tmdbEntries.has(id)) {
+      const label = (data as any)?._name || (data as any)?.name || `ID ${id}`;
+      tmdbEntries.set(id, label);
+    }
   }
   for (const [idStr, data] of Object.entries(episodeData.bangumi || {})) {
     const id = Number(idStr);
@@ -75,8 +85,12 @@ export default function InfoCards({ searchResult, onEpisodeDataChange }: Props) 
     setTmdbError('');
     try {
       const seasons = await fetchTmdbSeasonMap(id);
+      // Extract show-name sentinel injected by the backend so the TMDB
+      // Match display can show "中文名 (ID)" instead of "ID 83121 (83121)".
+      const showName: string = (seasons as any)._show_name;
+      const { _show_name: _, ...cleanSeasons } = seasons as any;
       const newTmdb = { ...episodeData.tmdb };
-      newTmdb[String(id)] = seasons;
+      newTmdb[String(id)] = { _name: showName || `TMDB ${id}`, ...cleanSeasons };
       onEpisodeDataChange({ ...episodeData, tmdb: newTmdb });
       setTmdbInput('');
     } catch (e: any) {

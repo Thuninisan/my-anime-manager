@@ -1646,15 +1646,16 @@ async def subscription_history(bangumi_id: int):
 
 
 @app.get("/api/rss/tmdb/{tmdb_id}/seasons")
-async def get_tmdb_seasons(tmdb_id: int) -> dict[str, SeasonInfo]:
+async def get_tmdb_seasons(tmdb_id: int) -> dict:
     """Fetch all TMDB seasons and episodes for a TV show.
 
     Calls build_season_episode_map to get every season's episode list,
     then converts to SeasonInfo / TmdbEpisodeInfo Pydantic models.
-    Returns an empty dict if TMDB has no data for this show.
+    Includes a ``_show_name`` sentinel key so the frontend can display
+    the show title (e.g. "xxx (83121)") without a second round-trip.
     """
     season_map = await tmdb_service.build_season_episode_map(tmdb_id)
-    result: dict[str, SeasonInfo] = {}
+    result: dict = {}
     for sk, sv in season_map.items():
         episodes = [
             TmdbEpisodeInfo(
@@ -1671,6 +1672,16 @@ async def get_tmdb_seasons(tmdb_id: int) -> dict[str, SeasonInfo]:
         result[str(sk)] = SeasonInfo(
             name=sv.get("name", f"Season {sk}"), episodes=episodes,
         )
+
+    # Attach show name so the frontend can display "中文名 (ID)"
+    try:
+        from .clients import tmdb as _tmdb
+        _detail_res = await _tmdb.get_tv_detail(tmdb_id)
+        _detail = _detail_res.json()
+        result["_show_name"] = _detail.get("name", str(tmdb_id))
+    except Exception:
+        result["_show_name"] = str(tmdb_id)
+
     return result
 
 
