@@ -960,9 +960,9 @@ async def _process_subscription(sub: dict):
         if await _download_item(item, bangumi_id, "primary", sub):
             new_downloads += 1
 
-    # 2. If primary had nothing new, try backup RSS
+    # 2. Always check backup RSS — it may have episodes the primary doesn't
     backup_url = sub.get("backup_rss_url", "")
-    if new_downloads == 0 and backup_url:
+    if backup_url:
         backup_tags = sub.get("backup_filter_tags") or filter_tags
         backup_exclude = sub.get("backup_exclude_patterns") or []
         backup_items = await _fetch_passed_items(
