@@ -353,7 +353,7 @@ export function computeMatches(data: any): MatchRow[] {
       src_season: pf.season,
       src_episode: pf.episode,
       bgm_entry: matchedBgmName || (searchEntry?.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
-      bgm_entry_id: matchedBgmId,
+      bgm_entry_id: matchedBgmId ?? searchEntry?.bangumi?.id ?? null,
       bgm_sort: bgmEp?.sort ?? null,
       bgm_ep_name: bgmEp?.name || '-',
       bgm_ep_name_cn: bgmEp?.name_cn || '',
@@ -557,11 +557,13 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
       const firstEp = sortedEps[0]?.epNum;
       setOverrides((prev) => {
         const existing = prev[rowIndex];
+        const initialRow = initialRows[rowIndex];
         return {
           ...prev,
           [rowIndex]: {
-            bgmEntryId: existing?.bgmEntryId ?? 0,
-            bgmEpSort: existing?.bgmEpSort ?? 0,
+            bgmEntryId: existing?.bgmEntryId ?? initialRow?.bgm_entry_id ?? 0,
+            bgmEpSort: existing?.bgmEpSort ?? initialRow?.bgm_sort ?? 0,
+            bgmEpId: existing?.bgmEpId ?? initialRow?.bgm_ep_id ?? undefined,
             tmdbSeason: season,
             tmdbEp: firstEp,
             tmdbShowId: tmdbShowId,
@@ -581,11 +583,13 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
     const firstEp = sortedEps[0]?.epNum;
     setOverrides((prev) => {
       const existing = prev[rowIndex];
+      const initialRow = initialRows[rowIndex];
       return {
         ...prev,
         [rowIndex]: {
-          bgmEntryId: existing?.bgmEntryId ?? 0,
-          bgmEpSort: existing?.bgmEpSort ?? 0,
+          bgmEntryId: existing?.bgmEntryId ?? initialRow?.bgm_entry_id ?? 0,
+          bgmEpSort: existing?.bgmEpSort ?? initialRow?.bgm_sort ?? 0,
+          bgmEpId: existing?.bgmEpId ?? initialRow?.bgm_ep_id ?? undefined,
           tmdbSeason: season,
           tmdbEp: firstEp,
         },
@@ -706,6 +710,13 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
         const sData = tmdbSeasons[String(ov.tmdbSeason)];
         const eData = sData?.episodes?.find(e => e.epNum === ov.tmdbEp);
         finalEpName = eData?.name || '-';
+      }
+
+      // When BGM→TMDB auto-match failed but user manually picked a season,
+      // still populate the season so the Ep dropdown can show episodes.
+      // (matched stays false until user picks a specific episode.)
+      if (finalSeason == null && ov.tmdbSeason != null) {
+        finalSeason = ov.tmdbSeason;
       }
 
       return applyManualMatched({
@@ -956,8 +967,21 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
               // Pre-compute TMDB episode options
               const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
               const selSeasonData = selSeasonKey ? rowTmdbSeasons[selSeasonKey] : null;
-              const tmdbEpOpts: TmdbEpOption[] = (selSeasonData?.episodes || [])
+              let tmdbEpOpts: TmdbEpOption[] = (selSeasonData?.episodes || [])
                 .sort((a, b) => a.epNum - b.epNum);
+
+              // Fallback: when no season is selected (auto-match failed), merge all
+              // episodes from all loaded TMDB seasons so the user can manually pick.
+              if (tmdbEpOpts.length === 0) {
+                for (const sdata of Object.values(rowTmdbSeasons)) {
+                  if (sdata?.episodes) {
+                    for (const ep of sdata.episodes) {
+                      tmdbEpOpts.push(ep);
+                    }
+                  }
+                }
+                tmdbEpOpts.sort((a, b) => a.epNum - b.epNum);
+              }
 
               return (
                 <MappingCard
@@ -1044,10 +1068,27 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
               const lookupTmdbId = ov?.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
               const lookupSeasons: Record<string, TmdbSeason> =
                 (lookupTmdbId && episodeData.tmdb?.[String(lookupTmdbId)]) || {};
+              // Merge all loaded TMDB entries as fallback (same as TV rows)
+              const spTmdbSeasons: Record<string, TmdbSeason> =
+                Object.keys(lookupSeasons).length > 0
+                  ? lookupSeasons
+                  : mergeAllTmdbSeasons(episodeData);
               const selSeasonKey = r.tmdb_season != null ? String(r.tmdb_season) : '';
-              const selSeasonData = selSeasonKey ? lookupSeasons[selSeasonKey] : null;
-              const tmdbEpOpts: TmdbEpOption[] = (selSeasonData?.episodes || [])
+              const selSeasonData = selSeasonKey ? spTmdbSeasons[selSeasonKey] : null;
+              let tmdbEpOpts: TmdbEpOption[] = (selSeasonData?.episodes || [])
                 .sort((a, b) => a.epNum - b.epNum);
+
+              // Fallback: when no season is selected, merge all episodes
+              if (tmdbEpOpts.length === 0) {
+                for (const sdata of Object.values(spTmdbSeasons)) {
+                  if (sdata?.episodes) {
+                    for (const ep of sdata.episodes) {
+                      tmdbEpOpts.push(ep);
+                    }
+                  }
+                }
+                tmdbEpOpts.sort((a, b) => a.epNum - b.epNum);
+              }
 
               return (
                 <MappingCard
