@@ -177,7 +177,7 @@ export default function InfoCards({ searchResult, episodeDataOverride, onEpisode
   };
 
   return (
-    <div className="mb-8 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl shadow-sm overflow-hidden">
+    <div className="mb-8 bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark rounded-xl shadow-sm">
       <div className="bg-slate-50 dark:bg-white/5 px-6 py-3 border-b border-border-light dark:border-border-dark flex justify-between items-center">
         <h3 className="font-bold text-sm">Metadata Source Overrides</h3>
         <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold uppercase">Manual Mapping</span>

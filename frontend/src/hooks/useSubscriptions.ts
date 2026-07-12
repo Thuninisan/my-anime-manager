@@ -45,10 +45,10 @@ export function useSubscriptions(): UseSubscriptionsReturn {
         backup_rss_url: existing?.backup_rss_url || existing?.rss_url || '',
         backup_subgroup_id: existing?.backup_subgroup_id || existing?.subgroup_id || 0,
         backup_subgroup_name: existing?.backup_subgroup_name || existing?.subgroup_name || '',
-        backup_filter_tags: existing?.backup_filter_tags || existing?.filter_tags || [],
+        backup_filter_tags: existing?.backup_filter_tags ?? existing?.filter_tags ?? [],
         download_path: existing?.download_path || '',
         exclude_patterns: excludes,
-        backup_exclude_patterns: existing?.backup_exclude_patterns || existing?.exclude_patterns || [],
+        backup_exclude_patterns: existing?.backup_exclude_patterns ?? existing?.exclude_patterns ?? [],
       };
     } else {
       // Preserve existing primary info: check primary fields first,
@@ -58,11 +58,11 @@ export function useSubscriptions(): UseSubscriptionsReturn {
         bangumi_id: result.bangumi_id,
         subgroup_id: existing?.subgroup_id || existing?.backup_subgroup_id || 0,
         subgroup_name: existing?.subgroup_name || existing?.backup_subgroup_name || '',
-        filter_tags: existing?.filter_tags || existing?.backup_filter_tags || [],
+        filter_tags: existing?.filter_tags ?? existing?.backup_filter_tags ?? [],
         backup_rss_url: group.rss_url, backup_subgroup_id: group.subgroup_id,
         backup_subgroup_name: group.name, backup_filter_tags: tags,
         download_path: existing?.download_path || '',
-        exclude_patterns: existing?.exclude_patterns || existing?.backup_exclude_patterns || [],
+        exclude_patterns: existing?.exclude_patterns ?? existing?.backup_exclude_patterns ?? [],
         backup_exclude_patterns: excludes,
       };
     }

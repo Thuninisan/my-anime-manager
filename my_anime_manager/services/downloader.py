@@ -963,7 +963,9 @@ async def _process_subscription(sub: dict):
     # 2. Always check backup RSS — it may have episodes the primary doesn't
     backup_url = sub.get("backup_rss_url", "")
     if backup_url:
-        backup_tags = sub.get("backup_filter_tags") or filter_tags
+        backup_tags = sub.get("backup_filter_tags")
+        if backup_tags is None:
+            backup_tags = filter_tags
         backup_exclude = sub.get("backup_exclude_patterns") or []
         backup_items = await _fetch_passed_items(
             backup_url, backup_tags, bangumi_id,

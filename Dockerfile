@@ -15,6 +15,7 @@ WORKDIR /app
 # Copy Python source and install
 COPY pyproject.toml ./
 COPY my_anime_manager/ ./my_anime_manager/
+COPY scripts/ ./scripts/
 RUN pip install --no-cache-dir .
 
 # Copy built frontend from stage 1
