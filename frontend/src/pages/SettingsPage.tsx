@@ -6,6 +6,7 @@ import GeneralConfigForm from '@/components/settings/GeneralConfigForm';
 import QbitConfigForm from '@/components/settings/QbitConfigForm';
 import RssToolsPanel from '@/components/settings/RssToolsPanel';
 import TorrentConfigForm from '@/components/settings/TorrentConfigForm';
+import UpdatePanel from '@/components/settings/UpdatePanel';
 import { useConfig } from '@/hooks/useConfig';
 
 /* Tab definitions */
@@ -14,6 +15,7 @@ const TABS = [
   { key: 'qbit', label: 'qBittorrent', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> },
   { key: 'tools', label: 'RSS Tools', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg> },
   { key: 'torrent', label: 'Torrent', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg> },
+  { key: 'updates', label: 'Updates', icon: <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg> },
 ] as const;
 
 export default function SettingsPage() {
@@ -105,6 +107,9 @@ export default function SettingsPage() {
             )}
             {tab === 'torrent' && (
               <TorrentConfigForm config={config} dirty={dirty} onChange={handleChange} />
+            )}
+            {tab === 'updates' && (
+              <UpdatePanel />
             )}
           </div>
         </div>

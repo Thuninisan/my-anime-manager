@@ -55,10 +55,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+from . import __version__
+
 app = FastAPI(
     title="My Anime Manager",
     description="TMDB + Bangumi 联动工具，为 Jellyfin 生成 NFO 元数据，支持 qBittorrent",
-    version="1.0.0",
+    version=__version__,
 )
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -84,6 +86,10 @@ app.add_middleware(
 
 _frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
 
+# ── Update check state ──
+_SOURCE_DIR = os.environ.get("MAM_SOURCE_DIR", "/app/source")
+_update_cache: dict = {"checked_at": None, "result": None}
+
 
 @app.on_event("startup")
 async def on_startup():
@@ -103,6 +109,39 @@ async def on_startup():
     if watch_dir:
         global _watch_task
         _watch_task = asyncio.create_task(_watch_worker(watch_dir))
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Gracefully stop all background workers before shutdown/update."""
+    global _watch_task, _scan_task
+    logger.info("Shutting down background workers...")
+
+    # Cancel watch worker
+    if _watch_task and not _watch_task.done():
+        _watch_task.cancel()
+        logger.info("Watch worker cancelled.")
+
+    # Cancel scan worker
+    if _scan_task and not _scan_task.done():
+        _scan_task.cancel()
+        logger.info("Scan worker cancelled.")
+
+    # Stop RSS downloader
+    try:
+        await asyncio.wait_for(downloader.stop(), timeout=10)
+        logger.info("RSS downloader stopped.")
+    except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
+        logger.warning("RSS downloader stop: %s", e)
+
+    # Cancel download monitor tasks
+    for info_hash, task in list(_download_tasks.items()):
+        if not task.done():
+            task.cancel()
+            logger.info("Download monitor cancelled: %s", info_hash[:8])
+    _download_tasks.clear()
+
+    logger.info("All workers stopped — safe to restart.")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -385,7 +424,7 @@ async def root():
 
     return {
         "service": "My Anime Manager",
-        "version": "1.0.0",
+        "version": __version__,
         "docs": "/docs",
         "watch": {
             "running": _watch_status["running"],
@@ -2211,6 +2250,80 @@ async def get_rss_settings():
 async def update_rss_settings(changes: dict[str, object]):
     """Update global RSS settings."""
     return data.update_rss_settings(changes)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Update check & apply — git pull + process restart
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/update/check")
+async def check_update():
+    """Compare local git HEAD vs remote origin. Results cached for 1 hour."""
+    now = datetime.utcnow()
+    if _update_cache["checked_at"] and _update_cache["result"]:
+        if (now - _update_cache["checked_at"]).total_seconds() < 3600:
+            return _update_cache["result"]
+
+    try:
+        subprocess.run(
+            ["git", "-C", _SOURCE_DIR, "fetch", "origin", "main"],
+            capture_output=True, text=True, timeout=30, check=True,
+        )
+        local = subprocess.run(
+            ["git", "-C", _SOURCE_DIR, "rev-parse", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        )
+        remote = subprocess.run(
+            ["git", "-C", _SOURCE_DIR, "rev-parse", "origin/main"],
+            capture_output=True, text=True, timeout=5,
+        )
+        local_sha = local.stdout.strip()[:7]
+        remote_sha = remote.stdout.strip()[:7]
+        has_update = local_sha != remote_sha
+
+        # Also get the latest tag for display
+        try:
+            tag_result = subprocess.run(
+                ["git", "-C", _SOURCE_DIR, "describe", "--tags", "--abbrev=0", "origin/main"],
+                capture_output=True, text=True, timeout=5,
+            )
+            latest_tag = tag_result.stdout.strip()
+        except Exception:
+            latest_tag = ""
+
+        result = {
+            "update_available": has_update,
+            "current_sha": local_sha,
+            "latest_sha": remote_sha,
+            "current_version": __version__,
+            "latest_tag": latest_tag,
+        }
+        _update_cache["checked_at"] = now
+        _update_cache["result"] = result
+        return result
+    except subprocess.CalledProcessError as e:
+        logger.warning("Update check git error: %s", e.stderr)
+        return {"update_available": False, "error": f"Git error: {e.stderr.strip()[:200]}", "current_version": __version__}
+    except Exception as e:
+        logger.warning("Update check failed: %s", e)
+        return {"update_available": False, "error": str(e), "current_version": __version__}
+
+
+@app.post("/api/update/apply")
+async def apply_update():
+    """Gracefully shutdown workers, then exit with code 42.
+
+    Exit code 42 signals the entrypoint script to re-run the update loop:
+    git pull → pip install → npm build → restart uvicorn.
+    The Docker container itself does NOT restart.
+    """
+    async def _do_restart():
+        await asyncio.sleep(1)  # Let HTTP response flush to the client
+        logger.info("Update triggered — shutting down for process restart (exit 42)...")
+        os._exit(42)
+
+    asyncio.create_task(_do_restart())
+    return {"ok": True, "message": "Pulling latest code and restarting application..."}
 
 
 # ═══════════════════════════════════════════════════════════════════════

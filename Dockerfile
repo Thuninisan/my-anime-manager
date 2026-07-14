@@ -1,25 +1,29 @@
-# Stage 1: Build React frontend
-FROM node:20-alpine AS frontend-builder
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
-
-# Stage 2: Python backend + serve frontend
 FROM python:3.12-alpine
+
+# Install git + Node.js for hot-update capability (git clone/pull + frontend rebuild)
+RUN apk add --no-cache git nodejs npm
+
 ENV PYTHONIOENCODING=utf-8
 ENV MAM_DATA_DIR=/app/data
+ENV MAM_SOURCE_DIR=/app/source
+ENV MAM_REPO_URL=https://github.com/karlkono/my-anime-manager.git
+ENV MAM_BRANCH=main
 WORKDIR /app
 
-# Copy Python source and install
+# ── Pre-install Python dependencies (layer cache) ──
+# Install the package to pull in all deps, then uninstall so the
+# entrypoint script can pip install -e from the git-cloned source.
 COPY pyproject.toml ./
-COPY my_anime_manager/ ./my_anime_manager/
-COPY scripts/ ./scripts/
-RUN pip install --no-cache-dir .
+COPY my_anime_manager/__init__.py ./my_anime_manager/__init__.py
+RUN pip install --no-cache-dir . && pip uninstall -y my-anime-manager
 
-# Copy built frontend from stage 1
-COPY --from=frontend-builder /app/frontend/dist ./frontend/dist/
+# ── Entrypoint script ──
+COPY docker-entrypoint.sh /
+RUN chmod +x /docker-entrypoint.sh
 
-ENTRYPOINT ["uvicorn", "my_anime_manager.api:app"]
-CMD ["--host", "0.0.0.0", "--port", "8000"]
+# ── Ensure writable directories exist ──
+RUN mkdir -p /app/data /app/source /app/frontend
+
+EXPOSE 8000
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD []
