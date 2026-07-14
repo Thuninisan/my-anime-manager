@@ -6,7 +6,7 @@ RUN apk add --no-cache git nodejs npm
 ENV PYTHONIOENCODING=utf-8
 ENV MAM_DATA_DIR=/app/data
 ENV MAM_SOURCE_DIR=/app/source
-ENV MAM_REPO_URL=https://github.com/karlkono/my-anime-manager.git
+ENV MAM_REPO_URL=https://github.com/Thuninisan/my-anime-manager.git
 ENV MAM_BRANCH=main
 WORKDIR /app
 
