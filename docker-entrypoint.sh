@@ -1,7 +1,10 @@
 #!/bin/sh
 set -e
 
-REPO_URL="${MAM_REPO_URL:-https://github.com/karlkono/my-anime-manager.git}"
+# Prevent git from prompting for credentials (no TTY in container)
+export GIT_TERMINAL_PROMPT=0
+
+REPO_URL="${MAM_REPO_URL:-https://github.com/Thuninisan/my-anime-manager.git}"
 SOURCE_DIR="${MAM_SOURCE_DIR:-/app/source}"
 BRANCH="${MAM_BRANCH:-main}"
 DATA_DIR="${MAM_DATA_DIR:-/app/data}"

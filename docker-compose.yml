@@ -13,7 +13,7 @@ services:
       - PROXY_HOST=改成你的代理IP或不填
       - PROXY_PORT=7890
       - WATCH_DIR=/torrents
-      - MAM_REPO_URL=https://github.com/karlkono/my-anime-manager.git
+      - MAM_REPO_URL=https://github.com/Thuninisan/my-anime-manager.git
       - MAM_BRANCH=main
     volumes:
       - mam-source:/app/source
