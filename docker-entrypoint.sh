@@ -27,8 +27,16 @@ while true; do
         export HTTPS_PROXY="$PROXY_URL"
         export http_proxy="$PROXY_URL"
         export https_proxy="$PROXY_URL"
-        export NO_PROXY="localhost,127.0.0.1,.local"
-        export no_proxy="$NO_PROXY"
+        # Default: bypass proxy for localhost + common LAN/Docker CIDR ranges.
+        # Set NO_PROXY env var to append custom hosts (comma-separated).
+        _DEFAULT_NO_PROXY="localhost,127.0.0.1,.local,192.168.0.0/16,10.0.0.0/8,172.16.0.0/12"
+        if [ -n "$NO_PROXY" ]; then
+            export NO_PROXY="${NO_PROXY},${_DEFAULT_NO_PROXY}"
+            export no_proxy="$NO_PROXY"
+        else
+            export NO_PROXY="$_DEFAULT_NO_PROXY"
+            export no_proxy="$_DEFAULT_NO_PROXY"
+        fi
 
         git config --global http.proxy "$PROXY_URL" 2>/dev/null || true
         git config --global https.proxy "$PROXY_URL" 2>/dev/null || true
