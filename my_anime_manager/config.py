@@ -15,10 +15,11 @@ Sensitive keys (password, api key) are masked in get_all().
 import os
 from typing import Any
 
-_SENSITIVE_KEYS = {"TMDB_API_KEY", "QBITTORRENT_PASSWORD"}
+_SENSITIVE_KEYS = {"TMDB_API_KEY", "QBITTORRENT_PASSWORD", "TVDB_API_KEY"}
 
 _DEFAULTS: dict[str, Any] = {
     "TMDB_API_KEY": "c5b546796de52125f23b47e0dff47add",
+    "TVDB_API_KEY": "",
     "BANGUMI_UA": "JellyfinTmdbHelper/1.0 (https://github.com)",
     "API_DELAY_MS": 600,
     "PROXY_HOST": "192.168.18.55",

@@ -164,6 +164,7 @@ export interface DownloadHistoryResponse {
 /* Config */
 export interface AppConfig {
   TMDB_API_KEY: string;
+  TVDB_API_KEY: string;
   BANGUMI_UA: string;
   API_DELAY_MS: number;
   PROXY_HOST: string;

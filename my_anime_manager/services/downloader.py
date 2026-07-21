@@ -17,7 +17,7 @@ from ..clients.qbittorrent import (
 from ..clients import bangumi as bgm_client
 from ..clients.bangumi import get_episodes as bgm_get_episodes, get_subject
 from ..data import (
-    get_tmdb_id, get_tmdb_season, get_bangumi_name, set_tmdb_id as data_set_tmdb_id,
+    get_tmdb_id, get_tmdb_season, get_tvdb_id, get_tvdb_season, get_bangumi_name, set_tmdb_id as data_set_tmdb_id,
     list_subscriptions, mark_downloaded, get_episode_source,
     get_episode_pub_date, remove_episode_record,
     get_all_episodes,
@@ -472,6 +472,10 @@ async def enrich_subscription(
         tmdb_id = get_tmdb_id(bangumi_id)
         tmdb_season = get_tmdb_season(bangumi_id)
 
+        # 4a. TVDB info from bangumi_mikan_map.json
+        tvdb_id = get_tvdb_id(bangumi_id)
+        tvdb_season = get_tvdb_season(bangumi_id)
+
         # ── Tier-1 fallback: auto-infer missing TMDB ID ──
         if not tmdb_id:
             _emit("🔍 TMDB ID 缺失，启动自动推断...")
@@ -559,6 +563,8 @@ async def enrich_subscription(
             "bgm_subject_name": bgm_subject_name,
             "tmdb_id": tmdb_id or 0,
             "tmdb_season": tmdb_season,
+            "tvdb_id": tvdb_id or 0,
+            "tvdb_season": tvdb_season,
             "tmdb_ep_offset": tmdb_ep_offset,
             "bgm_rating": bgm_rating,
             "bgm_rating_total": bgm_rating_total,

@@ -254,6 +254,8 @@ class SubscriptionOut(BaseModel):
     bgm_rating_total: int = 0
     tmdb_id: int = 0
     tmdb_season: int | None = None
+    tvdb_id: int = 0
+    tvdb_season: int | None = None
     # Poster image URL (Bangumi CDN URL, frontend loads directly)
     poster_url: str = ""
     # Downloaded episode count (from download_history.json)
@@ -1346,7 +1348,7 @@ async def create_subscription(body: SubscriptionIn):
     all_subs = data.list_subscriptions()
     for s in all_subs:
         if s["bangumi_id"] == body.bangumi_id and "bgm_season" in s:
-            cached = {k: s[k] for k in ("bgm_season", "bgm_sortrange", "tmdb_id", "tmdb_season", "series_name", "bgm_rating", "bgm_rating_total") if k in s}
+            cached = {k: s[k] for k in ("bgm_season", "bgm_sortrange", "tmdb_id", "tmdb_season", "tvdb_id", "tvdb_season", "series_name", "bgm_rating", "bgm_rating_total") if k in s}
             data.update_subscription(body.bangumi_id, cached)
             sub.update(cached)
             break
@@ -1383,7 +1385,7 @@ async def manual_subscribe(body: ManualSubscribeIn):
     return SubscriptionOut(**sub)
 
 
-ENRICH_FIELDS = ("bgm_season", "bgm_sortrange", "series_name", "tmdb_id", "tmdb_season", "bgm_rating", "bgm_rating_total")
+ENRICH_FIELDS = ("bgm_season", "bgm_sortrange", "series_name", "tmdb_id", "tmdb_season", "tvdb_id", "tvdb_season", "bgm_rating", "bgm_rating_total")
 
 
 def _get_cached_enrichment(bangumi_id: int) -> dict | None:

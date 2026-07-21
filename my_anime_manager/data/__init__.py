@@ -141,6 +141,78 @@ def set_tmdb_id(
     return True
 
 
+def get_anidb_id(bangumi_id: int) -> int | None:
+    """Get AniDB ID from the Bangumi mapping entry."""
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    entry = _bangumi_mikan_map.get(bangumi_id)
+    return entry.get("anidb_id") if entry else None
+
+
+def get_tvdb_id(bangumi_id: int) -> int | None:
+    """Get TVDB series ID from the Bangumi mapping entry."""
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    entry = _bangumi_mikan_map.get(bangumi_id)
+    return entry.get("tvdb_id") if entry else None
+
+
+def get_tvdb_season(bangumi_id: int) -> int | None:
+    """Get TVDB season number from the Bangumi mapping entry.
+
+    Values follow Kometa conventions: 1+ for normal seasons,
+    0 for specials, -1 for movies.
+    """
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    entry = _bangumi_mikan_map.get(bangumi_id)
+    return entry.get("tvdb_season") if entry else None
+
+
+def set_tvdb_id(
+    bangumi_id: int, tvdb_id: int, tvdb_season: int | None = None
+) -> bool:
+    """Set TVDB ID (and optionally season) for a Bangumi entry.
+
+    Updates the in-memory map and persists to JSON.  Enables future
+    runtime enrichment (e.g., manual override or auto-inference).
+
+    Returns False if the Bangumi entry is not found in the map.
+    """
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    entry = _bangumi_mikan_map.get(bangumi_id)
+    if entry is None:
+        return False
+    entry["tvdb_id"] = tvdb_id
+    if tvdb_season is not None:
+        entry["tvdb_season"] = tvdb_season
+    _save_map()
+    return True
+
+
+def get_bangumi_id_by_tvdb_id(tvdb_id: int) -> int | None:
+    """Reverse lookup: TVDB ID → Bangumi ID.
+
+    Args:
+        tvdb_id: TVDB series ID.
+
+    Returns:
+        Bangumi ID, or None if not found.
+    """
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    for bgm_id_str, entry in _bangumi_mikan_map.items():
+        if entry.get("tvdb_id") == tvdb_id:
+            return int(bgm_id_str)
+    return None
+
+
 def get_bangumi_id_by_tmdb_id(tmdb_id: int) -> int | None:
     """Reverse lookup: TMDB ID → Bangumi ID.
 

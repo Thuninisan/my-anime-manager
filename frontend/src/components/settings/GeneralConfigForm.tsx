@@ -63,6 +63,15 @@ export default function GeneralConfigForm({ config, dirty, onChange }: Props) {
               onChange={e => onChange('TMDB_API_KEY', e.target.value)}
             />
           </FieldRow>
+          <FieldRow label="TVDB API Key" hint="Used for fetching TVDB series metadata.">
+            <input
+              className={fieldClass('TVDB_API_KEY')}
+              type="password"
+              value={val('TVDB_API_KEY') === '***' ? '' : val('TVDB_API_KEY')}
+              placeholder={val('TVDB_API_KEY') === '***' ? '••••••••••••••••' : 'your TVDB API key'}
+              onChange={e => onChange('TVDB_API_KEY', e.target.value)}
+            />
+          </FieldRow>
           <div className="grid grid-cols-2 gap-5">
             <FieldRow label="Bangumi User-Agent">
               <input
