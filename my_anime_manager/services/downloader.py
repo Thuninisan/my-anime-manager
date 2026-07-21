@@ -619,6 +619,7 @@ async def write_episode_files(
     studios: list[str] | None = None,
     rating: float = 0.0,
     output_dir: str = ".",
+    thumb_source: str = "tmdb",
 ) -> dict:
     """Download episode thumbnail and generate ``.nfo`` — no API calls.
 
@@ -651,9 +652,15 @@ async def write_episode_files(
     still = tmdb_ep.get("still_path", "")
     if still:
         try:
-            thumb_path = await download_episode_thumb(
-                still, output_dir, thumb_base,
-            ) or ""
+            if thumb_source == "tvdb":
+                from .image_downloader import download_tvdb_episode_thumb
+                thumb_path = await download_tvdb_episode_thumb(
+                    still, output_dir, thumb_base,
+                ) or ""
+            else:
+                thumb_path = await download_episode_thumb(
+                    still, output_dir, thumb_base,
+                ) or ""
         except Exception:
             logger.exception("thumbnail download failed (non-fatal)")
 
@@ -718,6 +725,8 @@ async def generate_metadata(
     bgm_season: int = 1,
     tmdb_season: int | None = None,
     tmdb_ep_offset: int = 0,
+    tvdb_id: int = 0,
+    tvdb_season: int | None = None,
     base_path: str = "",
     sub_path: str = "",
     bgm_subject_name: str = "",
@@ -728,8 +737,6 @@ async def generate_metadata(
     ``/Media/番剧/冰之城墙/Season 1``).  The show directory is the
     parent of the season directory.
     """
-    from ..clients.tmdb import get_season_detail as tmdb_get_season
-
     season_dir = Path(base_path) / sub_path if base_path else Path(config.QBITTORRENT_SAVE_PATH) / show_name / f"Season {bgm_season}"
     show_dir = season_dir.parent
 
@@ -739,87 +746,163 @@ async def generate_metadata(
     override_tmdb_ep = overrides.get("tmdb_ep")       # None if not set
     override_tmdb_season = overrides.get("tmdb_season")  # None if not set
 
-    # ── TMDB: fetch the single target season ──────────────────────
-    target_tmdb_season = override_tmdb_season or tmdb_season or 1
-    # Apply episode offset: when TMDB resets numbering per season but
-    # Bangumi sort continues across seasons (e.g. Dorohedoro S2:
-    # sort=13 → target_ep=1 with offset=12)
+    # ── TVDB: fetch episode data ───────────────────────────────────
     target_ep_num = (override_tmdb_ep or sort) - tmdb_ep_offset
     if target_ep_num < 1:
         target_ep_num = 1
-    logger.info("fetching TMDB S%d E%d (tmdb_id=%d, offset=%d)",
-                target_tmdb_season, target_ep_num, tmdb_id, tmdb_ep_offset)
 
-    # Fetch ja first to capture the Japanese original episode name
-    ja_name = ""
-    try:
-        ja_resp = await tmdb_get_season(tmdb_id, target_tmdb_season, language="ja")
-        ja_data = ja_resp.json()
-        for ep in (ja_data.get("episodes") or []):
-            if ep.get("episode_number") == target_ep_num:
-                ja_name = ep.get("name", "")
-                break
-    except Exception:
-        logger.warning("TMDB ja season fetch failed, original name will be empty")
-
-    # Fetch zh-CN for Chinese NFO fields (title, plot, cast)
-    try:
-        resp = await tmdb_get_season(tmdb_id, target_tmdb_season, language="zh-CN")
-        season_data = resp.json()
-    except Exception:
-        logger.exception("TMDB season API failed")
-        return False
-
-    # Build normalised tmdb_ep dict from the matching episode
-    tmdb_ep = None
+    tvdb_ep_data = None
+    tvdb_ep_id = 0
     ep_rating = 0.0
-    for ep in (season_data.get("episodes") or []):
-        if ep.get("episode_number") == target_ep_num:
-            tmdb_ep = {
-                "name": ep.get("name", ""),
-                "original_name": ja_name or ep.get("name", ""),
-                "overview": ep.get("overview", ""),
-                "air_date": ep.get("air_date", ""),
-                "runtime": ep.get("runtime", 0),
-                "tmdb_id": ep["id"],
-                "still_path": ep.get("still_path", ""),
-                "directors": [c["name"] for c in ep.get("crew", []) if c.get("job") == "Director"],
-                "writers": [c["name"] for c in ep.get("crew", []) if c.get("job") == "Writer"],
-                "guest_stars": [
-                    {"name": gs["name"], "character": gs.get("character", "")}
-                    for gs in ep.get("guest_stars", [])
-                ],
-            }
-            ep_rating = ep.get("vote_average", 0) or 0
-            break
+    if tvdb_id:
+        try:
+            from ..clients.tvdb import (
+                get_series_extended as tvdb_get_series_extended,
+                get_season_extended as tvdb_get_season_extended,
+                get_episode_extended as tvdb_get_ep_extended,
+            )
 
-    if not tmdb_ep:
-        logger.warning("TMDB S%d missing episode sort=%d, skipping NFO", target_tmdb_season, sort)
-        return False
+            target_tvdb_season = tvdb_season or 1
+            logger.info(
+                "fetching TVDB series=%d season=%d ep=%d",
+                tvdb_id, target_tvdb_season, target_ep_num,
+            )
 
-    # ── Fetch full episode credits for main voice cast ──
-    # The /season/{n} endpoint only returns guest stars; the /credits
-    # endpoint includes the main cast (voice actors).
-    from ..clients.tmdb import get_episode_credits as tmdb_get_ep_credits
-    actors: list[dict] = list(tmdb_ep.get("guest_stars", []))
-    try:
-        cred_resp = await tmdb_get_ep_credits(
-            tmdb_id, target_tmdb_season, target_ep_num, language="zh-CN",
-        )
-        cred = cred_resp.json()
-        cast = cred.get("cast", [])
-        if cast:
-            actors = [
-                {"name": c["name"], "character": c.get("character", "")}
-                for c in cast
-            ]
-            # Also append actual guest stars if any
-            for gs in cred.get("guest_stars", []):
-                actors.append(
-                    {"name": gs["name"], "character": gs.get("character", "")}
-                )
-    except Exception:
-        logger.warning("episode credits fetch failed, falling back to guest_stars")
+            # Step 1: Get series extended → find season ID
+            series_resp = await tvdb_get_series_extended(tvdb_id)
+            series_data = series_resp.json().get("data", series_resp.json())
+            season_id = None
+            for s in series_data.get("seasons", []):
+                if s.get("number") == target_tvdb_season:
+                    season_id = s.get("id")
+                    break
+            if not season_id and series_data.get("seasons"):
+                # Fallback: use first season
+                season_id = series_data["seasons"][0].get("id")
+
+            if season_id:
+                # Step 2: Get season extended → find target episode
+                season_resp = await tvdb_get_season_extended(season_id)
+                season_info = season_resp.json().get("data", season_resp.json())
+                for ep in season_info.get("episodes", []):
+                    if ep.get("number") == target_ep_num:
+                        tvdb_ep_id = ep.get("id")
+                        tvdb_ep_data = {
+                            "name": ep.get("name", ""),
+                            "original_name": ep.get("name", ""),
+                            "overview": ep.get("overview", ""),
+                            "air_date": ep.get("airDate") or ep.get("aired", ""),
+                            "runtime": ep.get("runtime", 0),
+                            "tmdb_id": tvdb_ep_id,  # reuse key name for compat
+                            "still_path": ep.get("image", ""),
+                            "directors": [],
+                            "writers": [],
+                            "guest_stars": [],
+                        }
+                        ep_rating = ep.get("siteRating", 0) or 0
+                        break
+
+                # Step 3: Get episode extended for full credits
+                if tvdb_ep_id:
+                    try:
+                        ep_resp = await tvdb_get_ep_extended(tvdb_ep_id)
+                        ep_detail = ep_resp.json().get("data", ep_resp.json())
+                        tvdb_ep_data["directors"] = ep_detail.get("directors", []) or []
+                        tvdb_ep_data["writers"] = ep_detail.get("writers", []) or []
+                        tvdb_ep_data["guest_stars"] = [
+                            {"name": g, "character": ""}
+                            for g in (ep_detail.get("guestStars", []) or [])
+                        ]
+                        # Also add characters if available (voice actors)
+                        characters = ep_detail.get("characters", []) or []
+                        if characters:
+                            tvdb_ep_data["guest_stars"] = [
+                                {"name": c.get("personName", c.get("name", "")),
+                                 "character": c.get("name", "")}
+                                for c in characters
+                            ]
+                    except Exception:
+                        logger.warning("TVDB episode extended fetch failed, using base data")
+        except Exception:
+            logger.exception("TVDB episode fetch failed")
+
+    actors: list[dict] = []
+    if tvdb_ep_data:
+        tmdb_ep = tvdb_ep_data
+        actors = list(tmdb_ep.get("guest_stars", []))
+    else:
+        # ── Fallback: TMDB episode fetch ──────────────────────────
+        from ..clients.tmdb import get_season_detail as tmdb_get_season
+
+        target_tmdb_season = override_tmdb_season or tmdb_season or 1
+        logger.info("TVDB not available, falling back to TMDB S%d E%d (tmdb_id=%d)",
+                    target_tmdb_season, target_ep_num, tmdb_id)
+
+        # Fetch ja first for original episode name
+        ja_name = ""
+        try:
+            ja_resp = await tmdb_get_season(tmdb_id, target_tmdb_season, language="ja")
+            ja_data = ja_resp.json()
+            for ep in (ja_data.get("episodes") or []):
+                if ep.get("episode_number") == target_ep_num:
+                    ja_name = ep.get("name", "")
+                    break
+        except Exception:
+            logger.warning("TMDB ja season fetch failed")
+
+        try:
+            resp = await tmdb_get_season(tmdb_id, target_tmdb_season, language="zh-CN")
+            season_data = resp.json()
+        except Exception:
+            logger.exception("TMDB season API failed")
+            return False
+
+        tmdb_ep = None
+        for ep in (season_data.get("episodes") or []):
+            if ep.get("episode_number") == target_ep_num:
+                tmdb_ep = {
+                    "name": ep.get("name", ""),
+                    "original_name": ja_name or ep.get("name", ""),
+                    "overview": ep.get("overview", ""),
+                    "air_date": ep.get("air_date", ""),
+                    "runtime": ep.get("runtime", 0),
+                    "tmdb_id": ep["id"],
+                    "still_path": ep.get("still_path", ""),
+                    "directors": [c["name"] for c in ep.get("crew", []) if c.get("job") == "Director"],
+                    "writers": [c["name"] for c in ep.get("crew", []) if c.get("job") == "Writer"],
+                    "guest_stars": [
+                        {"name": gs["name"], "character": gs.get("character", "")}
+                        for gs in ep.get("guest_stars", [])
+                    ],
+                }
+                ep_rating = ep.get("vote_average", 0) or 0
+                break
+
+        if not tmdb_ep:
+            logger.warning("TMDB S%d missing episode sort=%d, skipping NFO", target_tmdb_season, sort)
+            return False
+
+        actors = list(tmdb_ep.get("guest_stars", []))
+
+        # Fetch full episode credits for main voice cast
+        from ..clients.tmdb import get_episode_credits as tmdb_get_ep_credits
+        try:
+            cred_resp = await tmdb_get_ep_credits(
+                tmdb_id, target_tmdb_season, target_ep_num, language="zh-CN",
+            )
+            cred = cred_resp.json()
+            cast = cred.get("cast", [])
+            if cast:
+                actors = [
+                    {"name": c["name"], "character": c.get("character", "")}
+                    for c in cast
+                ]
+                for gs in cred.get("guest_stars", []):
+                    actors.append(
+                        {"name": gs["name"], "character": gs.get("character", "")}
+                    )
+        except Exception:
+            logger.warning("episode credits fetch failed, falling back to guest_stars")
 
     # ── Season directory ──────────────────────────────────────────
     season_dir.mkdir(parents=True, exist_ok=True)
@@ -842,6 +925,7 @@ async def generate_metadata(
         bangumi_subject_name=bgm_subject_name or show_name,
         rating=ep_rating,
         output_dir=str(season_dir),
+        thumb_source="tvdb" if tvdb_id and tvdb_ep_data else "tmdb",
     )
     logger.info("episode NFO: %s", result["nfo_path"])
 
@@ -861,6 +945,7 @@ async def generate_metadata(
                 rating=detail.get("vote_average", 0),
                 status=detail.get("status", ""),
                 output_dir=str(show_dir),
+                tvdb_id=tvdb_id,
             )
             logger.info("tvshow.nfo generated")
             await download_show_images(tmdb_id, str(show_dir))
@@ -871,15 +956,43 @@ async def generate_metadata(
     season_nfo = season_dir / "season.nfo"
     if not season_nfo.exists():
         try:
+            season_title = show_name
+            season_plot = ""
+            season_premiered = ""
+            season_poster_url = None
+
+            if tvdb_id:
+                # Fetch TVDB series data for season name and plot
+                from ..clients.tvdb import (
+                    get_series_extended as tvdb_get_series_extended,
+                )
+                try:
+                    series_resp = await tvdb_get_series_extended(tvdb_id)
+                    series_data = series_resp.json().get("data", series_resp.json())
+                    season_plot = series_data.get("overview", "")
+                    season_premiered = series_data.get("firstAired", "")
+                    # Find season name
+                    target_tvdb_season = tvdb_season or 1
+                    for s in series_data.get("seasons", []):
+                        if s.get("number") == target_tvdb_season:
+                            s_name = s.get("name", "")
+                            if s_name:
+                                season_title = s_name
+                            break
+                except Exception:
+                    logger.warning("TVDB season fetch failed for season.nfo")
+
+            # Still download Bangumi poster
             subject = await get_subject(bgm_subject_id)
             poster = await download_season_poster(subject, str(show_dir), bgm_season)
             if poster:
                 logger.info("Season %d poster downloaded", bgm_season)
+
             generate_season_nfo(
-                title=subject.get("name_cn") or subject.get("name", ""),
+                title=season_title,
                 original_title=subject.get("name", ""),
-                plot=subject.get("summary", ""),
-                premiered=subject.get("date", ""),
+                plot=season_plot or subject.get("summary", ""),
+                premiered=season_premiered or subject.get("date", ""),
                 season_number=bgm_season,
                 bangumi_id=bgm_subject_id,
                 output_dir=str(season_dir),
@@ -1171,6 +1284,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
 
     bgm_subject_id = bangumi_id
     tmdb_id = get_tmdb_id(bangumi_id)
+    tvdb_id = get_tvdb_id(bangumi_id)
 
     # ── Ensure subscription has enrichment fields ──────────────────
     bgm_season = sub.get("bgm_season")
@@ -1187,9 +1301,11 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
 
     bgm_season = sub.get("bgm_season", 1)
     tmdb_season = sub.get("tmdb_season")
-    # Re-read tmdb_id: enrichment may have just persisted it
+    # Re-read tmdb_id/tvdb_id: enrichment may have just persisted them
     if not tmdb_id:
         tmdb_id = get_tmdb_id(bangumi_id) or sub.get("tmdb_id") or 0
+    if not tvdb_id:
+        tvdb_id = get_tvdb_id(bangumi_id) or sub.get("tvdb_id") or 0
 
     # ── Match RSS episode to Bangumi sort ──────────────────────────
     # Prefer the sort already assigned by _fetch_passed_items (sequential
@@ -1201,10 +1317,10 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     if sort != rss_ep_num:
         print(f"         📐 rss_ep={rss_ep_num} → sort={sort}")
 
-    # ⛔ Guard: cannot generate NFO without TMDB mapping
-    if not tmdb_id:
-        print(f"         ⛔ TMDB ID 缺失，无法生成 NFO，跳过下载")
-        print(f"         💡 请在订阅卡片中手动设置 TMDB ID")
+    # ⛔ Guard: need at least one metadata source
+    if not tmdb_id and not tvdb_id:
+        print(f"         ⛔ TMDB/TVDB ID 均缺失，无法生成 NFO，跳过下载")
+        print(f"         💡 请在订阅卡片中手动设置 TMDB 或 TVDB ID")
         increment_fail_count(bangumi_id, sort)
         return False
 
@@ -1287,7 +1403,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
         Path(tmp_path).unlink(missing_ok=True)
 
     # ── Generate metadata + rename ─────────────────────────────────
-    if tmdb_id:
+    if tmdb_id or tvdb_id:
         try:
             from ..clients.qbittorrent import get_torrent_files
             files = await get_torrent_files(qb, info_hash)
@@ -1299,6 +1415,8 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
                 bgm_season=bgm_season,
                 tmdb_season=tmdb_season,
                 tmdb_ep_offset=sub.get("tmdb_ep_offset", 0),
+                tvdb_id=tvdb_id or sub.get("tvdb_id") or 0,
+                tvdb_season=sub.get("tvdb_season"),
                 base_path=rss_base,
                 sub_path=sub_path,
                 bgm_subject_name=bgm_subject_name,

@@ -601,6 +601,7 @@ async def generate_metadata_collection(
         rating=tvshow.get("rating", 0),
         status=tvshow.get("status", ""),
         output_dir=output_root,
+        tvdb_id=tvshow.get("tvdb_id", 0),
     )
     print(f"   ✅ tvshow.nfo: {nfo_path}")
     summary["nfoGenerated"] += 1

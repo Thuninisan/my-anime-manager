@@ -57,6 +57,7 @@ def generate_episode_nfo(
     studios: list[str] | None = None,
     rating: float = 0.0,
     output_dir: str = ".",
+    tvdb_ep_id: int = 0,
 ) -> str:
     """Generate an episode NFO file.
 
@@ -146,7 +147,7 @@ def generate_episode_nfo(
   <premiered>{tmdb_ep_air_date or ''}</premiered>
   <runtime>{tmdb_ep_runtime or ''}</runtime>
 {rating_tag + chr(10) if rating_tag else ''}{director_tags + chr(10) if director_tags else ''}{credits_tags + chr(10) if credits_tags else ''}{actor_tags + chr(10) if actor_tags else ''}{studio_tags + chr(10) if studio_tags else ''}{thumb_tag + chr(10) if thumb_tag else ''}  <uniqueid type="tmdb" default="true">{tmdb_ep_id}</uniqueid>
-</episodedetails>
+{f'  <uniqueid type="tvdb">{tvdb_ep_id}</uniqueid>' + chr(10) if tvdb_ep_id else ''}</episodedetails>
 """
     file_path.write_text(xml, encoding="utf-8")
     return str(file_path)
@@ -163,6 +164,7 @@ def generate_tv_show_nfo(
     rating: float = 0.0,
     status: str = "",
     output_dir: str = ".",
+    tvdb_id: int = 0,
 ) -> str:
     """Generate a tvshow.nfo file (data from TMDB).
 
@@ -205,7 +207,7 @@ def generate_tv_show_nfo(
   <premiered>{premiered or ''}</premiered>
   <year>{year}</year>
 {genre_tags + chr(10) if genre_tags else ''}{studio_tags + chr(10) if studio_tags else ''}{rating_tag + chr(10) if rating_tag else ''}{status_tag + chr(10) if status_tag else ''}  <uniqueid type="tmdb" default="true">{tmdb_id}</uniqueid>
-</tvshow>
+{f'  <uniqueid type="tvdb">{tvdb_id}</uniqueid>' + chr(10) if tvdb_id else ''}</tvshow>
 """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)

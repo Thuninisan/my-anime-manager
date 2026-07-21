@@ -109,6 +109,36 @@ async def download_episode_thumb(
     return await _download_image(url, file_path)
 
 
+TVDB_ARTWORK_BASE = "https://artworks.thetvdb.com/banners"
+
+
+async def download_tvdb_episode_thumb(
+    image_path: str,
+    output_dir: str,
+    base_filename: str,
+) -> str | None:
+    """Download episode thumbnail from TVDB artwork CDN.
+
+    Args:
+        image_path: TVDB episode image (full URL or relative path like
+                    ``banners/v4/episode/123/screencap/abc.jpg``)
+        output_dir: Output directory
+        base_filename: Base filename without extension
+
+    Returns:
+        Saved file path or None
+    """
+    if not image_path:
+        return None
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+    if image_path.startswith("http"):
+        url = image_path
+    else:
+        url = f"{TVDB_ARTWORK_BASE}/{image_path.lstrip('/')}"
+    file_path = str(Path(output_dir) / f"{base_filename}-thumb")
+    return await _download_image(url, file_path)
+
+
 async def download_show_images(
     tv_id: int, output_dir: str
 ) -> dict[str, str | None]:

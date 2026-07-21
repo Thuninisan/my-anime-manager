@@ -157,3 +157,36 @@ async def search_series(query: str) -> httpx.Response:
         params={"query": query, "type": "series"},
         label=f"TVDB search",
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Episode endpoints
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def get_episode_extended(episode_id: int) -> httpx.Response:
+    """Get extended episode information including credits, directors, writers."""
+    return await _tvdb_request(
+        "GET",
+        f"/episodes/{episode_id}/extended",
+        label=f"TVDB episode/{episode_id}/extended",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Translations
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def get_series_translations(series_id: int, language: str) -> httpx.Response:
+    """Get translated series name and overview for a given language.
+
+    Args:
+        series_id: TVDB series ID.
+        language: Three-letter language code (e.g. ``"jpn"``, ``"zho"``, ``"eng"``).
+    """
+    return await _tvdb_request(
+        "GET",
+        f"/series/{series_id}/translations/{language}",
+        label=f"TVDB series/{series_id}/translations/{language}",
+    )
