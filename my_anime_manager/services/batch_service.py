@@ -595,7 +595,6 @@ async def generate_metadata_collection(
         original_title=tvshow["original_title"],
         plot=tvshow["plot"],
         premiered=tvshow["premiered"],
-        tmdb_id=tvshow["tmdb_id"],
         genres=tvshow.get("genres", []),
         studios=tvshow.get("studios", []),
         rating=tvshow.get("rating", 0),

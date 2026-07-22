@@ -31,6 +31,7 @@ _DEFAULTS: dict[str, Any] = {
     "QBITTORRENT_PASSWORD": "Wu_570048008",
     "QBITTORRENT_SAVE_PATH": "/Media/BD",
     "RSS_DOWNLOAD_PATH": "/Media/番剧",
+    "RSS_PATH_TEMPLATE": "/{series_name}/Season {tvdb_season}/{series_name} S{tvdb_season:02d}E{tvdb_episode:02d}",
     "TORRENT_DOWNLOAD_PATH": "/data/downloads",
     "TORRENT_EXCLUDE_PATTERNS": "cds,scans,pv,cm,menu,iv,preview,mka,nced,ncop",
     "TORRENT_HARDLINK_PATH": "/Media/BD",

@@ -38,7 +38,14 @@ async def login() -> str:
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     body = json.dumps({"apikey": apikey})
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    proxy_url = None
+    if config.PROXY_HOST:
+        proxy_url = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
+
+    async with httpx.AsyncClient(
+        timeout=30.0,
+        proxy=proxy_url,
+    ) as client:
         resp = await client.post(url, content=body, headers=headers)
         if resp.status_code != 200:
             raise RuntimeError(

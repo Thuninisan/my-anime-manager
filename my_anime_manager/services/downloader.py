@@ -543,6 +543,28 @@ async def enrich_subscription(
             except Exception as e:
                 _emit(f"⚠️ tmdb_ep_offset 计算失败（非致命）: {e}")
 
+        # 4c. Calculate tvdb_ep_offset — for split-season Bangumi entries
+        #     sharing the same TVDB season.  TVDB always starts at ep 1
+        #     per season, so we sum episode counts of earlier entries.
+        tvdb_ep_offset = 0
+        if tvdb_id and tvdb_season:
+            try:
+                from ..data import list_subscriptions as _list_subs
+                all_subs = _list_subs()
+                previous_ep_count = 0
+                for s in all_subs:
+                    if (s.get("tvdb_id") == tvdb_id
+                            and s.get("tvdb_season") == tvdb_season
+                            and s["bangumi_id"] < bangumi_id):
+                        sr = s.get("bgm_sortrange", [0, 0])
+                        if sr[0] > 0:
+                            previous_ep_count += sr[1] - sr[0] + 1
+                if previous_ep_count > 0:
+                    tvdb_ep_offset = previous_ep_count
+                    _emit(f"✅ tvdb_ep_offset={tvdb_ep_offset} (split-season, {previous_ep_count} eps from earlier entries)")
+            except Exception as e:
+                _emit(f"⚠️ tvdb_ep_offset 计算失败（非致命）: {e}")
+
         # 5. Extract this season's Bangumi subject name for file naming
         bgm_subject_name = ""
         try:
@@ -566,6 +588,7 @@ async def enrich_subscription(
             "tvdb_id": tvdb_id or 0,
             "tvdb_season": tvdb_season,
             "tmdb_ep_offset": tmdb_ep_offset,
+            "tvdb_ep_offset": tvdb_ep_offset,
             "bgm_rating": bgm_rating,
             "bgm_rating_total": bgm_rating_total,
             "air_date": air_date,
@@ -607,6 +630,45 @@ async def _download_torrent_file(torrent_url: str, max_retries: int = 3) -> byte
 # NFO & file structure generation
 # ═══════════════════════════════════════════════════════════════════════
 
+def format_download_path(
+    template: str, sub: dict, sort: int = 0, ext: str = "",
+    bangumi_sort: int = 0, bangumi_ep: int = 0,
+    tvdb_episode: int = 0, tmdb_episode: int = 0,
+) -> str:
+    """Format a download path template with subscription and episode variables.
+
+    Uses Python ``str.format()`` syntax.  Available variables:
+
+    ==================== ============================================
+    ``{series_name}``    Root series name (from Bangumi chain)
+    ``{bangumi_title}``  Current season Bangumi entry name
+    ``{bgm_season}``     Bangumi chain position (int)
+    ``{tvdb_season}``    TVDB season number (int)
+    ``{tmdb_season}``    TMDB season number (int)
+    ``{bangumi_sort}``   Bangumi sort number (sequential within entry)
+    ``{bangumi_ep}``     Bangumi canonical episode number
+    ``{tvdb_episode}``   Matched TVDB episode number
+    ``{tmdb_episode}``   Matched TMDB episode number
+    ``{sort}``           Alias for ``{bangumi_sort}`` (deprecated)
+    ==================== ============================================
+
+    Format specs are supported, e.g. ``{tvdb_episode:02d}`` → ``05``.
+    The *ext* parameter (e.g. ``".mkv"``) is appended after formatting.
+    """
+    return template.format(
+        series_name=sub.get("series_name") or sub.get("name", ""),
+        bangumi_title=sub.get("bgm_subject_name") or sub.get("name", ""),
+        bgm_season=sub.get("bgm_season", 1),
+        tvdb_season=sub.get("tvdb_season") or sub.get("bgm_season", 1),
+        tmdb_season=sub.get("tmdb_season") or sub.get("bgm_season", 1),
+        sort=bangumi_sort or sort,
+        bangumi_sort=bangumi_sort or sort,
+        bangumi_ep=bangumi_ep or bangumi_sort or sort,
+        tvdb_episode=tvdb_episode or bangumi_ep or bangumi_sort or sort,
+        tmdb_episode=tmdb_episode or bangumi_sort or sort,
+    ) + ext
+
+
 async def write_episode_files(
     tmdb_ep: dict,
     *,
@@ -620,26 +682,28 @@ async def write_episode_files(
     rating: float = 0.0,
     output_dir: str = ".",
     thumb_source: str = "tmdb",
+    file_stem: str = "",
 ) -> dict:
     """Download episode thumbnail and generate ``.nfo`` — no API calls.
 
-    All TMDB data must already be extracted into *tmdb_ep* before
+    All metadata must already be extracted into *tmdb_ep* before
     calling.  Used by both the RSS flow (:func:`generate_metadata`)
     and the torrent batch flow (:func:`generate_metadata_collection`).
 
     Args:
         tmdb_ep: Normalised dict with keys ``name``, ``overview``,
-            ``air_date``, ``runtime``, ``tmdb_id``, ``still_path``,
-            ``directors``, ``writers``, ``guest_stars``.
+            ``air_date``, ``runtime``, ``still_path``.
         season_number:  Season number written into the NFO.
-        episode_number: Episode / sort number written into the NFO.
+        episode_number: Episode number written into the NFO.
         bangumi_ep_id:  Bangumi episode ID (or ``None``).
-        show_name:      TMDB show title → ``<showtitle>``.
-        original_name:  TMDB original name → ``<originaltitle>``.
-        bangumi_subject_name: Bangumi subject name (used for the NFO
-            filename prefix and thumbnail base name).
+        show_name:      Show title → ``<showtitle>``.
+        original_name:  Original name → ``<originaltitle>``.
+        bangumi_subject_name: Bangumi subject name (fallback for file naming).
         studios:        Network / studio names.
         output_dir:     Directory to write NFO and thumbnail into.
+        thumb_source:   ``"tvdb"`` or ``"tmdb"`` controls which CDN is used.
+        file_stem:      Base filename (without extension) from path template.
+            If empty, falls back to ``{bangumi_subject_name} {ep:02d}``.
 
     Returns:
         ``{"nfo_path": str, "thumb_path": str}``.
@@ -647,7 +711,10 @@ async def write_episode_files(
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # ── Thumbnail ───────────────────────────────────────────────────
-    thumb_base = f"{bangumi_subject_name or show_name} {episode_number:02d}"
+    if file_stem:
+        thumb_base = file_stem
+    else:
+        thumb_base = f"{bangumi_subject_name or show_name} {episode_number:02d}"
     thumb_path = ""
     still = tmdb_ep.get("still_path", "")
     if still:
@@ -666,13 +733,12 @@ async def write_episode_files(
 
     # ── Episode NFO ─────────────────────────────────────────────────
     nfo_path = generate_episode_nfo(
-        tmdb_show_name=show_name,
-        tmdb_original_name=original_name,
-        tmdb_ep_name=tmdb_ep.get("name", ""),
-        tmdb_ep_overview=tmdb_ep.get("overview", ""),
-        tmdb_ep_air_date=tmdb_ep.get("air_date", ""),
-        tmdb_ep_runtime=tmdb_ep.get("runtime", 0),
-        tmdb_ep_id=tmdb_ep.get("tmdb_id", 0),
+        show_name=show_name,
+        original_name=original_name,
+        episode_name=tmdb_ep.get("name", ""),
+        plot=tmdb_ep.get("overview", ""),
+        air_date=tmdb_ep.get("air_date", ""),
+        runtime=tmdb_ep.get("runtime", 0),
         season_number=season_number,
         episode_number=episode_number,
         bangumi_ep_id=bangumi_ep_id,
@@ -684,6 +750,8 @@ async def write_episode_files(
         studios=studios or [],
         rating=rating,
         output_dir=output_dir,
+        tvdb_ep_id=tmdb_ep.get("tvdb_ep_id", 0),
+        file_stem=file_stem,
     )
 
     return {"nfo_path": nfo_path, "thumb_path": thumb_path}
@@ -727,18 +795,21 @@ async def generate_metadata(
     tmdb_ep_offset: int = 0,
     tvdb_id: int = 0,
     tvdb_season: int | None = None,
-    base_path: str = "",
-    sub_path: str = "",
+    tvdb_ep_offset: int = 0,
+    season_dir: str = "",
+    show_dir: str = "",
     bgm_subject_name: str = "",
+    series_name: str = "",
 ) -> bool:
     """Generate NFO files, download images, and rename in qBittorrent.
 
-    *base_path* + *sub_path* form the season directory (e.g.
-    ``/Media/番剧/冰之城墙/Season 1``).  The show directory is the
-    parent of the season directory.
+    *season_dir* is the directory for episode NFO / thumbnails (also
+    used for season.nfo).  *show_dir* is its parent — used for
+    tvshow.nfo and show-level images.  Both are derived from the
+    download path template.
     """
-    season_dir = Path(base_path) / sub_path if base_path else Path(config.QBITTORRENT_SAVE_PATH) / show_name / f"Season {bgm_season}"
-    show_dir = season_dir.parent
+    _season_dir = Path(season_dir)
+    _show_dir = Path(show_dir)
 
     # ── Read override from download history ────────────────────────
     from ..data import get_all_episodes
@@ -747,30 +818,53 @@ async def generate_metadata(
     override_tmdb_season = overrides.get("tmdb_season")  # None if not set
 
     # ── TVDB: fetch episode data ───────────────────────────────────
-    target_ep_num = (override_tmdb_ep or sort) - tmdb_ep_offset
-    if target_ep_num < 1:
-        target_ep_num = 1
-
     tvdb_ep_data = None
     tvdb_ep_id = 0
     ep_rating = 0.0
+    # Saved for season.nfo reuse (season title, first episode air date)
+    tvdb_season_info: dict | None = None
+    tvdb_series_data: dict | None = None
+    # Episode number variables for path template (initialised to sort as fallback)
+    bangumi_ep_val = sort
+    bgm_ep_name = ""
+    bgm_ep_name_cn = ""
+    tvdb_target_ep = 0
+    tmdb_target_ep = 0
     if tvdb_id:
         try:
             from ..clients.tvdb import (
                 get_series_extended as tvdb_get_series_extended,
                 get_season_extended as tvdb_get_season_extended,
-                get_episode_extended as tvdb_get_ep_extended,
             )
+
+            # Use Bangumi ``ep`` (canonical episode number) + split-season
+            # offset for TVDB alignment (TVDB always starts at 1 per season).
+            tvdb_ep_offset_val = tvdb_ep_offset or 0
+            try:
+                eps = await _get_bangumi_episodes(bangumi_id)
+                for e in eps:
+                    if (e.get("sort") or e.get("ep", 0)) == sort:
+                        bangumi_ep_val = e.get("ep") or sort
+                        bgm_ep_name = (e.get("name") or "").strip()
+                        bgm_ep_name_cn = (e.get("name_cn") or "").strip()
+                        break
+            except Exception:
+                pass
+            tvdb_target_ep = int(bangumi_ep_val) + tvdb_ep_offset_val
+            if tvdb_target_ep < 1:
+                tvdb_target_ep = 1
 
             target_tvdb_season = tvdb_season or 1
             logger.info(
-                "fetching TVDB series=%d season=%d ep=%d",
-                tvdb_id, target_tvdb_season, target_ep_num,
+                "fetching TVDB series=%d season=%d ep=%d (bgm_ep=%d, offset=%d)",
+                tvdb_id, target_tvdb_season, tvdb_target_ep,
+                bangumi_ep_val, tvdb_ep_offset_val,
             )
 
             # Step 1: Get series extended → find season ID
             series_resp = await tvdb_get_series_extended(tvdb_id)
             series_data = series_resp.json().get("data", series_resp.json())
+            tvdb_series_data = series_data  # save for season.nfo
             season_id = None
             for s in series_data.get("seasons", []):
                 if s.get("number") == target_tvdb_season:
@@ -784,154 +878,81 @@ async def generate_metadata(
                 # Step 2: Get season extended → find target episode
                 season_resp = await tvdb_get_season_extended(season_id)
                 season_info = season_resp.json().get("data", season_resp.json())
+                tvdb_season_info = season_info  # save for season.nfo
                 for ep in season_info.get("episodes", []):
-                    if ep.get("number") == target_ep_num:
+                    if ep.get("number") == tvdb_target_ep:
                         tvdb_ep_id = ep.get("id")
                         tvdb_ep_data = {
                             "name": ep.get("name", ""),
-                            "original_name": ep.get("name", ""),
                             "overview": ep.get("overview", ""),
                             "air_date": ep.get("airDate") or ep.get("aired", ""),
                             "runtime": ep.get("runtime", 0),
-                            "tmdb_id": tvdb_ep_id,  # reuse key name for compat
                             "still_path": ep.get("image", ""),
-                            "directors": [],
-                            "writers": [],
-                            "guest_stars": [],
+                            "tvdb_ep_id": tvdb_ep_id,
                         }
                         ep_rating = ep.get("siteRating", 0) or 0
                         break
-
-                # Step 3: Get episode extended for full credits
-                if tvdb_ep_id:
-                    try:
-                        ep_resp = await tvdb_get_ep_extended(tvdb_ep_id)
-                        ep_detail = ep_resp.json().get("data", ep_resp.json())
-                        tvdb_ep_data["directors"] = ep_detail.get("directors", []) or []
-                        tvdb_ep_data["writers"] = ep_detail.get("writers", []) or []
-                        tvdb_ep_data["guest_stars"] = [
-                            {"name": g, "character": ""}
-                            for g in (ep_detail.get("guestStars", []) or [])
-                        ]
-                        # Also add characters if available (voice actors)
-                        characters = ep_detail.get("characters", []) or []
-                        if characters:
-                            tvdb_ep_data["guest_stars"] = [
-                                {"name": c.get("personName", c.get("name", "")),
-                                 "character": c.get("name", "")}
-                                for c in characters
-                            ]
-                    except Exception:
-                        logger.warning("TVDB episode extended fetch failed, using base data")
         except Exception:
             logger.exception("TVDB episode fetch failed")
 
-    actors: list[dict] = []
-    if tvdb_ep_data:
-        tmdb_ep = tvdb_ep_data
-        actors = list(tmdb_ep.get("guest_stars", []))
-    else:
-        # ── Fallback: TMDB episode fetch ──────────────────────────
-        from ..clients.tmdb import get_season_detail as tmdb_get_season
+    if not tvdb_ep_data:
+        logger.error("TVDB episode data not available for S%d E%d, skipping NFO",
+                     tvdb_season or 1, tvdb_target_ep)
+        return False
 
-        target_tmdb_season = override_tmdb_season or tmdb_season or 1
-        logger.info("TVDB not available, falling back to TMDB S%d E%d (tmdb_id=%d)",
-                    target_tmdb_season, target_ep_num, tmdb_id)
+    tmdb_ep = tvdb_ep_data
 
-        # Fetch ja first for original episode name
-        ja_name = ""
-        try:
-            ja_resp = await tmdb_get_season(tmdb_id, target_tmdb_season, language="ja")
-            ja_data = ja_resp.json()
-            for ep in (ja_data.get("episodes") or []):
-                if ep.get("episode_number") == target_ep_num:
-                    ja_name = ep.get("name", "")
-                    break
-        except Exception:
-            logger.warning("TMDB ja season fetch failed")
-
-        try:
-            resp = await tmdb_get_season(tmdb_id, target_tmdb_season, language="zh-CN")
-            season_data = resp.json()
-        except Exception:
-            logger.exception("TMDB season API failed")
-            return False
-
-        tmdb_ep = None
-        for ep in (season_data.get("episodes") or []):
-            if ep.get("episode_number") == target_ep_num:
-                tmdb_ep = {
-                    "name": ep.get("name", ""),
-                    "original_name": ja_name or ep.get("name", ""),
-                    "overview": ep.get("overview", ""),
-                    "air_date": ep.get("air_date", ""),
-                    "runtime": ep.get("runtime", 0),
-                    "tmdb_id": ep["id"],
-                    "still_path": ep.get("still_path", ""),
-                    "directors": [c["name"] for c in ep.get("crew", []) if c.get("job") == "Director"],
-                    "writers": [c["name"] for c in ep.get("crew", []) if c.get("job") == "Writer"],
-                    "guest_stars": [
-                        {"name": gs["name"], "character": gs.get("character", "")}
-                        for gs in ep.get("guest_stars", [])
-                    ],
-                }
-                ep_rating = ep.get("vote_average", 0) or 0
-                break
-
-        if not tmdb_ep:
-            logger.warning("TMDB S%d missing episode sort=%d, skipping NFO", target_tmdb_season, sort)
-            return False
-
-        actors = list(tmdb_ep.get("guest_stars", []))
-
-        # Fetch full episode credits for main voice cast
-        from ..clients.tmdb import get_episode_credits as tmdb_get_ep_credits
-        try:
-            cred_resp = await tmdb_get_ep_credits(
-                tmdb_id, target_tmdb_season, target_ep_num, language="zh-CN",
-            )
-            cred = cred_resp.json()
-            cast = cred.get("cast", [])
-            if cast:
-                actors = [
-                    {"name": c["name"], "character": c.get("character", "")}
-                    for c in cast
-                ]
-                for gs in cred.get("guest_stars", []):
-                    actors.append(
-                        {"name": gs["name"], "character": gs.get("character", "")}
-                    )
-        except Exception:
-            logger.warning("episode credits fetch failed, falling back to guest_stars")
+    # ── Bangumi original Japanese name for <originaltitle> ─────────
+    bgm_original_name = ""
+    try:
+        subject_for_name = await get_subject(bgm_subject_id)
+        bgm_original_name = (subject_for_name.get("name") or "").strip()
+    except Exception:
+        logger.warning("Bangumi subject lookup for original name failed (non-fatal)")
 
     # ── Season directory ──────────────────────────────────────────
-    season_dir.mkdir(parents=True, exist_ok=True)
+    _season_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Episode thumb + NFO ───────────────────────────────────────
-    # Use full credits cast if available, otherwise fall back to
-    # the episode's guest_stars (which only has actual guests).
-    if actors:
-        tmdb_ep["guest_stars"] = actors
+    # Override episode title from Bangumi (Chinese names)
+    if bgm_ep_name_cn:
+        tmdb_ep["name"] = bgm_ep_name_cn
+
+    # Compute file stem from path template (same as media file)
+    _tmpl = config.RSS_PATH_TEMPLATE
+    _stem_sub = {
+        "series_name": series_name or show_name, "name": show_name,
+        "bgm_subject_name": bgm_subject_name or show_name,
+        "bgm_season": bgm_season,
+        "tvdb_season": tvdb_season, "tmdb_season": tmdb_season,
+    }
+    _stem_path = format_download_path(
+        _tmpl, _stem_sub, sort=sort, ext="",
+        bangumi_sort=sort, bangumi_ep=int(bangumi_ep_val),
+        tvdb_episode=tvdb_target_ep, tmdb_episode=tmdb_target_ep,
+    )
+    file_stem = Path(_stem_path).stem
 
     # Look up the Bangumi episode ID from the cached episode list
     bgm_ep_id = await _get_bangumi_ep_id(bangumi_id, sort)
     result = await write_episode_files(
         tmdb_ep,
-        season_number=bgm_season,
-        episode_number=sort,
+        season_number=tvdb_season or bgm_season,
+        episode_number=tvdb_target_ep,
         bangumi_ep_id=bgm_ep_id,
         show_name=show_name,
-        original_name=tmdb_ep.get("original_name") or show_name,
+        original_name=bgm_ep_name or bgm_original_name or show_name,
         bangumi_subject_name=bgm_subject_name or show_name,
         rating=ep_rating,
-        output_dir=str(season_dir),
+        output_dir=str(_season_dir),
         thumb_source="tvdb" if tvdb_id and tvdb_ep_data else "tmdb",
+        file_stem=file_stem,
     )
     logger.info("episode NFO: %s", result["nfo_path"])
 
     # ── Show-level NFO + images (only once) ───────────────────────
-    tvshow_nfo = show_dir / "tvshow.nfo"
-    if not tvshow_nfo.exists():
+    tvshow_nfo = _show_dir / "tvshow.nfo"
+    if not tvshow_nfo.exists() and tmdb_id:
         try:
             detail = await tmdb_service.get_tv_show_detail(tmdb_id)
             generate_tv_show_nfo(
@@ -939,71 +960,62 @@ async def generate_metadata(
                 original_title=detail.get("original_name", show_name),
                 plot=detail.get("overview", ""),
                 premiered=detail.get("first_air_date", ""),
-                tmdb_id=tmdb_id,
                 genres=detail.get("genres", []),
                 studios=detail.get("studios", []),
                 rating=detail.get("vote_average", 0),
                 status=detail.get("status", ""),
-                output_dir=str(show_dir),
+                output_dir=str(_show_dir),
                 tvdb_id=tvdb_id,
             )
             logger.info("tvshow.nfo generated")
-            await download_show_images(tmdb_id, str(show_dir))
+            await download_show_images(tmdb_id, str(_show_dir))
         except Exception:
             logger.exception("tvshow.nfo failed")
 
     # ── Season NFO ────────────────────────────────────────────────
-    season_nfo = season_dir / "season.nfo"
+    season_nfo = _season_dir / "season.nfo"
     if not season_nfo.exists():
         try:
             season_title = show_name
             season_plot = ""
             season_premiered = ""
-            season_poster_url = None
 
-            if tvdb_id:
-                # Fetch TVDB series data for season name and plot
-                from ..clients.tvdb import (
-                    get_series_extended as tvdb_get_series_extended,
-                )
-                try:
-                    series_resp = await tvdb_get_series_extended(tvdb_id)
-                    series_data = series_resp.json().get("data", series_resp.json())
-                    season_plot = series_data.get("overview", "")
-                    season_premiered = series_data.get("firstAired", "")
-                    # Find season name
-                    target_tvdb_season = tvdb_season or 1
-                    for s in series_data.get("seasons", []):
-                        if s.get("number") == target_tvdb_season:
-                            s_name = s.get("name", "")
-                            if s_name:
-                                season_title = s_name
-                            break
-                except Exception:
-                    logger.warning("TVDB season fetch failed for season.nfo")
+            if tvdb_season_info:
+                # Premiered: first episode air date of this season
+                eps = tvdb_season_info.get("episodes", [])
+                if eps:
+                    first_air = (eps[0].get("airDate") or eps[0].get("aired", ""))
+                    if first_air:
+                        season_premiered = first_air
 
             # Still download Bangumi poster
             subject = await get_subject(bgm_subject_id)
-            poster = await download_season_poster(subject, str(show_dir), bgm_season)
+            season_title = (subject.get("name_cn") or subject.get("name") or show_name).strip()
+            effective_season = tvdb_season or tmdb_season or bgm_season
+            poster = await download_season_poster(subject, str(_show_dir), effective_season)
             if poster:
-                logger.info("Season %d poster downloaded", bgm_season)
+                logger.info("Season %d poster downloaded", effective_season)
 
             generate_season_nfo(
                 title=season_title,
                 original_title=subject.get("name", ""),
                 plot=season_plot or subject.get("summary", ""),
                 premiered=season_premiered or subject.get("date", ""),
-                season_number=bgm_season,
+                season_number=tvdb_season or bgm_season,
                 bangumi_id=bgm_subject_id,
-                output_dir=str(season_dir),
+                output_dir=str(_season_dir),
             )
-            logger.info("Season %d season.nfo generated", bgm_season)
+            logger.info("Season %d season.nfo generated", effective_season)
         except Exception:
             logger.exception("season.nfo failed")
 
     # ── Rename in qBittorrent ─────────────────────────────────────
     ext = Path(old_torrent_path).suffix
-    new_path = f"{sub_path}/{bgm_subject_name or show_name} {sort:02d}{ext}"
+    new_path = format_download_path(
+        _tmpl, _stem_sub, sort=sort, ext=ext,
+        bangumi_sort=sort, bangumi_ep=int(bangumi_ep_val),
+        tvdb_episode=tvdb_target_ep, tmdb_episode=tmdb_target_ep,
+    )
     try:
         await rename_file(qb_client, info_hash, old_torrent_path, new_path)
         logger.info("renamed: %s → %s", old_torrent_path, new_path)
@@ -1375,19 +1387,16 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     # ── Compute info-hash from the .torrent file ───────────────────
     torrent_hash = compute_info_hash(tmp_path)
 
-    # ── Compute download paths ─────────────────────────────────────
+    # ── Compute download paths from template ───────────────────────
     show_name = sub.get("name", str(bangumi_id))
-    # bgm_subject_name is this season's Bangumi subject title (name_cn),
-    # used for file naming — unified with torrent's naming convention
     bgm_subject_name = sub.get("bgm_subject_name") or show_name
-    # series_name is the root series name (chain[0].name_cn), set during enrichment.
-    # Fall back to show_name for old subscriptions that haven't been enriched yet.
     series_name = sub.get("series_name") or show_name
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    sub_path_template = sub.get("download_path", f"/{series_name}/Season {{season}}")
-    sub_path = sub_path_template.format(
-        series_name=series_name, show_name=show_name, season=bgm_season
-    ).strip("/")
+    template = config.RSS_PATH_TEMPLATE
+    rel_path = format_download_path(template, sub, sort=sort).lstrip("/")
+    rel_dir = str(Path(rel_path).parent)
+    season_dir = str(Path(rss_base) / rel_dir)
+    show_dir = str(Path(season_dir).parent)
 
     # ── Add to qBittorrent ─────────────────────────────────────────
     # Pass the raw string (POSIX path) — don't let Path() convert to Windows style
@@ -1417,12 +1426,14 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
                 tmdb_ep_offset=sub.get("tmdb_ep_offset", 0),
                 tvdb_id=tvdb_id or sub.get("tvdb_id") or 0,
                 tvdb_season=sub.get("tvdb_season"),
-                base_path=rss_base,
-                sub_path=sub_path,
+                tvdb_ep_offset=sub.get("tvdb_ep_offset", 0),
+                season_dir=season_dir,
+                show_dir=show_dir,
                 bgm_subject_name=bgm_subject_name,
+                series_name=series_name,
             )
             if not success:
-                print(f"      ❌ NFO 生成失败：TMDB 未找到对应剧集，种子已删除")
+                print(f"      ❌ NFO 生成失败：TVDB 未找到对应剧集，种子已删除")
                 await delete_torrent(qb, info_hash, delete_files=False)
                 return False
         except Exception as e:
