@@ -167,6 +167,33 @@ async def search_series(query: str) -> httpx.Response:
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# Episodes — flat list across all seasons
+# ═══════════════════════════════════════════════════════════════════════
+
+
+async def get_series_episodes(
+    series_id: int, season_type: str = "default", language: str = "jpn", page: int = 0,
+) -> httpx.Response:
+    """Get all episodes for a series in a flat list (across all seasons).
+
+    Each episode includes ``seasonNumber``, ``number``, ``absoluteNumber``,
+    ``name``, ``overview``, ``aired``, ``image``, etc.
+
+    Args:
+        series_id: TVDB series ID.
+        season_type: Season type filter (``"default"`` for normal seasons).
+        language: 3-letter language code.
+        page: Page number (0-based).
+    """
+    return await _tvdb_request(
+        "GET",
+        f"/series/{series_id}/episodes/{season_type}/{language}",
+        params={"page": page},
+        label=f"TVDB series/{series_id}/episodes",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Episode endpoints
 # ═══════════════════════════════════════════════════════════════════════
 

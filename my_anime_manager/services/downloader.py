@@ -155,7 +155,7 @@ async def _build_chain_ids(root_id: int) -> list[int]:
     current_id = root_id
     for _ in range(30):
         try:
-            relations = await bgm_client.get_relations(current_id)
+            relations = await _get_bangumi_relations(current_id)
         except Exception:
             break
         sequel = next(
@@ -171,7 +171,7 @@ async def _build_chain_ids(root_id: int) -> list[int]:
 
 async def _auto_infer_tmdb(
     bangumi_id: int,
-    root_id: int,
+    chain_ids: list[int],
     root_subject: dict | None,
     _emit: Callable[[str], None],
 ) -> dict | None:
@@ -179,29 +179,17 @@ async def _auto_infer_tmdb(
 
     Called when ``get_tmdb_id(bangumi_id)`` returns ``None`` / 0.
 
-    Strategy:
-    1. Build the full chain from *root_id* forward through sequels.
-    2. If the chain has only one entry, search TMDB directly with the
-       subject's original Japanese name — take the first result as
-       ``tmdb_id`` with ``tmdb_season=1``.
-    3. If the chain has multiple entries, collect TMDB IDs from sibling
-       entries already present in ``bangumi_mikan_map.json``.  If none
-       are found, fall back to searching TMDB with ``chain[0]``'s name.
-    4. For each candidate TMDB ID, fetch all seasons in the show's
-       original language, then fuzzy-match the first Bangumi main-story
-       episode name against each season's first episode name.
-    5. Return the best ``(tmdb_id, tmdb_season)`` whose score exceeds
-       the threshold, or ``None``.
+    *chain_ids* is the full Bangumi sequel chain from root (pre-computed
+    by the caller to avoid duplicate API calls).
 
     Returns:
         ``{"tmdb_id": int, "tmdb_season": int}`` or ``None``.
     """
     from ..clients import tmdb as tmdb_client
     from ..services import tmdb as tmdb_service
-    from ..utils.episode_name_match import match_first_episode
+    from ..utils.episode_name_match import fuzzy_match_episode
 
-    # ── Step 1: Build chain & determine strategy ──
-    chain_ids = await _build_chain_ids(root_id)
+    # ── Step 1: Determine strategy ──
     is_single = len(chain_ids) == 1
 
     if is_single:
@@ -263,7 +251,7 @@ async def _auto_infer_tmdb(
             if root_subject:
                 root_name = (root_subject.get("name") or "").strip()
             if not root_name:
-                root_subj = await get_subject(root_id)
+                root_subj = await get_subject(chain_ids[0])
                 root_name = (root_subj.get("name") or "").strip()
         except Exception:
             pass
@@ -296,7 +284,7 @@ async def _auto_infer_tmdb(
     _emit(f"   📡 候选 TMDB ID: {unique_candidates}")
 
     try:
-        bgm_eps = await bgm_client.get_episodes(bangumi_id, ep_type=0)
+        bgm_eps = await _get_bangumi_episodes(bangumi_id)
     except Exception:
         _emit("   ⚠️ 获取 Bangumi 剧集列表失败")
         return None
@@ -341,21 +329,203 @@ async def _auto_infer_tmdb(
             _emit(f"   ⚠️ TMDB {ctid} 获取季数据失败")
             continue
 
-        match = match_first_episode(first_bgm_ep_name, season_map)
-        if match:
-            season_num, score = match
-            _emit(
-                f"   📊 TMDB {ctid} S{season_num:02d}: "
-                f"匹配分数={score:.3f}"
-            )
-            if best_result is None or score > best_result[2]:
-                best_result = (ctid, season_num, score)
+        for season_num, season_data in season_map.items():
+            if season_num < 1:
+                continue  # skip specials
+            for ep in season_data.get("episodes", []):
+                tmdb_name = (ep.get("name") or "").strip()
+                if not tmdb_name:
+                    continue
+                score = fuzzy_match_episode(first_bgm_ep_name, tmdb_name)
+                if score >= 0.6:
+                    _emit(
+                        f"   📺 tmdb={ctid} S{season_num:02d}E{ep.get('epNum', '?')} "
+                        f"\"{tmdb_name}\" ↔ \"{first_bgm_ep_name}\" score={score:.3f}"
+                    )
+                    if best_result is None or score > best_result[2]:
+                        best_result = (ctid, season_num, score)
 
     if best_result is None:
         _emit("   ❌ 所有候选均未达到匹配阈值")
         return None
 
+    _emit(
+        f"   ✅ 最佳匹配: tmdb_id={best_result[0]} S{best_result[1]:02d} "
+        f"score={best_result[2]:.3f}"
+    )
     return {"tmdb_id": best_result[0], "tmdb_season": best_result[1]}
+
+
+async def _auto_infer_tvdb(
+    bangumi_id: int,
+    chain_ids: list[int],
+    root_subject: dict | None,
+    _emit: Callable[[str], None],
+) -> dict | None:
+    """Try to infer a missing TVDB ID via name-based matching.
+
+    Called when ``get_tvdb_id(bangumi_id)`` returns ``None`` / 0.
+
+    *chain_ids* is the full Bangumi sequel chain from root (pre-computed
+    by the caller to avoid duplicate API calls).
+
+    Returns:
+        ``{"tvdb_id": int, "tvdb_season": int}`` or ``None``.
+    """
+    from ..clients import tvdb as tvdb_client
+    from ..utils.episode_name_match import fuzzy_match_episode
+
+    # ── Step 1: Collect sibling TVDB IDs ──
+    is_single = len(chain_ids) == 1
+
+    if is_single:
+        # Single-entry chain — search TVDB directly
+        subject = root_subject
+        if subject is None:
+            try:
+                subject = await get_subject(bangumi_id)
+            except Exception:
+                pass
+        if subject is None:
+            return None
+
+        original_name = (subject.get("name") or "").strip()
+        if not original_name:
+            return None
+
+        _emit(f"   🔍 单条目链，直接搜索 TVDB: {original_name}")
+        try:
+            res = await tvdb_client.search_series(original_name)
+            results = res.json().get("data", [])
+        except Exception:
+            _emit("   ⚠️ TVDB 搜索请求失败")
+            return None
+
+        if not results:
+            _emit("   ❌ TVDB 搜索无结果")
+            return None
+
+        best = results[0]
+        candidate_id = int(best.get("tvdb_id") or best.get("id", 0))
+        if not candidate_id:
+            _emit("   ⚠️ TVDB 搜索结果缺少 ID")
+            return None
+        _emit(f"   ✅ 匹配到: {best.get('name', '?')} [id={candidate_id}]")
+        unique_candidates = [candidate_id]
+    else:
+        # Multi-entry chain — collect TVDB IDs from siblings
+        candidates: list[int] = []
+        for cid in chain_ids:
+            if cid == bangumi_id:
+                continue
+            ctid = get_tvdb_id(cid)
+            if ctid:
+                candidates.append(ctid)
+
+        seen: set[int] = set()
+        unique_candidates: list[int] = []
+        for c in candidates:
+            if c not in seen:
+                seen.add(c)
+                unique_candidates.append(c)
+
+        if unique_candidates:
+            _emit(f"   🔗 从链中兄弟条目收集到 {len(unique_candidates)} 个 TVDB ID: {unique_candidates}")
+        else:
+            # Fall back to searching TVDB with chain[0]'s name
+            _emit("   🔍 链中无已知 TVDB ID，用 chain[0] 名称搜索...")
+            root_name = ""
+            try:
+                if root_subject:
+                    root_name = (root_subject.get("name") or "").strip()
+                if not root_name:
+                    root_subj = await get_subject(chain_ids[0])
+                    root_name = (root_subj.get("name") or "").strip()
+            except Exception:
+                pass
+
+            if not root_name:
+                _emit("   ⚠️ 无法获取 chain[0] 名称")
+                return None
+
+            try:
+                res = await tvdb_client.search_series(root_name)
+                results = res.json().get("data", [])
+            except Exception:
+                _emit("   ⚠️ TVDB 搜索请求失败")
+                return None
+
+            if not results:
+                _emit("   ❌ TVDB 搜索无结果")
+                return None
+
+            candidate_id = int(results[0].get("tvdb_id") or results[0].get("id", 0))
+            if not candidate_id:
+                _emit("   ⚠️ TVDB 搜索结果缺少 ID")
+                return None
+            _emit(f"   ✅ TVDB 搜索命中: {results[0].get('name', '?')} (id={candidate_id})")
+            unique_candidates = [candidate_id]
+
+    if not unique_candidates:
+        return None
+
+    # ── Step 2: Get Bangumi first main-story episode name ──
+    _emit(f"   📡 候选 TVDB ID: {unique_candidates}")
+
+    try:
+        bgm_eps = await _get_bangumi_episodes(bangumi_id)
+    except Exception:
+        _emit("   ⚠️ 获取 Bangumi 剧集列表失败")
+        return None
+
+    if not bgm_eps:
+        _emit("   ⚠️ Bangumi 无剧集数据")
+        return None
+
+    first_bgm_ep_name = (bgm_eps[0].get("name") or "").strip()
+    if not first_bgm_ep_name:
+        _emit("   ⚠️ 首个剧集名为空")
+        return None
+
+    _emit(f"   📺 Bangumi 首个剧集: {first_bgm_ep_name}")
+
+    # ── Step 3: Fetch TVDB episodes flat list & match ──
+    best_result: tuple[int, int, float, str] | None = None  # (tvdb_id, season, score, matched_ep_name)
+
+    for ctid in unique_candidates:
+        try:
+            eps_resp = await tvdb_client.get_series_episodes(ctid)
+            eps_data = eps_resp.json().get("data", eps_resp.json())
+            episodes = eps_data.get("episodes", [])
+        except Exception:
+            _emit(f"   ⚠️ TVDB {ctid} 获取剧集列表失败")
+            continue
+
+        for ep in episodes:
+            season_num = ep.get("seasonNumber")
+            if season_num is None or season_num < 1:
+                continue  # skip specials (0) and movies (-1)
+            tvdb_name = (ep.get("name") or "").strip()
+            if not tvdb_name:
+                continue
+            score = fuzzy_match_episode(first_bgm_ep_name, tvdb_name)
+            if score >= 0.6:
+                _emit(
+                    f"   📺 tvdb={ctid} S{season_num:02d}E{ep.get('number', '?')} "
+                    f"\"{tvdb_name}\" ↔ \"{first_bgm_ep_name}\" score={score:.3f}"
+                )
+                if best_result is None or score > best_result[2]:
+                    best_result = (ctid, season_num, score, tvdb_name)
+
+    if best_result is None:
+        _emit("   ❌ 所有候选均未达到匹配阈值")
+        return None
+
+    _emit(
+        f"   ✅ 最佳匹配: tvdb_id={best_result[0]} S{best_result[1]:02d} "
+        f"\"{best_result[3]}\" ↔ \"{first_bgm_ep_name}\" score={best_result[2]:.3f}"
+    )
+    return {"tvdb_id": best_result[0], "tvdb_season": best_result[1]}
 
 
 async def enrich_subscription(
@@ -385,8 +555,7 @@ async def enrich_subscription(
     def _emit(msg: str) -> None:
         if on_progress:
             on_progress(msg)
-        else:
-            print(msg)
+        print(msg)
 
     try:
         _emit(f"🔗 丰富化订阅信息 (bgm_id={bangumi_id})...")
@@ -405,7 +574,7 @@ async def enrich_subscription(
         for _ in range(30):
             visited.add(current_id)
             try:
-                relations = await bgm_client.get_relations(current_id)
+                relations = await _get_bangumi_relations(current_id)
             except Exception:
                 _emit("⚠️ 获取 Bangumi 关系失败")
                 return None
@@ -440,6 +609,9 @@ async def enrich_subscription(
         _emit(f"✅ bgm_season={bgm_season}")
         series_name = root_name
         _emit(f"✅ series_name={series_name}")
+
+        # Build forward chain once — reused by both TVDB and TMDB auto-inference
+        chain_ids = await _build_chain_ids(root_id)
 
         # 2. Get sort range
         eps = await _get_bangumi_episodes(bangumi_id)
@@ -476,12 +648,33 @@ async def enrich_subscription(
         tvdb_id = get_tvdb_id(bangumi_id)
         tvdb_season = get_tvdb_season(bangumi_id)
 
+        # ── Tier-1 fallback: auto-infer missing TVDB ID ──
+        if not tvdb_id:
+            _emit("🔍 TVDB ID 缺失，启动自动推断...")
+            try:
+                tvdb_result = await _auto_infer_tvdb(
+                    bangumi_id, chain_ids, root_subject, _emit,
+                )
+                if tvdb_result:
+                    tvdb_id = tvdb_result["tvdb_id"]
+                    tvdb_season = tvdb_result["tvdb_season"]
+                    from ..data import set_tvdb_id as _persist_tvdb
+                    _persist_tvdb(bangumi_id, tvdb_id, tvdb_season)
+                    _emit(
+                        f"✅ TVDB 自动推断成功: "
+                        f"tvdb_id={tvdb_id}, tvdb_season={tvdb_season}"
+                    )
+                else:
+                    _emit("⚠️ 自动匹配 TVDB 失败，请在订阅卡片中手动设置")
+            except Exception as e:
+                _emit(f"⚠️ TVDB 自动推断异常: {e}")
+
         # ── Tier-1 fallback: auto-infer missing TMDB ID ──
         if not tmdb_id:
             _emit("🔍 TMDB ID 缺失，启动自动推断...")
             try:
                 fallback_result = await _auto_infer_tmdb(
-                    bangumi_id, root_id, root_subject, _emit,
+                    bangumi_id, chain_ids, root_subject, _emit,
                 )
                 if fallback_result:
                     tmdb_id = fallback_result["tmdb_id"]
@@ -757,8 +950,18 @@ async def write_episode_files(
     return {"nfo_path": nfo_path, "thumb_path": thumb_path}
 
 
-# Simple in-memory cache: {bangumi_id: {sort: episode_id}}
-_bgm_ep_id_cache: dict[int, dict[int, int]] = {}
+# Simple in-memory caches
+_bgm_ep_id_cache: dict[int, dict[int, int]] = {}  # {bangumi_id: {sort: episode_id}}
+_bgm_relations_cache: dict[int, list[dict]] = {}   # {subject_id: relations}
+
+
+async def _get_bangumi_relations(subject_id: int) -> list[dict]:
+    """Get relations for a Bangumi subject (cached)."""
+    rels = _bgm_relations_cache.get(subject_id)
+    if rels is None:
+        rels = await bgm_client.get_relations(subject_id)
+        _bgm_relations_cache[subject_id] = rels
+    return rels
 
 
 async def _get_bangumi_ep_id(bangumi_id: int, sort: int) -> int | None:
@@ -771,7 +974,7 @@ async def _get_bangumi_ep_id(bangumi_id: int, sort: int) -> int | None:
         return _bgm_ep_id_cache[bangumi_id].get(sort)
 
     try:
-        eps = await bgm_client.get_episodes(bangumi_id, ep_type=0)
+        eps = await _get_bangumi_episodes(bangumi_id)
     except Exception:
         logger.warning("Failed to fetch Bangumi episodes for id=%d", bangumi_id)
         return None
