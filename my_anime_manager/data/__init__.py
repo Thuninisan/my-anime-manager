@@ -436,6 +436,8 @@ def mark_downloaded(
     source: str,
     pub_date: str = "",
     info_hash: str = "",
+    tvdb_ep: int = 0,
+    tmdb_ep_calc: int = 0,
 ) -> None:
     """Record a downloaded episode, overwriting any prior record for the same ep.
 
@@ -456,6 +458,8 @@ def mark_downloaded(
         "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "tmdb_ep": existing.get("tmdb_ep"),
         "tmdb_season": existing.get("tmdb_season"),
+        "tvdb_ep": tvdb_ep or existing.get("tvdb_ep"),
+        "tmdb_ep_calc": tmdb_ep_calc or existing.get("tmdb_ep_calc"),
     }
     _save_hist(hist)
 
