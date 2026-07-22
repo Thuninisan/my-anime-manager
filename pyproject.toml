@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "my-anime-manager"
-version = "1.1.0"
+version = "1.1.1"
 description = "TMDB + Bangumi integration tool for Jellyfin metadata management with qBittorrent support"
 requires-python = ">=3.11"
 license = {text = "ISC"}
