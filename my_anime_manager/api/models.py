@@ -1,9 +1,7 @@
-"""API request/response models."""
+"""API request/response Pydantic models."""
 
 from pydantic import BaseModel
 
-# ═══════════════════════════════════════════════════════════════════════
-# Pydantic response models
 # ═══════════════════════════════════════════════════════════════════════
 
 class TmdbEpisodeInfo(BaseModel):
@@ -142,3 +140,19 @@ class ScanStatus(BaseModel):
     current_file: str
     errors: list[str]
 
+
+class TmdbSearchResult(BaseModel):
+    id: int
+    name: str
+    original_name: str = ""
+    first_air_date: str = ""
+    poster_path: str = ""
+
+
+class SetTmdbRequest(BaseModel):
+    tmdb_id: int
+    tmdb_season: int | None = None
+
+
+class IntervalBody(BaseModel):
+    minutes: int
