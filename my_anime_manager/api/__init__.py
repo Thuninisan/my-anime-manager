@@ -59,6 +59,7 @@ from .. import __version__
 from .models import *
 from .routes_settings import router as settings_router
 from .routes_system import router as system_router, _scan_worker, _watch_worker
+from .routes_downloader import router as downloader_router
 from . import state
 
 app = FastAPI(
@@ -69,6 +70,7 @@ app = FastAPI(
 
 app.include_router(settings_router)
 app.include_router(system_router)
+app.include_router(downloader_router)
 
 # ═══════════════════════════════════════════════════════════════════════
 # CORS — allow frontend dev servers
@@ -1280,44 +1282,6 @@ async def get_rss_feed(
         raise HTTPException(502, f"RSS 获取失败: {e}")
 
 
-# ── /api/rss/downloader ──
-
-@app.get("/api/rss/downloader/status")
-async def downloader_status():
-    return downloader.get_status()
-
-
-@app.post("/api/rss/downloader/start")
-async def downloader_start():
-    await downloader.start()
-    return {"ok": True}
-
-
-@app.post("/api/rss/downloader/stop")
-async def downloader_stop():
-    await downloader.stop()
-    return {"ok": True}
-
-
-@app.post("/api/rss/downloader/run-once")
-async def downloader_run_once():
-    await downloader.run_once()
-    return {"ok": True}
-
-
-@app.get("/api/rss/downloader/config")
-async def downloader_config():
-    return downloader.get_config()
-
-
-@app.patch("/api/rss/downloader/config")
-async def downloader_set_interval(body: IntervalBody):
-    return await downloader.set_interval(body.minutes)
-
-
-@app.get("/api/rss/downloader/qbit-check")
-async def downloader_qbit_check():
-    return await downloader.check_qbit()
 
 
 # ── /api/rss/subscriptions/{bangumi_id}/history ──
