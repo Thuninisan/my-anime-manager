@@ -57,12 +57,18 @@ logger = logging.getLogger(__name__)
 
 from .. import __version__
 from .models import *
+from .routes_settings import router as settings_router
+from .routes_system import router as system_router, _scan_worker, _watch_worker
+from . import state
 
 app = FastAPI(
     title="My Anime Manager",
     description="TMDB + Bangumi 联动工具，为 Jellyfin 生成 NFO 元数据，支持 qBittorrent",
     version=__version__,
 )
+
+app.include_router(settings_router)
+app.include_router(system_router)
 
 # ═══════════════════════════════════════════════════════════════════════
 # CORS — allow frontend dev servers
@@ -88,8 +94,6 @@ app.add_middleware(
 _frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 
 # ── Update check state ──
-_SOURCE_DIR = os.environ.get("MAM_SOURCE_DIR", "/app/source")
-_update_cache: dict = {"checked_at": None, "result": None}
 
 
 @app.on_event("startup")
@@ -108,24 +112,22 @@ async def on_startup():
     # Auto-start directory watcher if WATCH_DIR env var is set
     watch_dir = os.environ.get("WATCH_DIR", "")
     if watch_dir:
-        global _watch_task
-        _watch_task = asyncio.create_task(_watch_worker(watch_dir))
+        state._watch_task = asyncio.create_task(_watch_worker(watch_dir))
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
     """Gracefully stop all background workers before shutdown/update."""
-    global _watch_task, _scan_task
     logger.info("Shutting down background workers...")
 
     # Cancel watch worker
-    if _watch_task and not _watch_task.done():
-        _watch_task.cancel()
+    if state._watch_task and not state._watch_task.done():
+        state._watch_task.cancel()
         logger.info("Watch worker cancelled.")
 
     # Cancel scan worker
-    if _scan_task and not _scan_task.done():
-        _scan_task.cancel()
+    if state._scan_task and not state._scan_task.done():
+        state._scan_task.cancel()
         logger.info("Scan worker cancelled.")
 
     # Stop RSS downloader
@@ -136,158 +138,13 @@ async def on_shutdown():
         logger.warning("RSS downloader stop: %s", e)
 
     # Cancel download monitor tasks
-    for info_hash, task in list(_download_tasks.items()):
+    for info_hash, task in list(state._download_tasks.items()):
         if not task.done():
             task.cancel()
             logger.info("Download monitor cancelled: %s", info_hash[:8])
-    _download_tasks.clear()
+    state._download_tasks.clear()
 
     logger.info("All workers stopped — safe to restart.")
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Pydantic response models
-# ═══════════════════════════════════════════════════════════════════════
-# background scan state
-# ═══════════════════════════════════════════════════════════════════════
-
-_scan_task: Optional[asyncio.Task] = None
-_scan_status: dict = {
-    "running": False,
-    "dir": "",
-    "total": 0,
-    "processed": 0,
-    "deleted": 0,
-    "failed": 0,
-    "current_file": "",
-    "errors": [],
-}
-
-
-async def _scan_worker(dir_path: str):
-    """Background worker: scan directory and process each .torrent file."""
-    global _scan_status
-    abs_dir = Path(dir_path).resolve()
-
-    _scan_status = {
-        "running": True,
-        "dir": str(abs_dir),
-        "total": 0,
-        "processed": 0,
-        "deleted": 0,
-        "failed": 0,
-        "current_file": "",
-        "errors": [],
-    }
-
-    if not abs_dir.exists():
-        _scan_status["errors"].append(f"目录不存在: {abs_dir}")
-        _scan_status["running"] = False
-        return
-
-    files = sorted(abs_dir.glob("*.torrent"))
-    _scan_status["total"] = len(files)
-
-    if not files:
-        _scan_status["running"] = False
-        return
-
-    for file in files:
-        _scan_status["current_file"] = file.name
-        try:
-            await process_torrent(str(file))
-            file.unlink()
-            _scan_status["processed"] += 1
-            _scan_status["deleted"] += 1
-        except Exception as e:
-            _scan_status["failed"] += 1
-            _scan_status["errors"].append(f"{file.name}: {e}")
-
-    _scan_status["current_file"] = ""
-    _scan_status["running"] = False
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# background watch state
-# ═══════════════════════════════════════════════════════════════════════
-
-_watch_task: Optional[asyncio.Task] = None
-_watch_status: dict = {
-    "running": False,
-    "dir": "",
-    "processed": 0,
-    "deleted": 0,
-    "failed": 0,
-    "current_file": "",
-    "errors": [],
-}
-
-
-async def _watch_worker(dir_path: str):
-    """Background worker: continuously watch directory for .torrent files."""
-    global _watch_status
-    abs_dir = Path(dir_path).resolve()
-
-    if not abs_dir.exists():
-        print(f"❌ 监控目录不存在: {abs_dir}")
-        _watch_status["running"] = False
-        return
-
-    SCAN_INTERVAL = 30
-    print(f"👀 开始监控 {abs_dir}，每 {SCAN_INTERVAL}s 扫描一次...")
-
-    _watch_status["running"] = True
-    _watch_status["dir"] = str(abs_dir)
-
-    while True:
-        files = sorted(abs_dir.glob("*.torrent"))
-
-        if files:
-            print(f"📁 扫描到 {len(files)} 个 torrent 文件")
-            _watch_status["errors"] = []
-
-            failed_dir = abs_dir / "failed"
-            failed_dir.mkdir(exist_ok=True)
-
-            for file in files:
-                _watch_status["current_file"] = file.name
-                success = False
-                try:
-                    await process_torrent(str(file))
-                    success = True
-                except Exception as e:
-                    _watch_status["failed"] += 1
-                    _watch_status["errors"].append(f"{file.name}: {e!r}")
-                    print(f"❌ 处理失败 {file.name}: {e!r}")
-                    traceback.print_exc()
-
-                if not file.exists():
-                    _watch_status["processed"] += 1
-                    _watch_status["deleted"] += 1
-                elif success:
-                    file.unlink()
-                    _watch_status["processed"] += 1
-                    _watch_status["deleted"] += 1
-                else:
-                    dest = failed_dir / file.name
-                    if dest.exists():
-                        stem = file.stem
-                        counter = 1
-                        while dest.exists():
-                            dest = failed_dir / f"{stem}_{counter}.torrent"
-                            counter += 1
-                    file.rename(dest)
-                    print(f"   ⚠️ 处理失败，已移到 {dest}")
-
-            _watch_status["current_file"] = ""
-            print("   继续监控...")
-
-        await asyncio.sleep(SCAN_INTERVAL)
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# Routes
-# ═══════════════════════════════════════════════════════════════════════
 
 @app.get("/")
 async def root():
@@ -303,10 +160,10 @@ async def root():
         "version": __version__,
         "docs": "/docs",
         "watch": {
-            "running": _watch_status["running"],
-            "dir": _watch_status["dir"],
-            "processed": _watch_status["processed"],
-            "failed": _watch_status["failed"],
+            "running": state._watch_status["running"],
+            "dir": state._watch_status["dir"],
+            "processed": state._watch_status["processed"],
+            "failed": state._watch_status["failed"],
         },
     }
 
@@ -1006,7 +863,7 @@ async def torrent_download(body: dict):
             skip_nfo=nfo_generated,
         )
     )
-    _download_tasks[info_hash] = task
+    state._download_tasks[info_hash] = task
 
     # Clean up the temp torrent file (already added to qBittorrent)
     Path(torrent_path).unlink(missing_ok=True)
@@ -1044,26 +901,6 @@ async def scan_status():
 async def watch_status():
     """Get the current watch loop status (auto-started via WATCH_DIR)."""
     return _watch_status
-
-
-# ── /config ──
-
-@app.get("/config")
-async def get_config():
-    """Read all current config values (sensitive fields masked)."""
-    return config.get_all()
-
-
-@app.put("/config")
-async def update_config(changes: dict[str, object]):
-    """Update config values at runtime.
-
-    Example body:
-        {"TMDB_API_KEY": "new-key", "PROXY_PORT": 1080}
-
-    Only known config keys are accepted; unknown keys are silently ignored.
-    """
-    return config.update(changes)
 
 
 # ── /api/rss/bangumi/{id} ──
@@ -2103,17 +1940,6 @@ async def update_episode_overrides(
                     logger.exception("overrides+PATCH: NFO regeneration failed")
 
     return {"ok": True}
-
-@app.get("/api/rss/settings")
-async def get_rss_settings():
-    """Get global RSS settings (exclude patterns, etc.)."""
-    return data.get_rss_settings()
-
-
-@app.put("/api/rss/settings")
-async def update_rss_settings(changes: dict[str, object]):
-    """Update global RSS settings."""
-    return data.update_rss_settings(changes)
 
 
 # ═══════════════════════════════════════════════════════════════════════
