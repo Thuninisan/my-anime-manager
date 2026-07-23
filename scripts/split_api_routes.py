@@ -1,68 +1,71 @@
 #!/usr/bin/env python3
-"""Extract route groups from api/__init__.py into separate modules using APIRouter."""
+"""Split api/__init__.py routes into separate modules with APIRouter."""
 import re
 from pathlib import Path
 
-API_DIR = Path("my_anime_manager/api")
-INIT = API_DIR / "__init__.py"
-
+API = Path("my_anime_manager/api")
+INIT = API / "__init__.py"
 text = INIT.read_text(encoding="utf-8")
 lines = text.split("\n")
 
-# ── Find all @app.route decorated functions and their line ranges ──
-route_funcs = []
-for i, line in enumerate(lines):
-    m = re.match(r'@app\.(get|post|put|patch|delete)\(', line)
-    if m:
-        # Find the function definition (next non-decorator line starting with async def or def)
-        start = i
-        for j in range(i+1, min(i+5, len(lines))):
-            if re.match(r'(async )?def ', lines[j]):
-                func_name = lines[j].split("(")[0].split()[-1]
-                # Find end of function (next @app. or top-level definition)
-                end = j + 1
-                while end < len(lines):
-                    if re.match(r'@app\.|^# ═', lines[end]) and lines[end-1].strip() == "":
-                        break
-                    end += 1
-                route_funcs.append({
-                    "method": m.group(1),
-                    "path": m.group(0).split('"')[1] if '"' in m.group(0) else m.group(0).split("'")[1],
-                    "func": func_name,
-                    "line_start": start,
-                    "line_end": end,
-                })
+# ── Route group definitions: (filename, start_line_keyword, end_line_keyword) ──
+# Keywords are exact strings to match in comment lines
+GROUPS = [
+    ("torrent", "# ── /api/torrent/subtitle", "# ── /scan ──"),
+    ("system",  "# ── /scan ──",            "# ── /config ──"),
+    ("settings","# ── /config ──",           "# ── /api/rss/bangumi/{id} ──"),
+    ("rss",     "# ── /api/rss/bangumi",     "# ── # ═"),
+    ("tmdb",    "# ── /api/rss/tmdb-search", None),  # till next group or end
+    ("downloader","# ── /api/rss/downloader", None),
+    ("history", "# ── /api/rss/subscriptions/{id}/history", "# ── /api/rss/download-history/{id}/{sort}"),
+]
+
+# Find exact line numbers for each group
+group_ranges = {}
+for name, start_kw, end_kw in GROUPS:
+    s = e = -1
+    for i, l in enumerate(lines):
+        if s < 0 and l.strip().startswith(start_kw):
+            s = i - 1  # include the blank line before
+            while s > 0 and not lines[s-1].strip():
+                s -= 1
+        if e < 0 and end_kw and l.strip().startswith(end_kw) and i > s:
+            e = i
+    if e < 0:  # no end keyword, find next route section or end of file
+        for i in range(s + 1, len(lines)):
+            if re.match(r'@app\.(get|post|put|patch|delete)\(', lines[i]) and i > s + 10:
+                e = i - 1
+                while e > s and not lines[e].strip():
+                    e -= 1
                 break
+        if e < 0:
+            e = len(lines)
+    if s >= 0 and e > s:
+        group_ranges[name] = (s, e)
+        print(f"  {name}: lines {s+1}-{e+1} ({e-s} lines)")
 
-# ── Group routes by prefix ──
-GROUPS = {
-    "system": [
-        ("/scan", "scan"),
-        ("/scan/status", "scan_status"),
-        ("/watch/status", "watch_status"),
-        ("/api/update/check", "check_update"),
-        ("/api/update/apply", "apply_update"),
-        ("/{full_path:path}", "serve_frontend"),
-    ],
-}
+# ── Write each route file ──
+ROUTE_TEMPLATE = '''"""API routes: {name}."""
 
-# Group routes
-route_by_name = {r["func"]: r for r in route_funcs}
-print(f"Found {len(route_funcs)} route functions")
+from fastapi import APIRouter{extra_imports}
 
-# ── Count lines that would be saved by extracting each group ──
-for group_name, routes in GROUPS.items():
-    total = 0
-    for path, func in routes:
-        r = route_by_name.get(func)
-        if r:
-            total += r["line_end"] - r["line_start"]
-    print(f"  {group_name}: {len(routes)} routes, ~{total} lines")
+router = APIRouter()
 
-print(f"\nTotal routes with prefixes:")
-prefixes = {}
-for r in route_funcs:
-    pfx = "/".join(r["path"].split("/")[:3])
-    prefixes.setdefault(pfx, []).append(r["func"])
-for pfx, funcs in sorted(prefixes.items()):
-    print(f"  {pfx}: {len(funcs)} routes - {', '.join(funcs[:3])}")
+'''
+
+for name, (s, e) in group_ranges.items():
+    code_lines = lines[s:e]
+
+    # Determine extra imports needed
+    extra = ""
+    code = "\n".join(code_lines)
+
+    # Change @app.xxx to @router.xxx
+    code = re.sub(r'@app\.(get|post|put|patch|delete)\(', r'@router.\1(', code)
+
+    out_path = API / f"routes_{name}.py"
+    content = ROUTE_TEMPLATE.format(name=name, extra_imports=extra) + code + "\n"
+    out_path.write_text(content, encoding="utf-8")
+    print(f"  Wrote {out_path} ({len(content.splitlines())} lines)")
+
+print("\nDone! Check files compile with: python -m py_compile api/routes_*.py")
