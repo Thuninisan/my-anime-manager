@@ -69,7 +69,6 @@ app = FastAPI(
 )
 
 app.include_router(settings_router)
-app.include_router(system_router)
 app.include_router(downloader_router)
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -875,34 +874,6 @@ async def torrent_download(body: dict):
         "info_hash": info_hash,
         "message": f"种子已添加，选择性下载 {len(download_indices)}/{len(qb_files)} 个文件。下载完成后自动创建硬链接。",
     }
-
-
-# ── /scan ──
-
-@app.post("/scan")
-async def start_scan(dir_path: str = Form(...)):
-    """Start scanning a directory for .torrent files in the background.
-
-    Only one scan can run at a time.
-    """
-    global _scan_task
-    if _scan_task and not _scan_task.done():
-        raise HTTPException(409, "扫描任务已在运行中")
-
-    _scan_task = asyncio.create_task(_scan_worker(dir_path))
-    return {"ok": True, "dir": dir_path, "message": "扫描已启动"}
-
-
-@app.get("/scan/status", response_model=ScanStatus)
-async def scan_status():
-    """Get the current scan progress."""
-    return ScanStatus(**_scan_status)
-
-
-@app.get("/watch/status")
-async def watch_status():
-    """Get the current watch loop status (auto-started via WATCH_DIR)."""
-    return _watch_status
 
 
 # ── /api/rss/bangumi/{id} ──
@@ -1903,108 +1874,6 @@ async def update_episode_overrides(
                 except Exception:
                     logger.exception("overrides+PATCH: NFO regeneration failed")
 
-    return {"ok": True}
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# Update check & apply — git pull + process restart
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.get("/api/update/check")
-async def check_update():
-    """Compare local git HEAD vs remote origin. Results cached for 1 hour."""
-    now = datetime.utcnow()
-    if _update_cache["checked_at"] and _update_cache["result"]:
-        if (now - _update_cache["checked_at"]).total_seconds() < 3600:
-            return _update_cache["result"]
-
-    try:
-        subprocess.run(
-            ["git", "-C", _SOURCE_DIR, "fetch", "origin", "main"],
-            capture_output=True, text=True, timeout=30, check=True,
-        )
-        local = subprocess.run(
-            ["git", "-C", _SOURCE_DIR, "rev-parse", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        )
-        remote = subprocess.run(
-            ["git", "-C", _SOURCE_DIR, "rev-parse", "origin/main"],
-            capture_output=True, text=True, timeout=5,
-        )
-        local_sha = local.stdout.strip()[:7]
-        remote_sha = remote.stdout.strip()[:7]
-        has_update = local_sha != remote_sha
-
-        # Also get the latest tag for display
-        try:
-            tag_result = subprocess.run(
-                ["git", "-C", _SOURCE_DIR, "describe", "--tags", "--abbrev=0", "origin/main"],
-                capture_output=True, text=True, timeout=5,
-            )
-            latest_tag = tag_result.stdout.strip()
-        except Exception:
-            latest_tag = ""
-
-        result = {
-            "update_available": has_update,
-            "current_sha": local_sha,
-            "latest_sha": remote_sha,
-            "current_version": __version__,
-            "latest_tag": latest_tag,
-        }
-        _update_cache["checked_at"] = now
-        _update_cache["result"] = result
-        return result
-    except subprocess.CalledProcessError as e:
-        logger.warning("Update check git error: %s", e.stderr)
-        return {"update_available": False, "error": f"Git error: {e.stderr.strip()[:200]}", "current_version": __version__}
-    except Exception as e:
-        logger.warning("Update check failed: %s", e)
-        return {"update_available": False, "error": str(e), "current_version": __version__}
-
-
-@app.post("/api/update/apply")
-async def apply_update():
-    """Gracefully shutdown workers, then exit with code 42.
-
-    Exit code 42 signals the entrypoint script to re-run the update loop:
-    git pull → pip install → npm build → restart uvicorn.
-    The Docker container itself does NOT restart.
-    """
-    async def _do_restart():
-        await asyncio.sleep(1)  # Let HTTP response flush to the client
-        logger.info("Update triggered — shutting down for process restart (exit 42)...")
-        os._exit(42)
-
-    asyncio.create_task(_do_restart())
-    return {"ok": True, "message": "Pulling latest code and restarting application..."}
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# SPA fallback — MUST be the LAST route registered
-# ═══════════════════════════════════════════════════════════════════════
-
-@app.get("/{full_path:path}", include_in_schema=False)
-async def serve_frontend(full_path: str):
-    """Serve the React SPA for all non-API routes (production mode).
-
-    Registered LAST so that all explicit routes (/config, /api/*, /scan,
-    /watch) take priority.  Only fires for frontend navigation
-    paths that don't match any other route.
-    """
-    if not _frontend_dist.exists():
-        raise HTTPException(404, "Frontend not built (run: cd frontend && npm run build)")
-
-    # Try to serve the exact file
-    file_path = _frontend_dist / full_path
-    if file_path.is_file():
-        from fastapi.responses import FileResponse
-        return FileResponse(str(file_path))
-
-    # SPA fallback: serve index.html for client-side routing
-    index_path = _frontend_dist / "index.html"
-    if index_path.exists():
-        from fastapi.responses import FileResponse
-        return FileResponse(str(index_path))
-
-    raise HTTPException(404, "Not found")
+# System routes (scan, watch, update, SPA) — MUST be last
+app.include_router(system_router)

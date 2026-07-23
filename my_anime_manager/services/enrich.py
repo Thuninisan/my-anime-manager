@@ -593,7 +593,10 @@ async def enrich_subscription(
     def _emit(msg: str) -> None:
         if on_progress:
             on_progress(msg)
-        print(msg)
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            pass  # Windows gbk terminal can't print emoji
 
     try:
         _emit(f"🔗 丰富化订阅信息 (bgm_id={bangumi_id})...")
@@ -775,19 +778,24 @@ async def enrich_subscription(
             pass
 
         return {
-            "bgm_season": bgm_season,
-            "bgm_sortrange": bgm_sortrange,
-            "series_name": series_name,
-            "bgm_subject_name": bgm_subject_name,
-            "tmdb_id": tmdb_id or 0,
-            "tmdb_season": tmdb_season,
-            "tvdb_id": tvdb_id or 0,
-            "tvdb_season": tvdb_season,
-            "tmdb_ep_offset": tmdb_ep_offset,
-            "tvdb_ep_offset": tvdb_ep_offset,
-            "bgm_rating": bgm_rating,
-            "bgm_rating_total": bgm_rating_total,
-            "air_date": air_date,
+            "bgm": {
+                "season": bgm_season,
+                "sortrange": bgm_sortrange,
+                "series_name": series_name,
+                "subject_name": bgm_subject_name,
+                "rating": bgm_rating,
+                "air_date": air_date,
+            },
+            "tvdb": {
+                "id": tvdb_id or 0,
+                "season": tvdb_season,
+                "ep_offset": tvdb_ep_offset,
+            },
+            "tmdb": {
+                "id": tmdb_id or 0,
+                "season": tmdb_season,
+                "ep_offset": tmdb_ep_offset,
+            },
         }
     except Exception as e:
         _emit(f"⚠️ enrich_subscription 失败: {e}")
