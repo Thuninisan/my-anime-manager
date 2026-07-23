@@ -97,34 +97,48 @@ export interface RssFeedResponse {
   items: RssFeedItem[];
 }
 
-export interface SubscriptionOut {
-  name: string;
+export interface BgmMeta {
+  season?: number;
+  sortrange?: number[];
+  subject_name?: string;
+  series_name?: string;
+  rating?: number;
+  air_date?: string;
+}
+
+export interface TvdbMeta {
+  id?: number;
+  season?: number | null;
+  ep_offset?: number;
+}
+
+export interface TmdbMeta {
+  id?: number;
+  season?: number | null;
+  ep_offset?: number;
+}
+
+export interface RssSourceMeta {
   rss_url: string;
-  bangumi_id: number;
   subgroup_id: number;
   subgroup_name: string;
   filter_tags: string[];
-  backup_rss_url: string;
-  backup_subgroup_id: number;
-  backup_subgroup_name: string;
-  backup_filter_tags: string[];
   exclude_patterns?: string[];
-  backup_exclude_patterns?: string[];
+}
+
+export interface SubscriptionOut {
+  name: string;
+  bangumi_id: number;
   created_at: string;
   updated_at: string;
   download_path?: string;
   active?: number;
-  // Pre-computed season metadata (from Bangumi chain)
-  bgm_season?: number;
-  bgm_sortrange?: number[];
-  // Bangumi rating (from subject API)
-  bgm_rating?: number;
-  bgm_rating_total?: number;
-  tmdb_id?: number;
-  tmdb_season?: number | null;
-  // Poster image URL (served from backend /posters/ static mount)
+  primary: RssSourceMeta;
+  backup: RssSourceMeta;
+  bgm: BgmMeta;
+  tvdb: TvdbMeta;
+  tmdb: TmdbMeta;
   poster_url?: string;
-  // Downloaded episode count (from download history)
   downloaded_count?: number;
 }
 
@@ -179,4 +193,5 @@ export interface AppConfig {
   TORRENT_DOWNLOAD_PATH: string;
   TORRENT_EXCLUDE_PATTERNS: string;
   TORRENT_HARDLINK_PATH: string;
+  RSS_PATH_TEMPLATE: string;
 }

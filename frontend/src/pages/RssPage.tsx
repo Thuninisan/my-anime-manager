@@ -116,8 +116,8 @@ export default function RssPage() {
     if (!result) return null;
     for (const s of subscriptions) {
       if (s.bangumi_id !== result.bangumi_id) continue;
-      if (s.subgroup_id === subgroupId) return 'primary';
-      if (s.backup_subgroup_id === subgroupId) return 'backup';
+      if (s.primary.subgroup_id === subgroupId) return 'primary';
+      if (s.backup.subgroup_id === subgroupId) return 'backup';
     }
     return null;
   };
@@ -128,8 +128,8 @@ export default function RssPage() {
     let primary = false, backup = false;
     for (const s of subscriptions) {
       if (s.bangumi_id !== result.bangumi_id) continue;
-      if (s.subgroup_id) primary = true;
-      if (s.backup_subgroup_id) backup = true;
+      if (s.primary.subgroup_id) primary = true;
+      if (s.backup.subgroup_id) backup = true;
     }
     return { primary, backup };
   })();

@@ -230,7 +230,7 @@ export default function EpisodeTable({
                                 <span className="text-muted-foreground text-[10px]">S</span>
                                 <input value={tmdbForm.season}
                                   onChange={ev => setTmdbForm(p => ({ ...p, season: ev.target.value }))}
-                                  placeholder={String(sub?.tmdb_season ?? 1)}
+                                  placeholder={String(sub?.tmdb?.season ?? 1)}
                                   className="w-14 text-xs bg-background border border-border rounded-xl px-3 py-2.5 text-center focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary shadow-sm"
                                 />
                               </label>

@@ -10,7 +10,7 @@ interface Props {
 }
 
 export default function SubscriptionCard({ subscription: s, onOpenHistory, onUnsubscribe, onActivate, onSetTmdb }: Props) {
-  const totalEps = s.bgm_sortrange ? s.bgm_sortrange[1] - s.bgm_sortrange[0] + 1 : 0;
+  const totalEps = s.bgm?.sortrange ? s.bgm.sortrange[1] - s.bgm.sortrange[0] + 1 : 0;
   const downloaded = s.downloaded_count || 0;
   const progressPct = totalEps > 0 ? (downloaded / totalEps) * 100 : 0;
   const isActive = s.active !== 0;
@@ -45,9 +45,9 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
         )}
 
         {/* Rating badge — only shown when rating > 0 */}
-        {(s.bgm_rating != null && s.bgm_rating > 0) && (
+        {(s.bgm?.rating != null && s.bgm.rating > 0) && (
           <div className="absolute top-3 left-3 bg-secondary text-white text-[10px] font-bold px-2 py-1 rounded-full glass-effect">
-            BGM {s.bgm_rating.toFixed(1)} / 10
+            BGM {s.bgm.rating.toFixed(1)} / 10
           </div>
         )}
 
@@ -119,25 +119,25 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
         </div>
         {/* Tags */}
         <div className="flex flex-wrap gap-1">
-          {s.subgroup_name && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground truncate max-w-[80px]" title={s.subgroup_name}>
-              {s.subgroup_name}
+          {s.primary.subgroup_name && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground truncate max-w-[80px]" title={s.primary.subgroup_name}>
+              {s.primary.subgroup_name}
             </span>
           )}
-          {s.filter_tags.length > 0
-            ? s.filter_tags.slice(0, 2).map(t => (
+          {s.primary.filter_tags.length > 0
+            ? s.primary.filter_tags.slice(0, 2).map(t => (
                 <span key={t} className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{t}</span>
               ))
             : <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Any</span>
           }
-          {s.backup_subgroup_name && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400" title={s.backup_subgroup_name}>
+          {s.backup.subgroup_name && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400" title={s.backup.subgroup_name}>
               backup
             </span>
           )}
         </div>
         {/* Missing TMDB warning — Tier-2 manual override trigger */}
-        {(!s.tmdb_id || s.tmdb_id === 0) && (
+        {(!s.tmdb?.id || s.tmdb?.id === 0) && (
           <button
             className="w-full text-[10px] px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors font-medium"
             onClick={(e) => {

@@ -56,9 +56,9 @@ export default function LeftSidebar({
               </div>
             </div>
           )}
-          {(sub?.bgm_rating != null && sub.bgm_rating > 0) && (
+          {(sub?.bgm?.rating != null && sub.bgm.rating > 0) && (
             <div className="absolute top-3 left-3 bg-secondary text-white text-[10px] font-bold px-2 py-1 rounded-full shadow-sm">
-              BGM {sub.bgm_rating.toFixed(1)} / 10
+              BGM {sub.bgm.rating.toFixed(1)} / 10
             </div>
           )}
         </div>
@@ -70,8 +70,8 @@ export default function LeftSidebar({
           {sub?.name || data?.name || '...'}
         </h2>
         <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
-          Season {data?.bgm_season || sub?.bgm_season || '?'}
-          {sub?.backup_subgroup_name && (
+          Season {data?.bgm?.season || sub?.bgm?.season || '?'}
+          {sub?.backup?.subgroup_name && (
             <>
               <span className="text-muted-foreground/40">·</span>
               <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -87,7 +87,7 @@ export default function LeftSidebar({
         </p>
 
         {/* Status card — only when single RSS (backup absent, more room) */}
-        {!sub?.backup_subgroup_name && (
+        {!sub?.backup?.subgroup_name && (
           <div className="mt-3 my-4">
             <span className="text-[13px] uppercase tracking-wider text-muted-foreground font-semibold block mb-1.5">Status</span>
             <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-semibold ${
@@ -101,12 +101,12 @@ export default function LeftSidebar({
           </div>
         )}
 
-        <div className={sub?.backup_subgroup_name ? 'mt-4 space-y-2.5' : 'mt-4 space-y-2.5'}>
+        <div className={sub?.backup?.subgroup_name ? 'mt-4 space-y-2.5' : 'mt-4 space-y-2.5'}>
           {/* ── Primary RSS card ── */}
           <div className="relative group bg-muted/30 rounded-lg p-3 space-y-1.5">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Primary RSS</div>
-            <Row label="Sub Group" value={sub?.subgroup_name || '—'} />
-            <Row label="Tags" value={sub?.filter_tags?.length ? sub.filter_tags.join(', ') : '无'} />
+            <Row label="Sub Group" value={sub?.primary?.subgroup_name || '—'} />
+            <Row label="Tags" value={sub?.primary?.filter_tags?.length ? sub.primary.filter_tags.join(', ') : '无'} />
             {editingCard === 'primary' ? (
               <div className="flex justify-between items-baseline gap-2">
                 <span className="text-[10px] text-muted-foreground shrink-0">Exclude</span>
@@ -120,9 +120,9 @@ export default function LeftSidebar({
                 />
               </div>
             ) : (
-              <Row label="Exclude" value={sub?.exclude_patterns?.length ? sub.exclude_patterns.join(', ') : '无'} />
+              <Row label="Exclude" value={sub?.primary?.exclude_patterns?.length ? sub.primary.exclude_patterns.join(', ') : '无'} />
             )}
-            <Row label="RSS" value={sub?.rss_url || '—'} mono />
+            <Row label="RSS" value={sub?.primary?.rss_url || '—'} mono />
 
             {editingCard !== 'primary' && (
               <div className="absolute inset-0 rounded-lg bg-primary/5 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
@@ -147,11 +147,11 @@ export default function LeftSidebar({
           </div>
 
           {/* ── Backup RSS card ── */}
-          {sub?.backup_subgroup_name && (
+          {sub?.backup?.subgroup_name && (
             <div className="relative group bg-muted/30 rounded-lg p-3 space-y-1">
               <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Backup RSS</div>
-              <Row label="Sub Group" value={sub.backup_subgroup_name} />
-              <Row label="Tags" value={sub?.backup_filter_tags?.length ? sub.backup_filter_tags.join(', ') : '无'} />
+              <Row label="Sub Group" value={sub.backup.subgroup_name} />
+              <Row label="Tags" value={sub?.backup?.filter_tags?.length ? sub.backup.filter_tags.join(', ') : '无'} />
               {editingCard === 'backup' ? (
                 <div className="flex justify-between items-baseline gap-2">
                   <span className="text-[10px] text-muted-foreground shrink-0">Exclude</span>
@@ -165,9 +165,9 @@ export default function LeftSidebar({
                   />
                 </div>
               ) : (
-                <Row label="Exclude" value={sub?.backup_exclude_patterns?.length ? sub.backup_exclude_patterns.join(', ') : '无'} />
+                <Row label="Exclude" value={sub?.backup?.exclude_patterns?.length ? sub.backup.exclude_patterns.join(', ') : '无'} />
               )}
-              <Row label="RSS" value={sub.backup_rss_url || '—'} mono />
+              <Row label="RSS" value={sub.backup.rss_url || '—'} mono />
 
               {editingCard !== 'backup' && (
                 <div className="absolute inset-0 rounded-lg bg-primary/5 backdrop-blur-[1px] opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">

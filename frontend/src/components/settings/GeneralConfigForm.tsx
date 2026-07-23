@@ -154,6 +154,17 @@ export default function GeneralConfigForm({ config, dirty, onChange }: Props) {
               onChange={e => onChange('MIKAN_BASE_URL', e.target.value)}
             />
           </FieldRow>
+          <FieldRow
+            label="RSS Path Template"
+            hint="Variables: {`{series_name}`}, {`{bangumi_title}`}, {`{bgm_season}`}, {`{tvdb_season}`}, {`{tmdb_season}`}, {`{bangumi_sort}`}, {`{bangumi_ep}`}, {`{tvdb_episode}`}, {`{tmdb_episode}`}. Format specs supported (e.g. {`{tvdb_episode:02d}`}). Extension auto-appended."
+          >
+            <input
+              className={fieldClass('RSS_PATH_TEMPLATE')}
+              type="text"
+              value={val('RSS_PATH_TEMPLATE')}
+              onChange={e => onChange('RSS_PATH_TEMPLATE', e.target.value)}
+            />
+          </FieldRow>
         </div>
       </SectionCard>
 
