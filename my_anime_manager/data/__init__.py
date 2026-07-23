@@ -263,10 +263,62 @@ _subs_lock = threading.Lock()
 def _load_subs() -> list[dict]:
     if _SUBS_FILE.exists():
         try:
-            return json.loads(_SUBS_FILE.read_text(encoding="utf-8"))
+            data = json.loads(_SUBS_FILE.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return []
+        if _migrate_subscriptions(data):
+            _atomic_write(_SUBS_FILE, json.dumps(data, ensure_ascii=False, indent=2))
+        return data
     return []
+
+
+def _migrate_subscriptions(data: list[dict]) -> bool:
+    """Migrate old flat subscription format to nested groups.
+
+    Returns True if any migration was performed.
+    """
+    migrated = False
+    for sub in data:
+        if "bgm" in sub:
+            continue  # already migrated
+
+        sub["bgm"] = {
+            "season": sub.pop("bgm_season", 1),
+            "sortrange": sub.pop("bgm_sortrange", [0, 0]),
+            "subject_name": sub.pop("bgm_subject_name", sub.pop("name", "")),
+            "series_name": sub.pop("series_name", ""),
+            "rating": sub.pop("bgm_rating", 0.0),
+            "air_date": sub.pop("air_date", ""),
+        }
+        sub.pop("bgm_rating_total", None)
+
+        sub["tvdb"] = {
+            "id": sub.pop("tvdb_id", 0) or 0,
+            "season": sub.pop("tvdb_season", None),
+            "ep_offset": sub.pop("tvdb_ep_offset", 0),
+        }
+        sub["tmdb"] = {
+            "id": sub.pop("tmdb_id", 0) or 0,
+            "season": sub.pop("tmdb_season", None),
+            "ep_offset": sub.pop("tmdb_ep_offset", 0),
+        }
+
+        sub["primary"] = {
+            "rss_url": sub.pop("rss_url", ""),
+            "subgroup_id": sub.pop("subgroup_id", 0),
+            "subgroup_name": sub.pop("subgroup_name", ""),
+            "filter_tags": sub.pop("filter_tags", []),
+            "exclude_patterns": sub.pop("exclude_patterns", []),
+        }
+        sub["backup"] = {
+            "rss_url": sub.pop("backup_rss_url", ""),
+            "subgroup_id": sub.pop("backup_subgroup_id", 0),
+            "subgroup_name": sub.pop("backup_subgroup_name", ""),
+            "filter_tags": sub.pop("backup_filter_tags", []),
+            "exclude_patterns": sub.pop("backup_exclude_patterns", []),
+        }
+        migrated = True
+    return migrated
 
 
 def _save_subs(subs: list[dict]) -> None:
@@ -302,16 +354,20 @@ def add_subscription(
     for s in subs:
         if s["bangumi_id"] == bangumi_id:
             s["name"] = name
-            s["rss_url"] = rss_url
-            s["subgroup_id"] = subgroup_id
-            s["subgroup_name"] = subgroup_name
-            s["filter_tags"] = filter_tags or []
-            s["backup_rss_url"] = backup_rss_url
-            s["backup_subgroup_id"] = backup_subgroup_id
-            s["backup_subgroup_name"] = backup_subgroup_name
-            s["backup_filter_tags"] = backup_filter_tags or []
-            s["exclude_patterns"] = exclude_patterns or []
-            s["backup_exclude_patterns"] = backup_exclude_patterns or []
+            s["primary"] = {
+                "rss_url": rss_url,
+                "subgroup_id": subgroup_id,
+                "subgroup_name": subgroup_name,
+                "filter_tags": filter_tags or [],
+                "exclude_patterns": exclude_patterns or [],
+            }
+            s["backup"] = {
+                "rss_url": backup_rss_url,
+                "subgroup_id": backup_subgroup_id,
+                "subgroup_name": backup_subgroup_name,
+                "filter_tags": backup_filter_tags or [],
+                "exclude_patterns": backup_exclude_patterns or [],
+            }
             if download_path:
                 s["download_path"] = download_path
             s["updated_at"] = now
@@ -320,20 +376,24 @@ def add_subscription(
 
     sub = {
         "name": name,
-        "rss_url": rss_url,
         "bangumi_id": bangumi_id,
-        "subgroup_id": subgroup_id,
-        "subgroup_name": subgroup_name,
-        "filter_tags": filter_tags or [],
-        "backup_rss_url": backup_rss_url,
-        "backup_subgroup_id": backup_subgroup_id,
-        "backup_subgroup_name": backup_subgroup_name,
-        "backup_filter_tags": backup_filter_tags or [],
         "download_path": download_path or f"/{{series_name}}/Season {{season}}",
-        "exclude_patterns": exclude_patterns or [],
-        "backup_exclude_patterns": backup_exclude_patterns or [],
         "active": 1,
         "created_at": now,
+        "primary": {
+            "rss_url": rss_url,
+            "subgroup_id": subgroup_id,
+            "subgroup_name": subgroup_name,
+            "filter_tags": filter_tags or [],
+            "exclude_patterns": exclude_patterns or [],
+        },
+        "backup": {
+            "rss_url": backup_rss_url,
+            "subgroup_id": backup_subgroup_id,
+            "subgroup_name": backup_subgroup_name,
+            "filter_tags": backup_filter_tags or [],
+            "exclude_patterns": backup_exclude_patterns or [],
+        },
     }
     subs.append(sub)
     _save_subs(subs)

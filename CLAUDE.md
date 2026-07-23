@@ -89,6 +89,20 @@ docker build -t my-anime-manager .
 docker run -p 8000:8000 -v ./data:/app/data my-anime-manager
 ```
 
+## 版本管理
+
+应用版本统一存放在 4 个位置，通过 `scripts/bump_version.py` 一键同步：
+
+```bash
+python scripts/bump_version.py X.Y.Z
+```
+
+更新的文件：
+- `my_anime_manager/__init__.py` — `__version__` + `__version_info__`（后端 API 引用）
+- `pyproject.toml` — `version`（pip/setuptools）
+- `frontend/package.json` — `"version"`（npm）
+- `Dockerfile` — `LABEL org.opencontainers.image.version`
+
 ## 配置系统
 
 `config.py` 使用三层优先级: **内存覆盖 > settings.json > 默认值**。

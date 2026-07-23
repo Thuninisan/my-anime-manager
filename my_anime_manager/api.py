@@ -229,36 +229,48 @@ class SubscriptionIn(BaseModel):
     backup_exclude_patterns: list[str] = []
 
 
+class BgmMeta(BaseModel):
+    season: int = 1
+    sortrange: list[int] = []
+    subject_name: str = ""
+    series_name: str = ""
+    rating: float = 0.0
+    air_date: str = ""
+
+
+class TvdbMeta(BaseModel):
+    id: int = 0
+    season: int | None = None
+    ep_offset: int = 0
+
+
+class TmdbMeta(BaseModel):
+    id: int = 0
+    season: int | None = None
+    ep_offset: int = 0
+
+
+class RssSource(BaseModel):
+    rss_url: str = ""
+    subgroup_id: int = 0
+    subgroup_name: str = ""
+    filter_tags: list[str] = []
+    exclude_patterns: list[str] = []
+
+
 class SubscriptionOut(BaseModel):
     name: str
-    rss_url: str
     bangumi_id: int
-    subgroup_id: int
-    subgroup_name: str
-    filter_tags: list[str] = []
-    backup_rss_url: str = ""
-    backup_subgroup_id: int = 0
-    backup_subgroup_name: str = ""
-    backup_filter_tags: list[str] = []
-    exclude_patterns: list[str] = []
-    backup_exclude_patterns: list[str] = []
     created_at: str = ""
     updated_at: str = ""
     download_path: str = ""
     active: int = 1
-    # Pre-computed season metadata (from Bangumi chain)
-    bgm_season: int = 1
-    bgm_sortrange: list[int] = []
-    # Bangumi rating (from subject API)
-    bgm_rating: float = 0.0
-    bgm_rating_total: int = 0
-    tmdb_id: int = 0
-    tmdb_season: int | None = None
-    tvdb_id: int = 0
-    tvdb_season: int | None = None
-    # Poster image URL (Bangumi CDN URL, frontend loads directly)
+    primary: RssSource = RssSource()
+    backup: RssSource = RssSource()
+    bgm: BgmMeta = BgmMeta()
+    tvdb: TvdbMeta = TvdbMeta()
+    tmdb: TmdbMeta = TmdbMeta()
     poster_url: str = ""
-    # Downloaded episode count (from download_history.json)
     downloaded_count: int = 0
 
 
@@ -735,7 +747,7 @@ async def _monitor_download(
                 tmdb_name = _sanitize_path_component(usub.get("tmdb_show_name", "Unknown"))
                 bgm_name = _sanitize_path_component(usub.get("bangumi_show_name", torrent_name))
                 bgm_sort = usub.get("bangumi_sort", 1)
-                tmdb_season = usub.get("tmdb_season", 1)
+                tmdb_season = usub.get("tmdb", {}).get("season", 1)
                 src_sub = subtitle_dir / stored_name
 
                 if not src_sub.exists():
@@ -1347,8 +1359,8 @@ async def create_subscription(body: SubscriptionIn):
     # If a sibling subscription already has cached bgm_season, copy it.
     all_subs = data.list_subscriptions()
     for s in all_subs:
-        if s["bangumi_id"] == body.bangumi_id and "bgm_season" in s:
-            cached = {k: s[k] for k in ("bgm_season", "bgm_sortrange", "tmdb_id", "tmdb_season", "tvdb_id", "tvdb_season", "series_name", "bgm_rating", "bgm_rating_total") if k in s}
+        if s["bangumi_id"] == body.bangumi_id and "bgm" in s:
+            cached = {g: s[g] for g in ENRICH_GROUPS if g in s}
             data.update_subscription(body.bangumi_id, cached)
             sub.update(cached)
             break
@@ -1385,7 +1397,7 @@ async def manual_subscribe(body: ManualSubscribeIn):
     return SubscriptionOut(**sub)
 
 
-ENRICH_FIELDS = ("bgm_season", "bgm_sortrange", "series_name", "tmdb_id", "tmdb_season", "tvdb_id", "tvdb_season", "bgm_rating", "bgm_rating_total")
+ENRICH_GROUPS = ("bgm", "tvdb", "tmdb")
 
 
 def _get_cached_enrichment(bangumi_id: int) -> dict | None:
@@ -1396,8 +1408,8 @@ def _get_cached_enrichment(bangumi_id: int) -> dict | None:
     """
     subs = data.list_subscriptions()
     for s in subs:
-        if s["bangumi_id"] == bangumi_id and "bgm_season" in s:
-            return {k: s[k] for k in ENRICH_FIELDS if k in s}
+        if s["bangumi_id"] == bangumi_id and "bgm" in s:
+            return {g: s[g] for g in ENRICH_GROUPS if g in s}
     return None
 
 
@@ -1635,8 +1647,8 @@ async def subscription_history(bangumi_id: int):
     subs = data.list_subscriptions()
     sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
     name = sub["name"] if sub else str(bangumi_id)
-    bgm_season = sub.get("bgm_season", 1) if sub else 1
-    bgm_sortrange = sub.get("bgm_sortrange", [0, 0]) if sub else [0, 0]
+    bgm_season = sub.get("bgm", {}).get("season", 1) if sub else 1
+    bgm_sortrange = sub.get("bgm", {}).get("sortrange", [0, 0]) if sub else [0, 0]
 
     # 2. Download history
     episodes_raw = data.get_all_episodes(bangumi_id)
@@ -1742,8 +1754,8 @@ async def subscription_history_stream(bangumi_id: int):
         subs = data.list_subscriptions()
         sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
         name = sub["name"] if sub else str(bangumi_id)
-        bgm_season = sub.get("bgm_season", 1) if sub else 1
-        bgm_sortrange = sub.get("bgm_sortrange", [0, 0]) if sub else [0, 0]
+        bgm_season = sub.get("bgm", {}).get("season", 1) if sub else 1
+        bgm_sortrange = sub.get("bgm", {}).get("sortrange", [0, 0]) if sub else [0, 0]
 
         episodes_raw = data.get_all_episodes(bangumi_id)
         hashes = []
@@ -1879,7 +1891,7 @@ async def delete_subscription_rss(bangumi_id: int, type: str = "primary"):
     # Reload and check if any RSS remains
     subs = data.list_subscriptions()
     sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
-    if sub and not sub.get("rss_url") and not sub.get("backup_rss_url"):
+    if sub and not sub.get("primary", {}).get("rss_url") and not sub.get("backup", {}).get("rss_url"):
         data.remove_subscription(bangumi_id)
         return {"ok": True, "deleted": True}
 
@@ -1942,15 +1954,17 @@ async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = 
     if not sub:
         raise HTTPException(404, "订阅不存在")
     show_name = sub.get("name", str(bangumi_id))
-    series_name = sub.get("series_name") or show_name
-    bgm_season = sub.get("bgm_season", 1)
-    tmdb_id = sub.get("tmdb_id", 0)
-    tmdb_season = sub.get("tmdb_season")
+    series_name = sub.get("bgm", {}).get("series_name") or show_name
+    bgm_season = sub.get("bgm", {}).get("season", 1)
+    tmdb_id = sub.get("tmdb", {}).get("id", 0)
+    tmdb_season = sub.get("tmdb", {}).get("season")
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    sub_path_template = sub.get("download_path") or "/{series_name}/Season {season}"
-    sub_path = sub_path_template.format(
-        series_name=series_name, show_name=show_name, season=bgm_season,
-    ).strip("/")
+    from my_anime_manager.services.downloader import format_download_path
+    template = config.RSS_PATH_TEMPLATE
+    rel_path = format_download_path(template, sub, sort=sort).lstrip("/")
+    rel_dir = str(Path(rel_path).parent)
+    _season_dir = str(Path(rss_base) / rel_dir)
+    _show_dir = str(Path(_season_dir).parent)
 
     # ── Save .torrent to temp file ──
     tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
@@ -2011,8 +2025,9 @@ async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = 
                     old_path, torrent_name,
                     bgm_season=bgm_season,
                     tmdb_season=tmdb_season,
-                    base_path=rss_base,
-                    sub_path=sub_path,
+                    season_dir=_season_dir,
+                    show_dir=_show_dir,
+                    series_name=series_name,
                 )
                 logger.info("metadata generated")
             except Exception as e:
@@ -2085,15 +2100,17 @@ async def replace_episode_torrent(bangumi_id: int, sort: int, file: UploadFile =
     if not sub:
         raise HTTPException(404, "订阅不存在")
     show_name = sub.get("name", str(bangumi_id))
-    series_name = sub.get("series_name") or show_name
-    bgm_season = sub.get("bgm_season", 1)
-    tmdb_id = sub.get("tmdb_id", 0)
-    tmdb_season = sub.get("tmdb_season")
+    series_name = sub.get("bgm", {}).get("series_name") or show_name
+    bgm_season = sub.get("bgm", {}).get("season", 1)
+    tmdb_id = sub.get("tmdb", {}).get("id", 0)
+    tmdb_season = sub.get("tmdb", {}).get("season")
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    sub_path_template = sub.get("download_path") or "/{series_name}/Season {season}"
-    sub_path = sub_path_template.format(
-        series_name=series_name, show_name=show_name, season=bgm_season,
-    ).strip("/")
+    from my_anime_manager.services.downloader import format_download_path
+    template = config.RSS_PATH_TEMPLATE
+    rel_path = format_download_path(template, sub, sort=sort).lstrip("/")
+    rel_dir = str(Path(rel_path).parent)
+    _season_dir = str(Path(rss_base) / rel_dir)
+    _show_dir = str(Path(_season_dir).parent)
 
     # ── Save .torrent to temp file ──
     tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
@@ -2141,7 +2158,8 @@ async def replace_episode_torrent(bangumi_id: int, sort: int, file: UploadFile =
                     bangumi_id, tmdb_id, show_name,
                     old_path, torrent_name,
                     bgm_season=bgm_season, tmdb_season=tmdb_season,
-                    base_path=rss_base, sub_path=sub_path,
+                    season_dir=_season_dir, show_dir=_show_dir,
+                    series_name=series_name,
                 )
                 logger.info("replace: metadata generated")
             except Exception as e:
@@ -2211,16 +2229,13 @@ async def update_episode_overrides(
         if sub:
             ep = data.get_all_episodes(bangumi_id).get(str(sort), {})
             info_hash = ep.get("info_hash", "")
-            if info_hash and sub.get("tmdb_id"):
+            if info_hash and sub.get("tmdb", {}).get("id"):
                 try:
                     show_name = sub.get("name", str(bangumi_id))
-                    series_name = sub.get("series_name") or show_name
-                    bgm_season = sub.get("bgm_season", 1)
+                    series_name = sub.get("bgm", {}).get("series_name") or show_name
+                    bgm_season = sub.get("bgm", {}).get("season", 1)
                     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-                    sub_path_template = sub.get("download_path") or "/{series_name}/Season {season}"
-                    sub_path = sub_path_template.format(
-                        series_name=series_name, show_name=show_name, season=bgm_season,
-                    ).strip("/")
+                    sub_path = f"{series_name}/Season {bgm_season}"
                     qb = await qb_login(
                         config.QBITTORRENT_URL,
                         config.QBITTORRENT_USERNAME,
@@ -2230,11 +2245,12 @@ async def update_episode_overrides(
                     old_path = files[0]["name"] if files else ep.get("guid", "")
                     await downloader.generate_metadata(
                         qb, info_hash, bangumi_id, sort,
-                        bangumi_id, sub["tmdb_id"], show_name,
+                        bangumi_id, sub["tmdb"]["id"], show_name,
                         old_path, ep.get("guid", ""),
                         bgm_season=bgm_season,
-                        tmdb_season=sub.get("tmdb_season"),
-                        base_path=rss_base, sub_path=sub_path,
+                        tmdb_season=sub.get("tmdb", {}).get("season"),
+                        season_dir=_season_dir, show_dir=_show_dir,
+                        series_name=series_name,
                     )
                     logger.info("overrides+PATCH: NFO regenerated for bangumi=%d sort=%d", bangumi_id, sort)
                 except Exception:
