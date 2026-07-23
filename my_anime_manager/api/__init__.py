@@ -56,6 +56,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from .. import __version__
+from .models import *
 
 app = FastAPI(
     title="My Anime Manager",
@@ -146,145 +147,6 @@ async def on_shutdown():
 
 # ═══════════════════════════════════════════════════════════════════════
 # Pydantic response models
-# ═══════════════════════════════════════════════════════════════════════
-
-class TmdbEpisodeInfo(BaseModel):
-    epNum: int
-    name: str
-    tmdbId: int
-    overview: str = ""
-    airDate: str = ""
-    runtime: int = 0
-    stillPath: str = ""
-
-
-class SeasonInfo(BaseModel):
-    name: str
-    episodes: list[TmdbEpisodeInfo]
-
-
-class RssSubtitleGroup(BaseModel):
-    name: str
-    subgroup_id: int
-    rss_url: str
-
-
-class BangumiRssResponse(BaseModel):
-    bangumi_id: int
-    name: str
-    mikan_id: int
-    global_rss: str
-    groups: list[RssSubtitleGroup]
-
-
-class MikanSearchResult(BaseModel):
-    mikan_id: int
-    title: str
-    url: str
-
-
-class AssignMikanRequest(BaseModel):
-    mikan_id: int
-
-
-class ManualSubscribeIn(BaseModel):
-    name: str
-    rss_url: str
-    bangumi_id: int
-    backup_rss_url: str = ""
-
-
-class RssFeedItem(BaseModel):
-    guid: str
-    title: str
-    torrent_url: str
-    pub_date: str
-    size_bytes: int
-    downloaded: bool
-    tags: list[str]
-    passed: bool
-    excluded: bool
-    episode_number: int = 0
-
-
-class RssFeedResponse(BaseModel):
-    title: str
-    items: list[RssFeedItem]
-
-
-class SubscriptionIn(BaseModel):
-    name: str
-    rss_url: str
-    bangumi_id: int
-    subgroup_id: int
-    subgroup_name: str
-    filter_tags: list[str] = []
-    backup_rss_url: str = ""
-    backup_subgroup_id: int = 0
-    backup_subgroup_name: str = ""
-    backup_filter_tags: list[str] = []
-    download_path: str = ""
-    active: int = 1
-    exclude_patterns: list[str] = []
-    backup_exclude_patterns: list[str] = []
-
-
-class BgmMeta(BaseModel):
-    season: int = 1
-    sortrange: list[int] = []
-    subject_name: str = ""
-    series_name: str = ""
-    rating: float = 0.0
-    air_date: str = ""
-
-
-class TvdbMeta(BaseModel):
-    id: int = 0
-    season: int | None = None
-    ep_offset: int = 0
-
-
-class TmdbMeta(BaseModel):
-    id: int = 0
-    season: int | None = None
-    ep_offset: int = 0
-
-
-class RssSource(BaseModel):
-    rss_url: str = ""
-    subgroup_id: int = 0
-    subgroup_name: str = ""
-    filter_tags: list[str] = []
-    exclude_patterns: list[str] = []
-
-
-class SubscriptionOut(BaseModel):
-    name: str
-    bangumi_id: int
-    created_at: str = ""
-    updated_at: str = ""
-    download_path: str = ""
-    active: int = 1
-    primary: RssSource = RssSource()
-    backup: RssSource = RssSource()
-    bgm: BgmMeta = BgmMeta()
-    tvdb: TvdbMeta = TvdbMeta()
-    tmdb: TmdbMeta = TmdbMeta()
-    poster_url: str = ""
-    downloaded_count: int = 0
-
-
-class ScanStatus(BaseModel):
-    running: bool
-    dir: str
-    total: int
-    processed: int
-    deleted: int
-    failed: int
-    current_file: str
-    errors: list[str]
-
-
 # ═══════════════════════════════════════════════════════════════════════
 # background scan state
 # ═══════════════════════════════════════════════════════════════════════
@@ -1467,14 +1329,6 @@ async def enrich_subscription_stream(bangumi_id: int):
     )
 
 
-class TmdbSearchResult(BaseModel):
-    id: int
-    name: str
-    original_name: str = ""
-    first_air_date: str = ""
-    poster_path: str = ""
-
-
 @app.get("/api/rss/tmdb-search")
 async def search_tmdb_shows(q: str) -> list[TmdbSearchResult]:
     """Search TMDB for TV shows (for manual TMDB ID assignment).
@@ -1499,11 +1353,6 @@ async def search_tmdb_shows(q: str) -> list[TmdbSearchResult]:
             poster_path=r.get("poster_path", ""),
         ))
     return results
-
-
-class SetTmdbRequest(BaseModel):
-    tmdb_id: int
-    tmdb_season: int | None = None
 
 
 @app.patch("/api/rss/subscriptions/{bangumi_id}/tmdb")
@@ -1623,9 +1472,6 @@ async def downloader_run_once():
 async def downloader_config():
     return downloader.get_config()
 
-
-class IntervalBody(BaseModel):
-    minutes: int
 
 @app.patch("/api/rss/downloader/config")
 async def downloader_set_interval(body: IntervalBody):
