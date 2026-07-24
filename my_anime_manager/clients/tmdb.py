@@ -9,7 +9,7 @@ TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original"
 _BASE = "https://api.themoviedb.org/3"
 
 # Common query params for every TMDB API call.
-_BASE_PARAMS = {"api_key": config.TMDB_API_KEY, "language": "ja"}
+_BASE_PARAMS = {"language": "ja"}
 
 
 async def _tmdb_request(
@@ -25,6 +25,7 @@ async def _tmdb_request(
     return await fetch_with_retry(
         f"{_BASE}{path}",
         params=merged,
+        headers={"Authorization": f"Bearer {config.TMDB_API_KEY}"},
         timeout=30.0,
         label=label,
     )
