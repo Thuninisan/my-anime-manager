@@ -254,10 +254,15 @@ async def generate_metadata(
             if poster:
                 logger.info("Season %d poster downloaded", effective_season)
 
+            # Resolve season plot (Bangumi → inline extract or DeepSeek)
+            if not season_plot:
+                from .plot_fallback import resolve_season_plot
+                season_plot = await resolve_season_plot(subject.get("summary", ""))
+
             generate_season_nfo(
                 title=season_title,
                 original_title=subject.get("name", ""),
-                plot=season_plot or subject.get("summary", ""),
+                plot=season_plot,
                 premiered=season_premiered or subject.get("date", ""),
                 season_number=tvdb_season or bgm_season,
                 bangumi_id=bgm_subject_id,

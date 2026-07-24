@@ -24,7 +24,7 @@ from .mapper import find_target_entry
 from .nfo import write_episode_files
 from .nfo.images import download_season_poster, download_show_images
 from .nfo.nfo_xml import generate_season_nfo, generate_tv_show_nfo
-from .nfo.plot_fallback import resolve_episode_plot
+from .nfo.plot_fallback import resolve_episode_plot, resolve_season_plot
 from ..utils.torrent_parser import parse_qbit_file_list
 from ..utils.torrent_file_reader import read_torrent_file_list
 
@@ -619,10 +619,11 @@ async def generate_metadata_collection(
                 print(f"   🖼️ Season {season_number} poster → {poster}")
                 summary["imagesDownloaded"] += 1
 
+        season_plot = await resolve_season_plot(season.get("bgm_plot", ""))
         nfo = generate_season_nfo(
             title=season["bgm_title"],
             original_title=season["bgm_original"],
-            plot=season.get("bgm_plot", ""),
+            plot=season_plot,
             premiered=season.get("bgm_premiered", ""),
             season_number=season_number,
             bangumi_id=season["bgm_id"],

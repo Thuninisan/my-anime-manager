@@ -159,3 +159,38 @@ async def _try_bangumi_translate(bangumi_id: int, sort: int) -> str:
         "Bangumi episode not found: id=%d sort=%d", bangumi_id, sort,
     )
     return ""
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Season-level plot (Bangumi summary → Chinese)
+# ═══════════════════════════════════════════════════════════════════════
+
+BGM_SUMMARY_MARKER = "[简介原文]"
+
+
+async def resolve_season_plot(bangumi_summary: str) -> str:
+    """Extract or translate a Bangumi subject summary for season.nfo.
+
+    Bangumi summaries sometimes embed a Chinese translation prefixed
+    with ``[简介原文]``.  When that marker is present the text before it
+    is used directly (no API call).  Otherwise the summary is sent to
+    DeepSeek for Japanese → Chinese translation.
+
+    Args:
+        bangumi_summary: Raw ``summary`` field from Bangumi subject API.
+
+    Returns:
+        Chinese plot text, or ``""`` on empty / failure.
+    """
+    text = bangumi_summary.strip()
+    if not text:
+        return ""
+
+    if BGM_SUMMARY_MARKER in text:
+        chinese = text.split(BGM_SUMMARY_MARKER)[0].rstrip("\r\n")
+        chinese = chinese.strip()
+        if chinese:
+            logger.debug("Season plot extracted from Bangumi inline translation")
+            return chinese
+
+    return await translate_ja_to_zh(text)
