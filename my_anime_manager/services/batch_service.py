@@ -24,6 +24,7 @@ from .mapper import find_target_entry
 from .nfo import write_episode_files
 from .nfo.images import download_season_poster, download_show_images
 from .nfo.nfo_xml import generate_season_nfo, generate_tv_show_nfo
+from .nfo.plot_fallback import resolve_episode_plot
 from ..utils.torrent_parser import parse_qbit_file_list
 from ..utils.torrent_file_reader import read_torrent_file_list
 
@@ -644,6 +645,19 @@ async def generate_metadata_collection(
         # Prefer per-episode original_name (Japanese title saved before
         # zh-CN overwrite), fall back to show-level original_title.
         ep_original = tmdb.get("original_name") or tvshow["original_title"]
+
+        # ── TMDB zh-CN plot fallback (batch flow: TMDB only) ──────
+        try:
+            zh_plot = await resolve_episode_plot(
+                tmdb_id=tvshow["tmdb_id"],
+                tmdb_season=ep.get("tmdb_season", ep["season_number"]),
+                tmdb_ep_num=ep["episode_number"],
+            )
+            if zh_plot:
+                tmdb["overview"] = zh_plot
+        except Exception:
+            pass  # non-fatal — keep the Japanese overview
+
         result = await write_episode_files(
             {
                 "name": tmdb.get("name", ""),

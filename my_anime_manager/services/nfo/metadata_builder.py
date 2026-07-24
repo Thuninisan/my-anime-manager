@@ -136,6 +136,26 @@ async def generate_metadata(
 
     tmdb_ep = tvdb_ep_data
 
+    # ── Episode plot fallback (TMDB zh-CN → TVDB zh → Bangumi+DeepSeek) ─
+    tmdb_ep_num = sort + (tmdb_ep_offset or 0)
+    try:
+        from .plot_fallback import resolve_episode_plot
+        chinese_plot = await resolve_episode_plot(
+            tmdb_id=tmdb_id,
+            tvdb_id=tvdb_id,
+            tvdb_season=tvdb_season or 1,
+            tvdb_ep=tvdb_ep,
+            tmdb_season=tmdb_season or 1,
+            tmdb_ep_num=tmdb_ep_num,
+            bangumi_id=bangumi_id,
+            bangumi_sort=sort,
+        )
+        if chinese_plot:
+            tmdb_ep["overview"] = chinese_plot
+            logger.info("Episode plot resolved via fallback chain")
+    except Exception:
+        logger.exception("Episode plot fallback failed (non-fatal)")
+
     # ── Bangumi original Japanese name for <originaltitle> ─────────
     bgm_original_name = ""
     try:
