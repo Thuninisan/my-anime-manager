@@ -32,10 +32,10 @@ my_anime_manager/
 │   ├── tmdb.py          # TMDB 搜索、详情、季→集映射
 │   ├── batch_service.py # Torrent 批量处理 (preview→confirm→execute)
 │   ├── torrent_preview.py  # 前端 torrent 解析管线 (parse + search)
-│   ├── downloader.py    # RSS 下载 worker + 元数据生成
+│   ├── downloader.py    # RSS 下载 worker
 │   ├── rss.py           # RSS 订阅管理 (Mikan 查找 + feed 解析)
-│   ├── nfo_generator.py # Jellyfin NFO 文件生成 (tvshow/season/episode)
-│   ├── image_downloader.py  # TMDB/Bangumi 图片下载
+│   ├── nfo/             # NFO 元数据子包 (XML 生成 + 图片下载 + 编排)
+│   │   ├── nfo_xml.py, images.py, generator.py, metadata_builder.py
 │   ├── mapper.py        # 季/集映射逻辑
 │   └── episode_metadata.py  # 剧集元数据解析与匹配
 ├── utils/               # 工具函数

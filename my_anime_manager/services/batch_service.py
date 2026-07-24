@@ -20,16 +20,10 @@ from ..clients.qbittorrent import (
 from .. import config
 from . import tmdb as tmdb_service
 from . import bangumi as bangumi_service
-from .downloader import write_episode_files
-from .image_downloader import (
-    download_season_poster,
-    download_show_images,
-)
 from .mapper import find_target_entry
-from .nfo_generator import (
-    generate_season_nfo,
-    generate_tv_show_nfo,
-)
+from .nfo import write_episode_files
+from .nfo.images import download_season_poster, download_show_images
+from .nfo.nfo_xml import generate_season_nfo, generate_tv_show_nfo
 from ..utils.torrent_parser import parse_qbit_file_list
 from ..utils.torrent_file_reader import read_torrent_file_list
 

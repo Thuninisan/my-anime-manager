@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from ..clients.tmdb import TMDB_IMAGE_BASE, get_tv_images
-from ..utils.http_retry import fetch_with_retry
+from ...clients.tmdb import TMDB_IMAGE_BASE, get_tv_images
+from ...utils.http_retry import fetch_with_retry
 
 
 async def _download_image(url: str, file_path_no_ext: str) -> str | None:
@@ -218,7 +218,7 @@ async def get_subscription_poster_url(
     Returns:
         CDN URL string (e.g. ``"https://..."``) or ``None`` on failure.
     """
-    from ..clients.bangumi import get_subject
+    from ...clients.bangumi import get_subject
 
     try:
         subject = await get_subject(bangumi_id)

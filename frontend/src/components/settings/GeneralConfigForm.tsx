@@ -72,6 +72,15 @@ export default function GeneralConfigForm({ config, dirty, onChange }: Props) {
               onChange={e => onChange('TVDB_API_KEY', e.target.value)}
             />
           </FieldRow>
+          <FieldRow label="DeepSeek API Key" hint="Used for AI-powered features via DeepSeek.">
+            <input
+              className={fieldClass('DEEPSEEK_API_KEY')}
+              type="password"
+              value={val('DEEPSEEK_API_KEY') === '***' ? '' : val('DEEPSEEK_API_KEY')}
+              placeholder={val('DEEPSEEK_API_KEY') === '***' ? '••••••••••••••••' : 'your DeepSeek API key'}
+              onChange={e => onChange('DEEPSEEK_API_KEY', e.target.value)}
+            />
+          </FieldRow>
           <div className="grid grid-cols-2 gap-5">
             <FieldRow label="Bangumi User-Agent">
               <input

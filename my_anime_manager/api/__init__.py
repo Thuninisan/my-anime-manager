@@ -39,7 +39,7 @@ from ..services.batch_service import process_torrent
 from ..services import rss as rss_service
 from ..services import downloader
 from ..services import tmdb as tmdb_service
-from ..services import image_downloader as image_service
+from ..services.nfo import images as image_service
 from ..clients.qbittorrent import login as qb_login, get_torrents_by_hashes, delete_torrent, add_torrent, resume_torrent, get_torrent_files, set_file_priority
 from ..utils.torrent_hash import compute_info_hash
 from ..utils.torrent_file_reader import read_torrent_file_list
@@ -1595,7 +1595,7 @@ async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = 
     tmdb_season = sub.get("tmdb", {}).get("season")
     tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    from my_anime_manager.services.downloader import format_download_path
+    from my_anime_manager.services.nfo import format_download_path
     template = config.RSS_PATH_TEMPLATE
     rel_path = format_download_path(template, sub, sort=sort, tvdb_episode=tvdb_ep_val).lstrip("/")
     rel_dir = str(Path(rel_path).parent)
@@ -1742,7 +1742,7 @@ async def replace_episode_torrent(bangumi_id: int, sort: int, file: UploadFile =
     tmdb_season = sub.get("tmdb", {}).get("season")
     tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    from my_anime_manager.services.downloader import format_download_path
+    from my_anime_manager.services.nfo import format_download_path
     template = config.RSS_PATH_TEMPLATE
     rel_path = format_download_path(template, sub, sort=sort, tvdb_episode=tvdb_ep_val).lstrip("/")
     rel_dir = str(Path(rel_path).parent)
