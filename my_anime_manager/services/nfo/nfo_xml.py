@@ -161,56 +161,32 @@ def generate_tv_show_nfo(
     title: str,
     original_title: str,
     plot: str,
-    premiered: str,
-    genres: list[str] | None = None,
-    studios: list[str] | None = None,
-    rating: float = 0.0,
-    status: str = "",
     output_dir: str = ".",
     tvdb_id: int = 0,
+    tmdb_id: int = 0,
 ) -> str:
     """Generate a tvshow.nfo file.
 
     Args:
-        title: Show title
-        original_title: Original show name (Japanese)
-        plot: Show overview
-        premiered: First air date (YYYY-MM-DD)
-        genres: List of genre names
-        studios: List of studio/network names
-        rating: Vote average
-        status: Show status (Ended / Returning Series)
+        title: Show title (zh-CN)
+        original_title: Original show name
+        plot: Show overview (zh-CN)
         output_dir: Output directory
         tvdb_id: TVDB series ID
+        tmdb_id: TMDB show ID
 
     Returns:
         Path to the generated NFO file
     """
-    if genres is None:
-        genres = []
-    if studios is None:
-        studios = []
-
-    year = premiered.split("-")[0] if premiered else ""
-
-    genre_tags = "\n".join(
-        f"  <genre>{_escape_xml(g)}</genre>" for g in genres
-    )
-    studio_tags = "\n".join(
-        f"  <studio>{_escape_xml(s)}</studio>" for s in studios
-    )
-    rating_tag = f"  <rating>{rating:.1f}</rating>" if rating > 0 else ""
-    status_tag = f"  <status>{_escape_xml(status)}</status>" if status else ""
-    tvdbid_tag = f"  <tvdbid>{tvdb_id}</tvdbid>" if tvdb_id else ""
+    tvdb_tag = f"  <tvdbid>{tvdb_id}</tvdbid>" if tvdb_id else ""
+    tmdb_tag = f"  <tmdbid>{tmdb_id}</tmdbid>" if tmdb_id else ""
 
     xml = f"""<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <tvshow>
   <title>{_escape_xml(title)}</title>
   <originaltitle>{_escape_xml(original_title)}</originaltitle>
   <plot>{_escape_xml(plot)}</plot>
-  <premiered>{premiered or ''}</premiered>
-  <year>{year}</year>
-{genre_tags + chr(10) if genre_tags else ''}{studio_tags + chr(10) if studio_tags else ''}{rating_tag + chr(10) if rating_tag else ''}{status_tag + chr(10) if status_tag else ''}{tvdbid_tag + chr(10) if tvdbid_tag else ''}</tvshow>
+{tvdb_tag + chr(10) if tvdb_tag else ''}{tmdb_tag + chr(10) if tmdb_tag else ''}</tvshow>
 """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)

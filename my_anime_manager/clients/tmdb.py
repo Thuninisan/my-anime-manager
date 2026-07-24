@@ -40,9 +40,12 @@ async def search_tv(query: str, language: str = "") -> httpx.Response:
     )
 
 
-async def get_tv_detail(tv_id: int) -> httpx.Response:
-    """Get TV show details."""
-    return await _tmdb_request(f"/tv/{tv_id}", label=f"TMDB tv/{tv_id}")
+async def get_tv_detail(tv_id: int, language: str = "") -> httpx.Response:
+    """Get TV show details.  Pass *language* (e.g. ``"zh-CN"``) to override."""
+    params = {"language": language} if language else None
+    return await _tmdb_request(
+        f"/tv/{tv_id}", params=params, label=f"TMDB tv/{tv_id}",
+    )
 
 
 async def get_season_detail(tv_id: int, season_num: int, language: str = "") -> httpx.Response:

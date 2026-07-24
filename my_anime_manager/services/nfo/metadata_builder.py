@@ -212,18 +212,26 @@ async def generate_metadata(
     tvshow_nfo = _show_dir / "tvshow.nfo"
     if not tvshow_nfo.exists() and tmdb_id:
         try:
-            detail = await tmdb_service.get_tv_show_detail(tmdb_id)
+            # Fetch TMDB detail in zh-CN for Chinese title + overview
+            detail_zh = await tmdb_service.get_tv_show_detail(tmdb_id, language="zh-CN")
+
+            title_zh = detail_zh.get("name", "") or show_name
+            original_zh = detail_zh.get("original_name", "") or show_name
+            plot_zh = detail_zh.get("overview", "")
+
+            # Fallback: if TMDB zh-CN overview is empty, use Bangumi summary + translate
+            if not plot_zh:
+                from .plot_fallback import resolve_season_plot
+                subject = await get_subject(bgm_subject_id)
+                plot_zh = await resolve_season_plot(subject.get("summary", ""))
+
             generate_tv_show_nfo(
-                title=detail.get("name", show_name),
-                original_title=detail.get("original_name", show_name),
-                plot=detail.get("overview", ""),
-                premiered=detail.get("first_air_date", ""),
-                genres=detail.get("genres", []),
-                studios=detail.get("studios", []),
-                rating=detail.get("vote_average", 0),
-                status=detail.get("status", ""),
+                title=title_zh,
+                original_title=original_zh,
+                plot=plot_zh,
                 output_dir=str(_show_dir),
                 tvdb_id=tvdb_id,
+                tmdb_id=tmdb_id,
             )
             logger.info("tvshow.nfo generated")
             await download_show_images(tmdb_id, str(_show_dir))

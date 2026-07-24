@@ -585,17 +585,34 @@ async def generate_metadata_collection(
 
     # ── tvshow.nfo ──────────────────────────────────────────────────
     print("\n📄 生成 tvshow.nfo...")
+
+    # Fetch TMDB zh-CN detail + plot fallback
+    from ..clients import tmdb as tmdb_client
+    title_zh = tvshow["title"]
+    original_zh = tvshow["original_title"]
+    plot_zh = tvshow["plot"]
+    try:
+        detail_zh = await tmdb_client.get_tv_detail(tvshow["tmdb_id"], language="zh-CN")
+        title_zh = detail_zh.get("name", "") or title_zh
+        original_zh = detail_zh.get("original_name", "") or original_zh
+        plot_zh = detail_zh.get("overview", "") or plot_zh
+    except Exception:
+        pass
+
+    # Fallback: if no Chinese overview, try Bangumi summary from first season
+    if not plot_zh and seasons:
+        first_season = next(iter(seasons.values()))
+        season_plot = await resolve_season_plot(first_season.get("bgm_plot", ""))
+        if season_plot:
+            plot_zh = season_plot
+
     nfo_path = generate_tv_show_nfo(
-        title=tvshow["title"],
-        original_title=tvshow["original_title"],
-        plot=tvshow["plot"],
-        premiered=tvshow["premiered"],
-        genres=tvshow.get("genres", []),
-        studios=tvshow.get("studios", []),
-        rating=tvshow.get("rating", 0),
-        status=tvshow.get("status", ""),
+        title=title_zh,
+        original_title=original_zh,
+        plot=plot_zh,
         output_dir=output_root,
         tvdb_id=tvshow.get("tvdb_id", 0),
+        tmdb_id=tvshow["tmdb_id"],
     )
     print(f"   ✅ tvshow.nfo: {nfo_path}")
     summary["nfoGenerated"] += 1

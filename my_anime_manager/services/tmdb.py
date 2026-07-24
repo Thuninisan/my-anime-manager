@@ -148,17 +148,18 @@ async def search_tv_show(
     return _format_show(show)
 
 
-async def get_tv_show_detail(tv_id: int) -> dict:
+async def get_tv_show_detail(tv_id: int, language: str = "") -> dict:
     """Get detailed TV show information.
 
     Args:
-        tv_id: TMDB show ID
+        tv_id: TMDB show ID.
+        language: Optional language override (e.g. ``"zh-CN"``).
 
     Returns:
         dict with full show details including studios, genres
     """
     print("📡 获取 TMDB 详情...")
-    res = await tmdb_client.get_tv_detail(tv_id)
+    res = await tmdb_client.get_tv_detail(tv_id, language=language)
     data = res.json()
 
     # Extract studios from networks, fallback to production companies
