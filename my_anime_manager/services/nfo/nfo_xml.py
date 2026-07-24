@@ -233,6 +233,7 @@ def generate_season_nfo(
     season_number: int,
     bangumi_id: int,
     output_dir: str = ".",
+    tvdb_season_id: int = 0,
 ) -> str:
     """Generate a season.nfo file (data from Bangumi subject).
 
@@ -244,11 +245,15 @@ def generate_season_nfo(
         season_number: Season number
         bangumi_id: Bangumi subject ID
         output_dir: Output directory
+        tvdb_season_id: TVDB season ID (0 if unavailable).
 
     Returns:
         Path to the generated NFO file
     """
     year = premiered.split("-")[0] if premiered else ""
+
+    bangumi_tag = f"  <bangumiid>{bangumi_id or ''}</bangumiid>"
+    tvdb_tag = f"  <tvdbid>{tvdb_season_id}</tvdbid>" if tvdb_season_id else ""
 
     xml = f"""<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <season>
@@ -258,8 +263,8 @@ def generate_season_nfo(
   <premiered>{premiered or ''}</premiered>
   <year>{year}</year>
   <seasonnumber>{season_number}</seasonnumber>
-  <uniqueid type="bangumi">{bangumi_id or ''}</uniqueid>
-</season>
+{bangumi_tag}
+{tvdb_tag + chr(10) if tvdb_tag else ''}</season>
 """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)

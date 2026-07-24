@@ -267,6 +267,7 @@ async def generate_metadata(
                 season_number=tvdb_season or bgm_season,
                 bangumi_id=bgm_subject_id,
                 output_dir=str(_season_dir),
+                tvdb_season_id=season_id or 0,
             )
             logger.info("Season %d season.nfo generated", effective_season)
         except Exception:
