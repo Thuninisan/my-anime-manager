@@ -279,8 +279,8 @@ def _migrate_subscriptions(data: list[dict]) -> bool:
     """
     migrated = False
     for sub in data:
-        if "bgm" in sub:
-            continue  # already migrated
+        if "bgm" in sub or "primary" in sub:
+            continue  # already migrated (or created in new format)
 
         sub["bgm"] = {
             "season": sub.pop("bgm_season", 1),

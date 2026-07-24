@@ -3,8 +3,17 @@ import type { BangumiRssResponse, ManualSubscribeIn, MikanSearchResult, RssDataS
 const API_BASE = '/api/rss';
 
 export async function searchBangumi(query: string): Promise<{ bangumi_id: number; name: string; has_mikan_id: boolean }[]> {
-  const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`);
+  // Search results must always come from the API. In the VS Code/Electron
+  // WebView, a stale cached SPA HTML response can otherwise be returned for
+  // this GET request and the caller only sees an empty suggestion list.
+  const res = await fetch(`${API_BASE}/search?q=${encodeURIComponent(query)}`, {
+    cache: 'no-store',
+    headers: { Accept: 'application/json' },
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!(res.headers.get('content-type') || '').includes('application/json')) {
+    throw new Error('搜索接口返回了非 JSON 响应');
+  }
   return res.json();
 }
 

@@ -1077,11 +1077,28 @@ def _get_cached_enrichment(bangumi_id: int) -> dict | None:
 
     When a subscription already has enrichment data (e.g. from a sibling
     primary/backup subscription), we can skip the full Bangumi API chain.
+
+    Only returns cached data that looks valid — a failed enrichment
+    (sortrange [0,0] with no IDs) is treated as no cache so it can be
+    retried on the next attempt.
     """
     subs = data.list_subscriptions()
     for s in subs:
-        if s["bangumi_id"] == bangumi_id and "bgm" in s:
+        if s.get("bangumi_id") != bangumi_id:
+            continue
+        bgm = s.get("bgm")
+        if not bgm:
+            continue
+        tvdb = s.get("tvdb", {})
+        tmdb = s.get("tmdb", {})
+        # A valid enrichment has at least one of: episode range, TVDB ID, or TMDB ID
+        has_eps = (bgm.get("sortrange") or [0, 0])[1] > 0
+        has_tvdb = (tvdb.get("id") or 0) > 0
+        has_tmdb = (tmdb.get("id") or 0) > 0
+        if has_eps or has_tvdb or has_tmdb:
             return {g: s[g] for g in ENRICH_GROUPS if g in s}
+        # Stale/failed enrichment — ignore and re-run
+        return None
     return None
 
 
@@ -1173,9 +1190,9 @@ async def set_subscription_tmdb(bangumi_id: int, body: SetTmdbRequest):
     Used by the Tier-2 manual override in the frontend.
     """
     # Update the subscription record
-    fields: dict = {"tmdb_id": body.tmdb_id}
+    fields: dict = {"tmdb": {"id": body.tmdb_id}}
     if body.tmdb_season is not None:
-        fields["tmdb_season"] = body.tmdb_season
+        fields["tmdb"]["season"] = body.tmdb_season
     ok = data.update_subscription(bangumi_id, fields)
     if not ok:
         raise HTTPException(404, f"Subscription not found: {bangumi_id}")
@@ -1237,7 +1254,7 @@ async def get_rss_feed(
         subs = data.list_subscriptions()
         for s in subs:
             if s["bangumi_id"] == int(subscription_id):
-                filter_tags = s.get("filter_tags", [])
+                filter_tags = s.get("primary", {}).get("filter_tags", [])
                 break
     elif tags:
         filter_tags = [t.strip() for t in tags.split(",") if t.strip()]
@@ -1497,12 +1514,12 @@ async def delete_subscription_rss(bangumi_id: int, type: str = "primary"):
         raise HTTPException(404, "订阅不存在")
 
     if type == "primary":
-        fields = {"rss_url": "", "subgroup_id": 0, "subgroup_name": "",
-                   "filter_tags": [], "exclude_patterns": []}
+        fields = {"primary": {"rss_url": "", "subgroup_id": 0, "subgroup_name": "",
+                              "filter_tags": [], "exclude_patterns": []}}
     else:
-        fields = {"backup_rss_url": "", "backup_subgroup_id": 0,
-                   "backup_subgroup_name": "", "backup_filter_tags": [],
-                   "backup_exclude_patterns": []}
+        fields = {"backup": {"rss_url": "", "subgroup_id": 0,
+                             "subgroup_name": "", "filter_tags": [],
+                             "exclude_patterns": []}}
 
     data.update_subscription(bangumi_id, fields)
 
@@ -1576,10 +1593,11 @@ async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = 
     bgm_season = sub.get("bgm", {}).get("season", 1)
     tmdb_id = sub.get("tmdb", {}).get("id", 0)
     tmdb_season = sub.get("tmdb", {}).get("season")
+    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
     from my_anime_manager.services.downloader import format_download_path
     template = config.RSS_PATH_TEMPLATE
-    rel_path = format_download_path(template, sub, sort=sort).lstrip("/")
+    rel_path = format_download_path(template, sub, sort=sort, tvdb_episode=tvdb_ep_val).lstrip("/")
     rel_dir = str(Path(rel_path).parent)
     _season_dir = str(Path(rss_base) / rel_dir)
     _show_dir = str(Path(_season_dir).parent)
@@ -1722,10 +1740,11 @@ async def replace_episode_torrent(bangumi_id: int, sort: int, file: UploadFile =
     bgm_season = sub.get("bgm", {}).get("season", 1)
     tmdb_id = sub.get("tmdb", {}).get("id", 0)
     tmdb_season = sub.get("tmdb", {}).get("season")
+    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
     from my_anime_manager.services.downloader import format_download_path
     template = config.RSS_PATH_TEMPLATE
-    rel_path = format_download_path(template, sub, sort=sort).lstrip("/")
+    rel_path = format_download_path(template, sub, sort=sort, tvdb_episode=tvdb_ep_val).lstrip("/")
     rel_dir = str(Path(rel_path).parent)
     _season_dir = str(Path(rss_base) / rel_dir)
     _show_dir = str(Path(_season_dir).parent)

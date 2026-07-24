@@ -1,6 +1,7 @@
 """Subscription enrichment — Bangumi chain, TVDB/TMDB auto-inference, episode offsets."""
 
 import logging
+import traceback
 from typing import Any, Callable
 
 from .. import config
@@ -15,10 +16,6 @@ from ..utils.episode_name_match import fuzzy_match_episode
 logger = logging.getLogger(__name__)
 
 
-
-
-logger = logging.getLogger(__name__)
-
 # ═══════════════════════════════════════════════════════════════════════
 # Episode offset — map RSS episode numbers to Bangumi sort range
 # ═══════════════════════════════════════════════════════════════════════
@@ -31,7 +28,7 @@ async def _get_bangumi_episodes(subject_id: int) -> list[dict]:
     eps = _bgm_ep_cache.get(subject_id)
     if not eps:
         try:
-            eps = await bgm_get_episodes(subject_id)
+            eps = await bgm_client.get_episodes(subject_id)
             _bgm_ep_cache[subject_id] = eps
         except Exception:
             return []

@@ -25,6 +25,7 @@ from ..data import (
 )
 from . import rss as rss_service, tmdb as tmdb_service
 from .enrich import (
+    _bgm_ep_cache,
     _get_bangumi_episodes,
     _match_rss_ep_to_sort,
     _get_bangumi_ep_id,
@@ -165,12 +166,15 @@ def format_download_path(
     Format specs are supported, e.g. ``{tvdb_episode:02d}`` → ``05``.
     The *ext* parameter (e.g. ``".mkv"``) is appended after formatting.
     """
+    bgm = sub.get("bgm", {})
+    tvdb = sub.get("tvdb", {})
+    tmdb = sub.get("tmdb", {})
     return template.format(
-        series_name=sub.get("series_name") or sub.get("name", ""),
-        bangumi_title=sub.get("bgm_subject_name") or sub.get("name", ""),
-        bgm_season=sub.get("bgm_season", 1),
-        tvdb_season=sub.get("tvdb_season") or sub.get("bgm_season", 1),
-        tmdb_season=sub.get("tmdb_season") or sub.get("bgm_season", 1),
+        series_name=bgm.get("series_name") or sub.get("name", ""),
+        bangumi_title=bgm.get("subject_name") or sub.get("name", ""),
+        bgm_season=bgm.get("season", 1),
+        tvdb_season=tvdb.get("season") or bgm.get("season", 1),
+        tmdb_season=tmdb.get("season") or bgm.get("season", 1),
         sort=bangumi_sort or sort,
         bangumi_sort=bangumi_sort or sort,
         bangumi_ep=bangumi_ep or bangumi_sort or sort,
@@ -402,10 +406,14 @@ async def generate_metadata(
     # Compute file stem from path template (same as media file)
     _tmpl = config.RSS_PATH_TEMPLATE
     _stem_sub = {
-        "series_name": series_name or show_name, "name": show_name,
-        "bgm_subject_name": bgm_subject_name or show_name,
-        "bgm_season": bgm_season,
-        "tvdb_season": tvdb_season, "tmdb_season": tmdb_season,
+        "name": show_name,
+        "bgm": {
+            "series_name": series_name or show_name,
+            "subject_name": bgm_subject_name or show_name,
+            "season": bgm_season,
+        },
+        "tvdb": {"season": tvdb_season},
+        "tmdb": {"season": tmdb_season},
     }
     _stem_path = format_download_path(
         _tmpl, _stem_sub, sort=sort, ext="",
@@ -554,31 +562,39 @@ async def _process_subscription(sub: dict):
     if sub.get("active") == 0:
         return
 
-    filter_tags = sub.get("filter_tags") or []
+    primary = sub.get("primary", {})
+    backup = sub.get("backup", {})
+    bgm = sub.get("bgm", {})
+
+    filter_tags = primary.get("filter_tags") or []
     name = sub.get("name", str(bangumi_id))
 
-    bgm_sortrange = sub.get("bgm_sortrange")
-    air_date = sub.get("air_date", "")
+    bgm_sortrange = bgm.get("sortrange")
+    air_date = bgm.get("air_date", "")
 
     # 1. Try primary RSS
-    primary_exclude = sub.get("exclude_patterns") or []
-    primary_items = await _fetch_passed_items(
-        sub["rss_url"], filter_tags, bangumi_id,
-        extra_exclude_patterns=primary_exclude, source="primary",
-        bgm_sortrange=bgm_sortrange, air_date=air_date,
-    )
-    new_downloads = 0
-    for item in primary_items:
-        if await _download_item(item, bangumi_id, "primary", sub):
-            new_downloads += 1
+    primary_exclude = primary.get("exclude_patterns") or []
+    primary_rss = primary.get("rss_url", "")
+    if primary_rss:
+        primary_items = await _fetch_passed_items(
+            primary_rss, filter_tags, bangumi_id,
+            extra_exclude_patterns=primary_exclude, source="primary",
+            bgm_sortrange=bgm_sortrange, air_date=air_date,
+        )
+        new_downloads = 0
+        for item in primary_items:
+            if await _download_item(item, bangumi_id, "primary", sub):
+                new_downloads += 1
+    else:
+        new_downloads = 0
 
     # 2. Always check backup RSS — it may have episodes the primary doesn't
-    backup_url = sub.get("backup_rss_url", "")
+    backup_url = backup.get("rss_url", "")
     if backup_url:
-        backup_tags = sub.get("backup_filter_tags")
+        backup_tags = backup.get("filter_tags")
         if backup_tags is None:
             backup_tags = filter_tags
-        backup_exclude = sub.get("backup_exclude_patterns") or []
+        backup_exclude = backup.get("exclude_patterns") or []
         backup_items = await _fetch_passed_items(
             backup_url, backup_tags, bangumi_id,
             extra_exclude_patterns=backup_exclude, source="backup",
@@ -594,14 +610,14 @@ async def _process_subscription(sub: dict):
 
 
 async def _refresh_sortrange(bangumi_id: int, sub: dict):
-    """Re-fetch Bangumi episode list and update bgm_sortrange in the subscription.
+    """Re-fetch Bangumi episode list and update bgm.sortrange in the subscription.
 
     Bangumi entries for currently-airing shows often have incomplete episode
     lists (fewer sorts than the final count).  After each successful download
     we refresh the sort range so ``_check_completion`` always sees the latest
     data and won't prematurely mark a subscription as completed.
     """
-    sub_bak = sub.get("bgm_sortrange")
+    sub_bak = sub.get("bgm", {}).get("sortrange")
     try:
         # Clear cached episodes so we get the latest from the API
         _bgm_ep_cache.pop(bangumi_id, None)
@@ -610,9 +626,11 @@ async def _refresh_sortrange(bangumi_id: int, sub: dict):
         new_range = [min(sorts), max(sorts)] if sorts else [0, 0]
 
         if sub_bak != new_range:
-            sub["bgm_sortrange"] = new_range
+            sub.setdefault("bgm", {})["sortrange"] = new_range
             from ..data import update_subscription
-            update_subscription(bangumi_id, {"bgm_sortrange": new_range})
+            bgm_data = dict(sub.get("bgm", {}))
+            bgm_data["sortrange"] = new_range
+            update_subscription(bangumi_id, {"bgm": bgm_data})
             logger.info("bgm_sortrange refreshed: %s → %s", sub_bak, new_range)
     except Exception:
         logger.warning("Failed to refresh bgm_sortrange (non-fatal)", exc_info=True)
@@ -622,7 +640,7 @@ async def _refresh_sortrange(bangumi_id: int, sub: dict):
 
 async def _check_completion(bangumi_id: int, sub: dict):
     """If all episodes in bgm_sortrange are downloaded, mark active=0."""
-    bgm_sortrange = sub.get("bgm_sortrange", [0, 0])
+    bgm_sortrange = sub.get("bgm", {}).get("sortrange", [0, 0])
     if bgm_sortrange[0] <= 0:
         return
     episodes = get_all_episodes(bangumi_id)
@@ -783,7 +801,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     tvdb_id = get_tvdb_id(bangumi_id)
 
     # ── Ensure subscription has enrichment fields ──────────────────
-    bgm_season = sub.get("bgm_season")
+    bgm_season = sub.get("bgm", {}).get("season")
     if bgm_season is None:
         print(f"         🔗 订阅缺少 bgm_season，正在丰富化...")
         enriched = await enrich_subscription(bangumi_id)
@@ -795,13 +813,13 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
             print(f"         ❌ 丰富化失败，将在下次轮询重试")
             return False
 
-    bgm_season = sub.get("bgm_season", 1)
-    tmdb_season = sub.get("tmdb_season")
+    bgm_season = sub.get("bgm", {}).get("season", 1)
+    tmdb_season = sub.get("tmdb", {}).get("season")
     # Re-read tmdb_id/tvdb_id: enrichment may have just persisted them
     if not tmdb_id:
-        tmdb_id = get_tmdb_id(bangumi_id) or sub.get("tmdb_id") or 0
+        tmdb_id = get_tmdb_id(bangumi_id) or sub.get("tmdb", {}).get("id") or 0
     if not tvdb_id:
-        tvdb_id = get_tvdb_id(bangumi_id) or sub.get("tvdb_id") or 0
+        tvdb_id = get_tvdb_id(bangumi_id) or sub.get("tvdb", {}).get("id") or 0
 
     # ── Match RSS episode to Bangumi sort ──────────────────────────
     # Prefer the sort already assigned by _fetch_passed_items (sequential
@@ -820,7 +838,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
         increment_fail_count(bangumi_id, sort)
         return False
 
-    bgm_sortrange = sub.get("bgm_sortrange", [0, 0])
+    bgm_sortrange = sub.get("bgm", {}).get("sortrange", [0, 0])
     if bgm_sortrange[0] > 0 and (sort < bgm_sortrange[0] or sort > bgm_sortrange[1]):
         print(f"         ⚠️ sort={sort} 超出 bgm_sortrange={bgm_sortrange}，但仍继续处理")
 
@@ -873,11 +891,13 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
 
     # ── Compute download paths from template ───────────────────────
     show_name = sub.get("name", str(bangumi_id))
-    bgm_subject_name = sub.get("bgm_subject_name") or show_name
-    series_name = sub.get("series_name") or show_name
+    bgm = sub.get("bgm", {})
+    bgm_subject_name = bgm.get("subject_name") or show_name
+    series_name = bgm.get("series_name") or show_name
+    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
     template = config.RSS_PATH_TEMPLATE
-    rel_path = format_download_path(template, sub, sort=sort).lstrip("/")
+    rel_path = format_download_path(template, sub, sort=sort, tvdb_episode=tvdb_ep_val).lstrip("/")
     rel_dir = str(Path(rel_path).parent)
     season_dir = str(Path(rss_base) / rel_dir)
     show_dir = str(Path(season_dir).parent)
@@ -901,17 +921,18 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
             from ..clients.qbittorrent import get_torrent_files
             files = await get_torrent_files(qb, info_hash)
             old_path = files[0]["name"] if files else guid
-            tvdb_ep_val = sort + sub.get("tvdb_ep_offset", 0)
+            tvdb_meta = sub.get("tvdb", {})
+            tmdb_meta = sub.get("tmdb", {})
             success = await generate_metadata(
                 qb, info_hash, bangumi_id, sort,
                 bgm_subject_id, tmdb_id, show_name,
                 old_path, guid,
                 bgm_season=bgm_season,
                 tmdb_season=tmdb_season,
-                tmdb_ep_offset=sub.get("tmdb_ep_offset", 0),
-                tvdb_id=tvdb_id or sub.get("tvdb_id") or 0,
-                tvdb_season=sub.get("tvdb_season"),
-                tvdb_ep_offset=sub.get("tvdb_ep_offset", 0),
+                tmdb_ep_offset=tmdb_meta.get("ep_offset", 0),
+                tvdb_id=tvdb_id or tvdb_meta.get("id") or 0,
+                tvdb_season=tvdb_meta.get("season"),
+                tvdb_ep_offset=tvdb_meta.get("ep_offset", 0),
                 tvdb_ep=tvdb_ep_val,
                 season_dir=season_dir,
                 show_dir=show_dir,
@@ -933,7 +954,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     except Exception:
         pass  # resume might fail if auto-started
 
-    tmdb_ep_calc = sort + sub.get("tmdb_ep_offset", 0)
+    tmdb_ep_calc = sort + sub.get("tmdb", {}).get("ep_offset", 0)
     mark_downloaded(bangumi_id, sort, item.get("rss_url", ""), guid, source,
                     pub_date=item.get("pub_date", ""), info_hash=torrent_hash,
                     tvdb_ep=tvdb_ep_val, tmdb_ep_calc=tmdb_ep_calc)

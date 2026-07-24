@@ -21,7 +21,10 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(-1);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const searchVersionRef = useRef(0);
+  const composingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hasCjk = /[\u3400-\u9fff\uf900-\ufaff]/;
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -33,28 +36,49 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
     return () => document.removeEventListener('mousedown', handleClick);
   }, []);
 
-  const handleInputChange = (value: string) => {
-    onBangumiIdChange(value);
-    setHighlightIdx(-1);
+  useEffect(() => () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+  }, []);
+
+  const scheduleSearch = (value: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const searchVersion = ++searchVersionRef.current;
 
     const trimmed = value.trim();
     // Only suggest for text (non-numeric) queries
-    if (trimmed && !/^\d+$/.test(trimmed) && trimmed.length >= 1) {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(async () => {
-        try {
-          const results = await searchBangumi(trimmed);
-          setCandidates(results);
-          setShowDropdown(results.length > 0);
-        } catch {
-          setCandidates([]);
-          setShowDropdown(false);
-        }
-      }, 300);
-    } else {
+    if (!trimmed || /^\d+$/.test(trimmed)) {
       setCandidates([]);
       setShowDropdown(false);
+      return;
     }
+
+    // During IME composition, ignore pure phonetic intermediate text but allow
+    // committed Chinese values even if the browser still marks the event composing.
+    if (composingRef.current && !hasCjk.test(trimmed)) return;
+
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const results = await searchBangumi(trimmed);
+        if (searchVersion !== searchVersionRef.current) return;
+        setCandidates(results);
+        setShowDropdown(results.length > 0);
+      } catch {
+        if (searchVersion !== searchVersionRef.current) return;
+        setCandidates([]);
+        setShowDropdown(false);
+      }
+    }, 300);
+  };
+
+  const handleInputChange = (value: string) => {
+    onBangumiIdChange(value);
+    setHighlightIdx(-1);
+    scheduleSearch(value);
+  };
+
+  const handleCompositionEnd = (e: React.CompositionEvent<HTMLInputElement>) => {
+    composingRef.current = false;
+    handleInputChange(e.currentTarget.value);
   };
 
   const handleSelectCandidate = (candidate: Candidate) => {
@@ -103,6 +127,12 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
           placeholder="名称或 Bangumi ID (e.g. 地狱乐)"
           value={bangumiId}
           onChange={e => handleInputChange(e.target.value)}
+          onCompositionStart={() => {
+            composingRef.current = true;
+            if (debounceRef.current) clearTimeout(debounceRef.current);
+            searchVersionRef.current += 1;
+          }}
+          onCompositionEnd={handleCompositionEnd}
           onFocus={() => { if (candidates.length > 0) setShowDropdown(true); }}
           onKeyDown={handleKeyDown}
         />
