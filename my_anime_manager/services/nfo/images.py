@@ -134,7 +134,13 @@ async def download_tvdb_episode_thumb(
     if image_path.startswith("http"):
         url = image_path
     else:
-        url = f"{TVDB_ARTWORK_BASE}/{image_path.lstrip('/')}"
+        # Strip any leading "banners/" prefix — get_series_episodes
+        # sometimes returns "banners/v4/episode/..." rather than
+        # "v4/episode/...", which would double up with the base.
+        clean = image_path.lstrip("/")
+        if clean.startswith("banners/"):
+            clean = clean[len("banners/"):]
+        url = f"{TVDB_ARTWORK_BASE}/{clean}"
     file_path = str(Path(output_dir) / f"{base_filename}-thumb")
     return await _download_image(url, file_path)
 

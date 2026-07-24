@@ -57,9 +57,6 @@ async def generate_metadata(
     tvdb_ep_data = None
     tvdb_ep_id = 0
     ep_rating = 0.0
-    # Saved for season.nfo reuse (season title, first episode air date)
-    tvdb_season_info: dict | None = None
-    tvdb_series_data: dict | None = None
     # Episode number variables for path template (initialised to sort as fallback)
     bangumi_ep_val = sort
     bgm_ep_name = ""
@@ -67,13 +64,6 @@ async def generate_metadata(
     tmdb_target_ep = 0
     if tvdb_id:
         try:
-            from ...clients.tvdb import (
-                get_series_extended as tvdb_get_series_extended,
-                get_season_extended as tvdb_get_season_extended,
-            )
-
-            # Use Bangumi ``ep`` (canonical episode number) + split-season
-            # offset for TVDB alignment (TVDB always starts at 1 per season).
             tvdb_ep_offset_val = tvdb_ep_offset or 0
             try:
                 eps = await _get_bangumi_episodes(bangumi_id)
@@ -95,37 +85,15 @@ async def generate_metadata(
                 bangumi_ep_val, tvdb_ep_offset_val,
             )
 
-            # Step 1: Get series extended → find season ID
-            series_resp = await tvdb_get_series_extended(tvdb_id)
-            series_data = series_resp.json().get("data", series_resp.json())
-            tvdb_series_data = series_data  # save for season.nfo
-            season_id = None
-            for s in series_data.get("seasons", []):
-                if s.get("number") == target_tvdb_season:
-                    season_id = s.get("id")
-                    break
-            if not season_id and series_data.get("seasons"):
-                # Fallback: use first season
-                season_id = series_data["seasons"][0].get("id")
-
-            if season_id:
-                # Step 2: Get season extended → find target episode
-                season_resp = await tvdb_get_season_extended(season_id)
-                season_info = season_resp.json().get("data", season_resp.json())
-                tvdb_season_info = season_info  # save for season.nfo
-                for ep in season_info.get("episodes", []):
-                    if ep.get("number") == tvdb_ep:
-                        tvdb_ep_id = ep.get("id")
-                        tvdb_ep_data = {
-                            "name": ep.get("name", ""),
-                            "overview": ep.get("overview", ""),
-                            "air_date": ep.get("airDate") or ep.get("aired", ""),
-                            "runtime": ep.get("runtime", 0),
-                            "still_path": ep.get("image", ""),
-                            "tvdb_ep_id": tvdb_ep_id,
-                        }
-                        ep_rating = ep.get("siteRating", 0) or 0
-                        break
+            from .. import tvdb as tvdb_service
+            result = await tvdb_service.get_episode(
+                tvdb_id, target_tvdb_season, tvdb_ep,
+                language="zho",
+            )
+            if result:
+                tvdb_ep_data = result
+                tvdb_ep_id = result["tvdb_ep_id"]
+                ep_rating = result.get("site_rating", 0) or 0
         except Exception:
             logger.exception("TVDB episode fetch failed")
 
@@ -155,14 +123,6 @@ async def generate_metadata(
             logger.info("Episode plot resolved via fallback chain")
     except Exception:
         logger.exception("Episode plot fallback failed (non-fatal)")
-
-    # ── Bangumi original Japanese name for <originaltitle> ─────────
-    bgm_original_name = ""
-    try:
-        subject_for_name = await get_subject(bgm_subject_id)
-        bgm_original_name = (subject_for_name.get("name") or "").strip()
-    except Exception:
-        logger.warning("Bangumi subject lookup for original name failed (non-fatal)")
 
     # ── Season directory ──────────────────────────────────────────
     _season_dir.mkdir(parents=True, exist_ok=True)
@@ -199,7 +159,7 @@ async def generate_metadata(
         episode_number=tvdb_ep,
         bangumi_ep_id=bgm_ep_id,
         show_name=show_name,
-        original_name=bgm_ep_name or bgm_original_name or show_name,
+        original_name=bgm_ep_name or show_name,
         bangumi_subject_name=bgm_subject_name or show_name,
         rating=ep_rating,
         output_dir=str(_season_dir),
@@ -246,14 +206,6 @@ async def generate_metadata(
             season_plot = ""
             season_premiered = ""
 
-            if tvdb_season_info:
-                # Premiered: first episode air date of this season
-                eps = tvdb_season_info.get("episodes", [])
-                if eps:
-                    first_air = (eps[0].get("airDate") or eps[0].get("aired", ""))
-                    if first_air:
-                        season_premiered = first_air
-
             # Still download Bangumi poster
             subject = await get_subject(bgm_subject_id)
             season_title = (subject.get("name_cn") or subject.get("name") or show_name).strip()
@@ -275,7 +227,7 @@ async def generate_metadata(
                 season_number=tvdb_season or bgm_season,
                 bangumi_id=bgm_subject_id,
                 output_dir=str(_season_dir),
-                tvdb_season_id=season_id or 0,
+                tvdb_season_id=0,
             )
             logger.info("Season %d season.nfo generated", effective_season)
         except Exception:
