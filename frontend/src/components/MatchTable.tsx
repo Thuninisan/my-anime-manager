@@ -52,6 +52,7 @@ interface SearchEntry {
   tmdb: { id: number; name: string; original_title?: string; original_name?: string } | null;
   bangumi: { id: number; name: string; name_cn?: string } | null;
   media_type?: "tv" | "movie" | "special";
+  map_entries?: { bangumi_id: number; name: string; tvdb_id?: number; tvdb_season?: number; tmdb_season?: number }[];
 }
 
 interface TmdbEpisode {
@@ -93,6 +94,8 @@ export interface MatchRow {
   tmdb_season: number | null;
   tmdb_ep: number | null;
   tmdb_ep_name: string;
+  tvdb_season: number | null;
+  tvdb_ep: number | null;
   matched: boolean;
   media_type?: "tv" | "movie" | "special";
 }
@@ -259,6 +262,8 @@ export function computeMatches(data: any): MatchRow[] {
         tmdb_season: null,
         tmdb_ep: null,
         tmdb_ep_name: searchEntry.tmdb?.name || '-',
+        tvdb_season: null,
+        tvdb_ep: null,
         matched,
         media_type: "movie",
       };
@@ -346,6 +351,39 @@ export function computeMatches(data: any): MatchRow[] {
         : null;
     }
 
+    // TVDB: look up from episode_data.tvdb using map entry + Bangumi sort
+    let tvdb_season: number | null = null;
+    let tvdb_ep: number | null = null;
+    if (bgmEp && matchedBgmId != null) {
+      const mapEntries: any[] = searchEntry?.map_entries || [];
+      const mapEntry = mapEntries.find((me: any) => me.bangumi_id === matchedBgmId);
+      const tvdbId: number | undefined = mapEntry?.tvdb_id;
+      if (tvdbId != null) {
+        const tvdbSeries = episodeData?.tvdb?.[String(tvdbId)];
+        const seasons: Record<string, any> = tvdbSeries?.seasons || {};
+        // Try absoluteNumber match first
+        for (const [skey, sdata] of Object.entries(seasons)) {
+          const eps: any[] = sdata?.episodes || [];
+          const found = eps.find((e: any) => e.absoluteNumber === bgmEp.sort);
+          if (found) {
+            tvdb_season = found.seasonNumber ?? Number(skey);
+            tvdb_ep = found.epNum;
+            break;
+          }
+        }
+        // Fallback: match by epNum within the map's tvdb_season
+        if (tvdb_ep == null && mapEntry.tvdb_season != null) {
+          const targetSeason = seasons[String(mapEntry.tvdb_season)];
+          const eps: any[] = targetSeason?.episodes || [];
+          const found = eps.find((e: any) => e.epNum === bgmEp.sort);
+          if (found) {
+            tvdb_season = mapEntry.tvdb_season;
+            tvdb_ep = found.epNum;
+          }
+        }
+      }
+    }
+
     return {
       file_name: pf.file_name,
       torrent_path: pf.torrent_path,
@@ -361,6 +399,8 @@ export function computeMatches(data: any): MatchRow[] {
       tmdb_season: tmdbMatch?.season ?? null,
       tmdb_ep: tmdbMatch?.epNum ?? null,
       tmdb_ep_name: tmdbMatch?.name || '-',
+      tvdb_season,
+      tvdb_ep,
       matched: tmdbMatch !== null,
       media_type: "tv",
     };
@@ -481,6 +521,8 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
       tmdb_season: null,
       tmdb_ep: null,
       tmdb_ep_name: '-',
+      tvdb_season: null,
+      tvdb_ep: null,
       matched: false,
       media_type: "special" as any,
     }));

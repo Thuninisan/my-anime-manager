@@ -259,6 +259,14 @@ export default function MappingCard({
             </select>
           </div>
         )}
+        {!isMovie && row.tvdb_season != null && row.tvdb_ep != null && (
+          <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200 dark:border-white/10">
+            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TVDB</span>
+            <span className="text-[11px] font-mono text-slate-500 tabular-nums">
+              S{row.tvdb_season} E{row.tvdb_ep}
+            </span>
+          </div>
+        )}
         <div className="ml-auto">
           <button
             className="cursor-pointer select-none transition-all hover:scale-105 active:scale-95"
