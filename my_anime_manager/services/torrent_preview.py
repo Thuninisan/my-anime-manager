@@ -885,6 +885,12 @@ async def parse_and_search(torrent_path: str) -> dict:
     from ..utils.torrent_file_reader import read_torrent_name
     torrent_name = read_torrent_name(torrent_path)
 
+    # ── Branch: ktnbytes / 343-Labs → TMDB-first flow ──
+    if "ktnbytes" in torrent_name.lower() or "343-labs" in torrent_name.lower():
+        print(f"🔀 检测到 ktnbytes/343-Labs 种子，使用 TMDB 直搜流程")
+        from .torrent.search import search_by_tmdb
+        return await search_by_tmdb(torrent_path, torrent_name=torrent_name)
+
     # ── Step 1: Bencode extraction ──
     print("📋 读取种子文件内容 (bencode)...")
     file_list: list[dict] = read_torrent_file_list(torrent_path)

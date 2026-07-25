@@ -231,6 +231,38 @@ def get_bangumi_id_by_tmdb_id(tmdb_id: int) -> int | None:
     return None
 
 
+def get_map_entries_by_tmdb_id(tmdb_id: int) -> list[dict]:
+    """Return all map entries that share the same TMDB ID.
+
+    Useful for ktnbytes / 343-Labs torrents where a single TMDB show
+    may map to multiple Bangumi seasons (e.g. S1 + S2).
+
+    Args:
+        tmdb_id: TMDB series ID.
+
+    Returns:
+        List of dicts with keys: bangumi_id, name, name_original,
+        tvdb_id, tvdb_season, tmdb_season.
+        Sorted by bangumi_id ascending.
+    """
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    results: list[dict] = []
+    for bgm_id_str, entry in _bangumi_mikan_map.items():
+        if entry.get("tmdb_id") == tmdb_id:
+            results.append({
+                "bangumi_id": int(bgm_id_str),
+                "name": entry.get("name", ""),
+                "name_original": entry.get("name_original"),
+                "tvdb_id": entry.get("tvdb_id"),
+                "tvdb_season": entry.get("tvdb_season"),
+                "tmdb_season": entry.get("tmdb_season"),
+            })
+    results.sort(key=lambda x: x["bangumi_id"])
+    return results
+
+
 def search_by_name(query: str) -> list[dict]:
     """Search bangumi_mikan_map by name. Returns up to 20 short matches."""
     global _bangumi_mikan_map
