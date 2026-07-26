@@ -65,6 +65,8 @@ export interface DownloadFileEntry {
   bangumi_ep_id: number | null;
   tmdb_season: number;
   tmdb_episode: number;
+  tvdb_season: number | null;
+  tvdb_episode: number | null;
 }
 
 export interface UploadedSubEntry {
@@ -78,6 +80,8 @@ export interface UploadedSubEntry {
   bangumi_ep_id: number | null;
   tmdb_season: number;
   tmdb_episode: number;
+  tvdb_season: number | null;
+  tvdb_episode: number | null;
 }
 
 export interface DownloadRequest {

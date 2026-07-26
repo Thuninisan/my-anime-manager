@@ -70,7 +70,7 @@ export default function LeftSidebar({
           {sub?.name || data?.name || '...'}
         </h2>
         <p className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
-          Season {data?.bgm?.season || sub?.bgm?.season || '?'}
+          Season {data?.bgm_season || sub?.bgm?.season || '?'}
           {sub?.backup?.subgroup_name && (
             <>
               <span className="text-muted-foreground/40">·</span>

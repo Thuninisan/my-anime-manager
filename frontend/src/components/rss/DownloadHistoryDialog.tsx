@@ -26,7 +26,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
   useEffect(() => {
     if (!open || !sub?.tmdb?.id) { setTmdbSeasonMap(null); return; }
     let cancelled = false;
-    getTmdbSeasonMap(sub.tmdb_id)
+    getTmdbSeasonMap(sub.tmdb!.id)
       .then(data => { if (!cancelled) setTmdbSeasonMap(data); })
       .catch(() => { if (!cancelled) setTmdbSeasonMap(null); })
     return () => { cancelled = true; };
@@ -114,7 +114,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
       // Filter out S00 (Specials) from default candidates
       const seasonKeys = Object.keys(tmdbSeasonMap).filter(k => k !== '0').sort((a, b) => Number(a) - Number(b));
       if (!season) {
-        season = sub?.tmdb?.season != null ? String(sub.tmdb_season) : (seasonKeys[0] || '');
+        season = sub?.tmdb?.season != null ? String(sub.tmdb!.season) : (seasonKeys[0] || '');
       }
       if (season && tmdbSeasonMap[season] && !ep) {
         const seasonEps = tmdbSeasonMap[season].episodes;
@@ -171,7 +171,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
               <p className="text-sm text-muted-foreground mt-0.5">
                 Downloaded{' '}
                 <span className="font-bold text-foreground">
-                  {data ? data.episodes.length : 0}/{data ? data.bgm.sortrange[1] - data.bgm.sortrange[0] + 1 : 0}
+                  {data ? data.episodes.length : 0}/{data ? data.bgm_sortrange[1] - data.bgm_sortrange[0] + 1 : 0}
                 </span>{' '}
                 episodes
               </p>
