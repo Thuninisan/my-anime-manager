@@ -182,12 +182,7 @@ def _parse_file(file_entry: dict) -> dict:
 
     # Strip trailing year (e.g. "Show 2024" → "Show") so show_name
     # matches the search_results key produced by _search_*_for_name.
-    base_name, _ = _extract_year(anime_title)
-    # Append season suffix when > 1 so multi-season torrents produce
-    # distinct show names (e.g. "Shield Hero" vs "Shield Hero Season 2").
-    show_name = base_name
-    if season_num > 1:
-        show_name = f"{base_name} Season {season_num}"
+    show_name, _ = _extract_year(anime_title)
 
     result["show_name"] = show_name
     result["season"] = season_num
