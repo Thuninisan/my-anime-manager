@@ -89,7 +89,7 @@ async def generate_metadata(
         config.RSS_PATH_TEMPLATE, _stem_sub, sort=sort, ext=ext,
         bangumi_sort=sort, bangumi_ep=sort,
         tvdb_episode=tvdb_ep_val, tmdb_episode=eff_tmdb_ep,
-    )
+    ).lstrip("/")
     try:
         await rename_file(qb_client, info_hash, old_torrent_path, new_path)
         logger.info("renamed: %s → %s", old_torrent_path, new_path)
