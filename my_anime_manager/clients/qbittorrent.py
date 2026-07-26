@@ -11,6 +11,8 @@ from pathlib import Path
 import qbittorrentapi
 from qbittorrentapi import LoginFailed, Conflict409Error
 
+from ..utils.torrent_hash import compute_info_hash
+
 logger = logging.getLogger(__name__)
 
 # Seconds before giving up on a qBittorrent connection (connect + read).
@@ -74,18 +76,24 @@ async def add_torrent(
 ) -> str:
     """Add a torrent to qBittorrent in paused state.
 
-    After adding, queries the torrent list by name to retrieve the info hash.
+    Uses hash-diff (primary) to locate the newly-added torrent.
+    Falls back to a pre-computed info-hash lookup when qBittorrent
+    deduplicates the torrent (same info_hash already present).
 
     Args:
         client: Authenticated qbittorrentapi.Client
         torrent_file_path: Path to .torrent file
         save_path: Download save path
-        rename: Optional rename for the torrent (also used to look up the hash)
+        rename: Optional rename for the torrent
 
     Returns:
         Info hash string of the added torrent
     """
     torrent_name = rename or Path(torrent_file_path).stem
+
+    # Pre-compute the info hash from the .torrent file so we can look it
+    # up directly when qBittorrent deduplicates (hash-diff finds nothing).
+    expected_hash = compute_info_hash(torrent_file_path)
 
     def _do_add():
         before_hashes = {t.hash for t in client.torrents.info()}
@@ -109,12 +117,12 @@ async def add_torrent(
             for torrent in client.torrents.info():
                 if torrent.hash not in before_hashes:
                     return torrent.hash
-            # Also try name match as fallback
-            for torrent in client.torrents.info():
-                internal = torrent.name.lower().replace(" ", "")
-                needle = torrent_name.lower().replace(" ", "")
-                if needle in internal or internal in needle:
-                    return torrent.hash
+            # Fallback: look up by pre-computed info hash (handles
+            # deduplication when the same .torrent was already present).
+            if expected_hash:
+                for torrent in client.torrents.info():
+                    if torrent.hash == expected_hash:
+                        return torrent.hash
 
         raise RuntimeError(f"添加种子后未找到 torrent: {torrent_name}")
 
