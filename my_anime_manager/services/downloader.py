@@ -23,9 +23,6 @@ from . import rss as rss_service
 from .enrich import (
     _bgm_ep_cache,
     _get_bangumi_episodes,
-    _match_rss_ep_to_sort,
-    _get_bangumi_ep_id,
-    _get_bangumi_relations,
     enrich_subscription,
 )
 from .nfo import generate_metadata, format_download_path
@@ -193,11 +190,13 @@ async def _process_subscription(sub: dict):
     # 1. Try primary RSS
     primary_exclude = primary.get("exclude_patterns") or []
     primary_rss = primary.get("rss_url", "")
+    primary_offset = primary.get("offset")
     if primary_rss:
         primary_items = await _fetch_passed_items(
             primary_rss, filter_tags, bangumi_id,
             extra_exclude_patterns=primary_exclude, source="primary",
             bgm_sortrange=bgm_sortrange, air_date=air_date,
+            rss_offset=primary_offset,
         )
         new_downloads = 0
         for item in primary_items:
@@ -208,6 +207,7 @@ async def _process_subscription(sub: dict):
 
     # 2. Always check backup RSS — it may have episodes the primary doesn't
     backup_url = backup.get("rss_url", "")
+    backup_offset = backup.get("offset")
     if backup_url:
         backup_tags = backup.get("filter_tags")
         if backup_tags is None:
@@ -217,6 +217,7 @@ async def _process_subscription(sub: dict):
             backup_url, backup_tags, bangumi_id,
             extra_exclude_patterns=backup_exclude, source="backup",
             bgm_sortrange=bgm_sortrange, air_date=air_date,
+            rss_offset=backup_offset,
         )
         for item in backup_items:
             if await _download_item(item, bangumi_id, "backup", sub):
@@ -277,6 +278,7 @@ async def _fetch_passed_items(
     source: str = "primary",
     bgm_sortrange: list[int] | None = None,
     air_date: str = "",
+    rss_offset: int | None = None,
 ) -> list[dict]:
     """Fetch RSS and return items that pass filter AND aren't downloaded yet.
 
@@ -304,10 +306,7 @@ async def _fetch_passed_items(
         print(f"   ⚠️ RSS 获取失败: {e}")
         return []
 
-    # Pre-fetch episodes (cached) so we can match rss_ep → sort for dedup
-    episodes = await _get_bangumi_episodes(bangumi_id)
-
-    # ── Sort RSS items by pub_date (earliest first) ──
+    # Sort RSS items by pub_date (earliest first)
     feed["items"].sort(key=lambda item: item.get("pub_date") or "9999")
 
     # ── Track covered sorts (already downloaded) for sortrange limit ──
@@ -339,26 +338,16 @@ async def _fetch_passed_items(
         if air_date and item_pub_date and item_pub_date < air_date:
             continue
 
-        # ── Assign sort: map RSS episode number to Bangumi sort ──
-        # Use _match_rss_ep_to_sort first for a deterministic rss_ep → sort
-        # mapping.  Only fall back to sequential fill when the mapped sort
-        # falls outside bgm_sortrange (e.g. RSS episode numbering doesn't
-        # align with Bangumi's sort order, or the episode belongs to a
-        # different season that happens to appear in this feed).
-        sort = _match_rss_ep_to_sort(episodes, rss_ep)
+        # ── Assign sort: rss_ep + rss_offset ──
+        # offset = first_bangumi_sort - smallest_rss_ep, computed during
+        # enrichment.  This gives a direct linear mapping from RSS episode
+        # numbers to Bangumi sort values.
+        if rss_offset is None:
+            continue  # can't determine sort without offset — skip
+        sort = rss_ep + rss_offset
         if bgm_sortrange and bgm_sortrange[0] > 0:
-            if sort > bgm_sortrange[1]:
-                # Mapped sort above range — likely a different season, skip
-                continue
-            if sort < bgm_sortrange[0]:
-                # Mapped sort below range — sequential fill as fallback
-                fallback = 0
-                for s in range(bgm_sortrange[0], bgm_sortrange[1] + 1):
-                    if s not in covered:
-                        fallback = s
-                        break
-                if fallback:
-                    sort = fallback
+            if sort < bgm_sortrange[0] or sort > bgm_sortrange[1]:
+                continue  # outside expected range, skip
         item["sort"] = sort
 
         # ── Sort-range duplicate filter ──
@@ -422,11 +411,26 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     bgm_season = sub.get("bgm", {}).get("season")
     if bgm_season is None:
         print(f"         🔗 订阅缺少 bgm_season，正在丰富化...")
-        enriched = await enrich_subscription(bangumi_id)
+        primary_rss = sub.get("primary", {}).get("rss_url", "")
+        backup_rss = sub.get("backup", {}).get("rss_url", "")
+        enriched = await enrich_subscription(
+            bangumi_id,
+            primary_rss_url=primary_rss,
+            backup_rss_url=backup_rss,
+        )
         if enriched:
+            # Pop offsets before top-level update; write to nested keys
+            primary_offset = enriched.pop("primary_offset", None)
+            backup_offset = enriched.pop("backup_offset", None)
             sub.update(enriched)
-            from ..data import update_subscription
+            from ..data import update_subscription, set_subscription_rss_offset
             update_subscription(bangumi_id, enriched)
+            if primary_offset is not None:
+                set_subscription_rss_offset(bangumi_id, "primary", primary_offset)
+                sub.setdefault("primary", {})["offset"] = primary_offset
+            if backup_offset is not None:
+                set_subscription_rss_offset(bangumi_id, "backup", backup_offset)
+                sub.setdefault("backup", {})["offset"] = backup_offset
         else:
             print(f"         ❌ 丰富化失败，将在下次轮询重试")
             return False
@@ -440,12 +444,11 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
         tvdb_id = get_tvdb_id(bangumi_id) or sub.get("tvdb", {}).get("id") or 0
 
     # ── Match RSS episode to Bangumi sort ──────────────────────────
-    # Prefer the sort already assigned by _fetch_passed_items (sequential
-    # fill of bgm_sortrange); fall back to legacy matching.
+    # sort is assigned by _fetch_passed_items via rss_ep + rss_offset.
     sort = item.get("sort") or 0
     if not sort:
-        episodes = await _get_bangumi_episodes(bgm_subject_id)
-        sort = _match_rss_ep_to_sort(episodes, rss_ep_num)
+        print(f"         ⚠️ rss_ep={rss_ep_num} 无法映射到 sort，跳过")
+        return False
     if sort != rss_ep_num:
         print(f"         📐 rss_ep={rss_ep_num} → sort={sort}")
 

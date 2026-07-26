@@ -457,6 +457,25 @@ def update_subscription(bangumi_id: int, fields: dict) -> bool:
     return False
 
 
+def set_subscription_rss_offset(bangumi_id: int, key: str, offset: int) -> bool:
+    """Set the RSS *offset* on a subscription's primary or backup feed.
+
+    *key* must be ``"primary"`` or ``"backup"``.  The offset is stored
+    inside ``sub[key]["offset"]`` and controls how RSS episode numbers
+    are mapped to Bangumi sort values (``sort = rss_ep + offset``).
+
+    Returns False if the subscription is not found.
+    """
+    subs = _load_subs()
+    for s in subs:
+        if s["bangumi_id"] == bangumi_id:
+            s.setdefault(key, {})["offset"] = offset
+            s["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            _save_subs(subs)
+            return True
+    return False
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Download history (dedup by bangumi_id + episode_number)
 # ═══════════════════════════════════════════════════════════════════════

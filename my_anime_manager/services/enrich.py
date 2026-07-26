@@ -11,6 +11,7 @@ from ..data import (
     get_tmdb_id, get_tmdb_season, get_tvdb_id, get_tvdb_season,
     set_tmdb_id as data_set_tmdb_id, set_tvdb_id,
 )
+from . import rss as rss_service
 from ..utils.episode_name_match import fuzzy_match_episode
 
 logger = logging.getLogger(__name__)
@@ -35,22 +36,41 @@ async def _get_bangumi_episodes(subject_id: int) -> list[dict]:
     return eps
 
 
-def _match_rss_ep_to_sort(episodes: list[dict], rss_ep: int) -> int:
-    """Match RSS episode number to Bangumi sort value.
+async def _compute_rss_offset(rss_url: str, air_date: str) -> int | None:
+    """Compute the offset between RSS episode numbering and Bangumi sort.
 
-    Tries exact match on 'ep' field first, then positional fallback
-    (rss_ep-th episode in the sorted list). Returns the sort value,
-    or rss_ep as-is if no match found.
+    Fetches the RSS feed, finds the smallest *episode_number* among items
+    published on or after *air_date*, and returns that value.  The caller
+    then uses ``sort = rss_ep + offset`` where *offset* is
+    ``first_bangumi_sort - smallest_rss_ep``.
+
+    Returns None when the feed is empty or has no items after *air_date*.
     """
-    # Exact match on ep field
-    for e in episodes:
-        if e.get("ep") == rss_ep:
-            return e.get("sort") or rss_ep
-    # Positional fallback (1-based → 0-based index)
-    if 0 < rss_ep <= len(episodes):
-        e = episodes[rss_ep - 1]
-        return e.get("sort") or rss_ep
-    return rss_ep
+    try:
+        feed = await rss_service.fetch_and_parse_rss(rss_url)
+    except Exception:
+        logger.warning("RSS fetch failed for offset computation: %s", rss_url[:80])
+        return None
+
+    items = feed.get("items", [])
+    if not items:
+        return None
+
+    smallest: int | None = None
+    for item in items:
+        ep = item.get("episode_number") or 0
+        if not ep:
+            continue
+        pub = item.get("pub_date", "")
+        if air_date and pub and pub < air_date:
+            continue
+        if smallest is None or ep < smallest:
+            smallest = ep
+
+    if smallest is not None:
+        logger.info("RSS offset: smallest_ep=%d from %s", smallest, rss_url[:80])
+
+    return smallest
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -566,6 +586,8 @@ async def _compute_tmdb_ep_offset(
 async def enrich_subscription(
     bangumi_id: int,
     on_progress: Callable[[str], Any] | None = None,
+    primary_rss_url: str = "",
+    backup_rss_url: str = "",
 ) -> dict | None:
     """Enrich a subscription with Bangumi season info, sort range, rating.
 
@@ -774,6 +796,26 @@ async def enrich_subscription(
         except Exception:
             pass
 
+        # 5a. Compute RSS episode offset for primary/backup feeds
+        #     offset = first_bangumi_sort - smallest_rss_ep
+        #     The downloader then uses: sort = rss_ep + offset
+        primary_offset: int | None = None
+        backup_offset: int | None = None
+        if bgm_sortrange and bgm_sortrange[0] > 0 and air_date:
+            first_sort = bgm_sortrange[0]
+            if primary_rss_url:
+                smallest = await _compute_rss_offset(primary_rss_url, air_date)
+                if smallest is not None:
+                    primary_offset = first_sort - smallest
+                    _emit(f"   📐 primary rss_offset={primary_offset} "
+                          f"(first_sort={first_sort} - first_rss_ep={smallest})")
+            if backup_rss_url:
+                smallest = await _compute_rss_offset(backup_rss_url, air_date)
+                if smallest is not None:
+                    backup_offset = first_sort - smallest
+                    _emit(f"   📐 backup rss_offset={backup_offset} "
+                          f"(first_sort={first_sort} - first_rss_ep={smallest})")
+
         return {
             "bgm": {
                 "season": bgm_season,
@@ -793,6 +835,8 @@ async def enrich_subscription(
                 "season": tmdb_season,
                 "ep_offset": tmdb_ep_offset,
             },
+            "primary_offset": primary_offset,
+            "backup_offset": backup_offset,
         }
     except Exception as e:
         _emit(f"⚠️ enrich_subscription 失败: {e}")

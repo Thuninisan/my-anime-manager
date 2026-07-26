@@ -482,8 +482,13 @@ async def batch_nfo_generator(
                     pass
 
         # ── Episode: collect thumb coroutine + metadata ──
-        eff_season = tvdb_season if tvdb_season is not None else tmdb_season
-        eff_episode = tvdb_ep or tmdb_ep_num
+        # Season and episode must be atomic: either both from TVDB
+        # or both from TMDB.  Mixing sources (e.g. TVDB season + TMDB
+        # episode) produces wrong results when the two databases use
+        # different season boundaries.
+        _use_tvdb = (tvdb_season is not None) and bool(tvdb_ep)
+        eff_season = tvdb_season if _use_tvdb else tmdb_season
+        eff_episode = tvdb_ep if _use_tvdb else tmdb_ep_num
 
         # Collect thumbnail download coroutine (deferred to Phase 3b)
         still = merged_ep.get("still_path", "")

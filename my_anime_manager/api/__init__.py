@@ -914,8 +914,8 @@ async def torrent_download(body: dict):
                     "bangumi_subject_id": bgm_id,
                     "bangumi_episode_sort": f.get("bangumi_sort", 0),
                     "tvdb_id": f.get("tvdb_season") and f.get("tvdb_episode") and _find_tvdb_id(preview_data, bgm_id) or 0,
-                    "tvdb_season": f.get("tvdb_season") or 0,
-                    "tvdb_episode": f.get("tvdb_episode") or 0,
+                    "tvdb_season": f.get("tvdb_season"),     # None if not provided — 0 is valid (Specials)
+                    "tvdb_episode": f.get("tvdb_episode"),   # None if not provided
                     "tmdb_id": _find_tmdb_id(preview_data, f.get("tmdb_show_name", "")),
                     "tmdb_season": f.get("tmdb_season", 0),
                     "tmdb_episode": f.get("tmdb_episode", 0),
@@ -1220,11 +1220,30 @@ async def enrich_subscription_stream(bangumi_id: int):
 
         async def run():
             try:
+                # Look up subscription to get RSS URLs for offset computation
+                subs = data.list_subscriptions()
+                sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+                primary_rss = sub.get("primary", {}).get("rss_url", "") if sub else ""
+                backup_rss = sub.get("backup", {}).get("rss_url", "") if sub else ""
+
                 result = await downloader.enrich_subscription(
                     bangumi_id, on_progress=on_progress,
+                    primary_rss_url=primary_rss,
+                    backup_rss_url=backup_rss,
                 )
                 if result:
+                    # Pop offsets before top-level update_subscription
+                    primary_offset = result.pop("primary_offset", None)
+                    backup_offset = result.pop("backup_offset", None)
                     data.update_subscription(bangumi_id, result)
+                    # Write offsets into nested primary/backup keys
+                    if primary_offset is not None:
+                        data.set_subscription_rss_offset(bangumi_id, "primary", primary_offset)
+                    if backup_offset is not None:
+                        data.set_subscription_rss_offset(bangumi_id, "backup", backup_offset)
+                    # Restore for the stream response
+                    result["primary_offset"] = primary_offset
+                    result["backup_offset"] = backup_offset
                 queue.put_nowait({"type": "done", "result": result})
             except Exception as exc:
                 queue.put_nowait({"type": "error", "message": str(exc)})
