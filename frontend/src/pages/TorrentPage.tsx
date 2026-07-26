@@ -21,12 +21,19 @@ export default function TorrentPage() {
     }
   };
 
+  const handleClosePreview = () => {
+    setSearchResult(null);
+    setAugmentedEpData(null);
+  };
+
+  const showOverlay = searchResult && !searchResult.error && searchResult.parsed_files;
+
   return (
     <>
-      {/* Upload dropzone */}
-      {!searchResult && !error && (
+      {/* Upload dropzone — always visible, dimmed when overlay is open */}
+      <div className={showOverlay ? 'opacity-40 pointer-events-none select-none' : ''}>
         <TorrentUpload onParse={handleParseTorrent} />
-      )}
+      </div>
 
       {/* Error */}
       {error && (
@@ -51,16 +58,6 @@ export default function TorrentPage() {
         </div>
       )}
 
-      {/* Match table / preview (parse-and-search result) */}
-      {searchResult && !searchResult.error && searchResult.parsed_files && (
-        <TorrentPreview
-          searchResult={searchResult}
-          augmentedEpData={augmentedEpData}
-          onEpisodeDataChange={setAugmentedEpData}
-          onClose={() => { setSearchResult(null); setAugmentedEpData(null); }}
-        />
-      )}
-
       {/* Parse error from server */}
       {searchResult?.error && (
         <div className="max-w-4xl mx-auto mt-4 glass-card rounded-xl p-4">
@@ -74,6 +71,27 @@ export default function TorrentPage() {
             </button>
           </div>
           <pre className="text-xs text-muted-foreground">{searchResult.error}</pre>
+        </div>
+      )}
+
+      {/* ── Preview Overlay ── */}
+      {showOverlay && (
+        <div className="fixed inset-0 z-40 flex">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={handleClosePreview}
+          />
+
+          {/* Slide-over panel */}
+          <div className="relative ml-64 flex-1 bg-background overflow-y-auto custom-scrollbar shadow-2xl">
+            <TorrentPreview
+              searchResult={searchResult}
+              augmentedEpData={augmentedEpData}
+              onEpisodeDataChange={setAugmentedEpData}
+              onClose={handleClosePreview}
+            />
+          </div>
         </div>
       )}
     </>

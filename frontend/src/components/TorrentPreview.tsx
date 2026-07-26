@@ -38,13 +38,13 @@ function getTmdbShowName(searchResult: any, showName: string): string {
 
 /** Extract bangumi show name — prefer Chinese (name_cn), fall back to Japanese (name), then row label. */
 function getBangumiShowName(searchResult: any, row: MatchRow): string {
-  // 1. search_results (最初搜索命中)
+  // 1. search_results (initial search hits)
   for (const entry of Object.values(searchResult?.search_results || {}) as any[]) {
     if (entry?.bangumi?.id === row.bgm_entry_id) {
       return entry.bangumi.name_cn || entry.bangumi.name || row.bgm_entry;
     }
   }
-  // 2. episode_data.bangumi (续集链 / 番外篇 — augmented by InfoCards)
+  // 2. episode_data.bangumi (sequel chain / side stories — augmented by InfoCards)
   const bgmData: Record<string, any> = searchResult?.episode_data?.bangumi || {};
   const bgmEntry = bgmData[String(row.bgm_entry_id)];
   if (bgmEntry?.name) {
@@ -58,7 +58,7 @@ export default function TorrentPreview({
   searchResult,
   augmentedEpData,
   onEpisodeDataChange,
-  onClose: _onClose,
+  onClose,
 }: TorrentPreviewProps) {
   const mergedResult = augmentedEpData && searchResult
     ? { ...searchResult, episode_data: augmentedEpData }
@@ -121,6 +121,8 @@ export default function TorrentPreview({
           bangumi_ep_id: row.bgm_ep_id,
           tmdb_season: row.tmdb_season ?? 0,
           tmdb_episode: row.tmdb_ep ?? 0,
+          tvdb_season: row.tvdb_season,
+          tvdb_episode: row.tvdb_ep,
         };
 
         // Video file
@@ -175,6 +177,8 @@ export default function TorrentPreview({
             bangumi_ep_id: matchingRow.bgm_ep_id,
             tmdb_season: matchingRow.tmdb_season ?? 0,
             tmdb_episode: matchingRow.tmdb_ep ?? 0,
+            tvdb_season: matchingRow.tvdb_season,
+            tvdb_episode: matchingRow.tvdb_ep,
           });
         }
       }
@@ -200,115 +204,166 @@ export default function TorrentPreview({
     }
   }, [effectiveRows, uploadedSubtitles, searchResult]);
 
+  const torrentName: string = searchResult?.torrent_name || 'Torrent Preview';
+  const success = downloadResult && !downloading;
+
   return (
-    <div className="flex-1 overflow-y-auto custom-scrollbar p-8 pb-32">
-      {/* ── Stats cards ── */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-        <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark p-4 rounded-xl shadow-sm">
-          <p className="text-xs text-slate-400 font-bold uppercase mb-1">Total Files</p>
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-bold">{stats.total}</span>
-            <span className="text-xs text-slate-500">
-              {skippedFiles.length} skipped
-            </span>
-          </div>
+    <div className="flex flex-col min-h-full">
+      {/* ── Header bar ── */}
+      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-md border-b border-border-light dark:border-border-dark px-8 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary shrink-0">
+            <rect x="2" y="7" width="20" height="15" rx="2" ry="2" />
+            <polyline points="17 2 12 7 7 2" />
+          </svg>
+          <h2 className="text-base font-semibold truncate">{torrentName}</h2>
         </div>
-        <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark p-4 rounded-xl shadow-sm">
-          <p className="text-xs text-slate-400 font-bold uppercase mb-1">Mapped</p>
-          <div className="flex items-baseline gap-2 text-primary">
-            <span className="text-2xl font-bold">{stats.mapped}</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
-              <polyline points="22 4 12 14.01 9 11.01" />
-            </svg>
-          </div>
-        </div>
-        <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark p-4 rounded-xl shadow-sm">
-          <p className="text-xs text-slate-400 font-bold uppercase mb-1">Pending</p>
-          <div className="flex items-baseline gap-2 text-secondary">
-            <span className="text-2xl font-bold">{stats.pending}</span>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <polyline points="12 6 12 12 16 14" />
-            </svg>
-          </div>
-        </div>
-        <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark p-4 rounded-xl shadow-sm">
-          <p className="text-xs text-slate-400 font-bold uppercase mb-1">Breakdown</p>
-          <div className="flex items-baseline gap-3">
-            <span className="text-sm font-medium">
-              <span className="text-primary">{tvCount}</span> TV
-            </span>
-            <span className="text-sm font-medium">
-              <span className="text-secondary">{movieCount}</span> Movie
-            </span>
-          </div>
-        </div>
+        <button
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors cursor-pointer shrink-0"
+          onClick={onClose}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+          <span>Close</span>
+        </button>
       </div>
 
-      {/* ── Metadata Source Overrides ── */}
-      <InfoCards
-        searchResult={searchResult}
-        episodeDataOverride={mergedResult.episode_data}
-        onEpisodeDataChange={onEpisodeDataChange}
-      />
-
-      {/* ── Match tables ── */}
-      <MatchTable
-        data={mergedResult}
-        onRowsComputed={handleRowsComputed}
-        onSubtitlesChange={handleSubtitlesChange}
-      />
-
-      {/* ── Success / error message ── */}
-      {downloadResult && (
-        <div className="fixed top-4 right-4 z-50 bg-accent text-white px-5 py-3 rounded-xl shadow-lg max-w-md">
-          <p className="text-sm font-semibold">{downloadResult}</p>
-          <button
-            className="text-xs underline mt-1 cursor-pointer"
-            onClick={() => setDownloadResult(null)}
-          >
-            Dismiss
-          </button>
+      {/* ── Body ── */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-8 pb-32">
+        {/* ── Stats cards ── */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+          <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark p-4 rounded-xl shadow-sm">
+            <p className="text-xs text-slate-400 font-bold uppercase mb-1">Total Files</p>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold">{stats.total}</span>
+              <span className="text-xs text-slate-500">
+                {skippedFiles.length} skipped
+              </span>
+            </div>
+          </div>
+          <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark p-4 rounded-xl shadow-sm">
+            <p className="text-xs text-slate-400 font-bold uppercase mb-1">Mapped</p>
+            <div className="flex items-baseline gap-2 text-primary">
+              <span className="text-2xl font-bold">{stats.mapped}</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                <polyline points="22 4 12 14.01 9 11.01" />
+              </svg>
+            </div>
+          </div>
+          <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark p-4 rounded-xl shadow-sm">
+            <p className="text-xs text-slate-400 font-bold uppercase mb-1">Pending</p>
+            <div className="flex items-baseline gap-2 text-secondary">
+              <span className="text-2xl font-bold">{stats.pending}</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </div>
+          </div>
+          <div className="bg-surface-light dark:bg-surface-dark border border-border-light dark:border-border-dark p-4 rounded-xl shadow-sm">
+            <p className="text-xs text-slate-400 font-bold uppercase mb-1">Breakdown</p>
+            <div className="flex items-baseline gap-3">
+              <span className="text-sm font-medium">
+                <span className="text-primary">{tvCount}</span> TV
+              </span>
+              <span className="text-sm font-medium">
+                <span className="text-secondary">{movieCount}</span> Movie
+              </span>
+            </div>
+          </div>
         </div>
-      )}
-      {downloadError && (
-        <div className="fixed top-4 right-4 z-50 bg-destructive text-white px-5 py-3 rounded-xl shadow-lg max-w-md">
-          <p className="text-sm font-semibold">Error: {downloadError}</p>
-          <button
-            className="text-xs underline mt-1 cursor-pointer"
-            onClick={() => setDownloadError(null)}
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
 
-      {/* ── Floating action button ── */}
-      <div className="fixed bottom-0 left-64 right-0 p-8 pointer-events-none z-50">
+        {/* ── Metadata Source Overrides ── */}
+        <InfoCards
+          searchResult={searchResult}
+          episodeDataOverride={mergedResult.episode_data}
+          onEpisodeDataChange={onEpisodeDataChange}
+        />
+
+        {/* ── Match tables ── */}
+        <MatchTable
+          data={mergedResult}
+          onRowsComputed={handleRowsComputed}
+          onSubtitlesChange={handleSubtitlesChange}
+        />
+
+        {/* ── Success / error toasts ── */}
+        {downloadResult && (
+          <div className="fixed top-4 right-4 z-50 bg-accent text-white px-5 py-3 rounded-xl shadow-lg max-w-md">
+            <p className="text-sm font-semibold">{downloadResult}</p>
+            <button
+              className="text-xs underline mt-1 cursor-pointer"
+              onClick={() => setDownloadResult(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+        {downloadError && (
+          <div className="fixed top-4 right-4 z-50 bg-destructive text-white px-5 py-3 rounded-xl shadow-lg max-w-md">
+            <p className="text-sm font-semibold">Error: {downloadError}</p>
+            <button
+              className="text-xs underline mt-1 cursor-pointer"
+              onClick={() => setDownloadError(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Bottom action bar ── */}
+      <div className="sticky bottom-0 bg-background/95 backdrop-blur-md border-t border-border-light dark:border-border-dark px-8 py-5 z-30">
         <div className="flex justify-center">
-          <button
-            className="pointer-events-auto flex items-center gap-3 px-8 py-4 bg-primary text-white rounded-2xl shadow-2xl shadow-pink-500/40 hover:scale-[1.02] active:scale-95 transition-all group cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            onClick={handleBeginProcessing}
-            disabled={downloading || effectiveRows.filter((r) => r.matched).length === 0}
-          >
-            {downloading ? (
-              <>
-                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span className="font-bold text-lg tracking-tight">Submitting...</span>
-              </>
-            ) : (
-              <>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="animate-pulse">
-                  <path d="M8 5v14l11-7z" />
+          {success ? (
+            /* ── Success state: offer to process another torrent ── */
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 text-accent">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
                 </svg>
-                <span className="font-bold text-lg tracking-tight">Begin Processing All Matches</span>
-                <span className="text-xs bg-white/20 px-2 py-1 rounded-md font-mono">
-                  {effectiveRows.filter((r) => r.matched).length} / {parsedFiles.length} Files
-                </span>
-              </>
-            )}
-          </button>
+                <span className="font-semibold">Download Complete</span>
+              </div>
+              <button
+                className="flex items-center gap-2 px-6 py-3 bg-primary text-white rounded-2xl shadow-2xl shadow-pink-500/40 hover:scale-[1.02] active:scale-95 transition-all cursor-pointer font-bold text-lg tracking-tight"
+                onClick={onClose}
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Process Another Torrent
+              </button>
+            </div>
+          ) : (
+            /* ── Default: Begin Processing button ── */
+            <button
+              className="flex items-center gap-3 px-8 py-4 bg-primary text-white rounded-2xl shadow-2xl shadow-pink-500/40 hover:scale-[1.02] active:scale-95 transition-all group cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+              onClick={handleBeginProcessing}
+              disabled={downloading || effectiveRows.filter((r) => r.matched).length === 0}
+            >
+              {downloading ? (
+                <>
+                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  <span className="font-bold text-lg tracking-tight">Submitting...</span>
+                </>
+              ) : (
+                <>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" className="animate-pulse">
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                  <span className="font-bold text-lg tracking-tight">Begin Processing All Matches</span>
+                  <span className="text-xs bg-white/20 px-2 py-1 rounded-md font-mono">
+                    {effectiveRows.filter((r) => r.matched).length} / {parsedFiles.length} Files
+                  </span>
+                </>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>
