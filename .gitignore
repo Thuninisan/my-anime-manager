@@ -26,5 +26,8 @@ frontend/dist/
 Thumbs.db
 .DS_Store
 
-# User-uploaded subtitles (runtime data)
-my_anime_manager/data/subtitles/
+# Runtime data (user data, settings, community map, etc.)
+my_anime_manager/data/
+
+# Docs (reference / migration data, not runtime)
+docs/
