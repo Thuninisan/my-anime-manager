@@ -20,9 +20,10 @@ Path & file generation:
 
 Metadata orchestration:
   - :func:`.generate_metadata`
+  - :func:`.batch_nfo_generator`
 """
 
-from .generator import format_download_path, write_episode_files
+from .generator import batch_nfo_generator, format_download_path, write_episode_files
 from .images import (
     download_episode_thumb,
     download_season_poster,

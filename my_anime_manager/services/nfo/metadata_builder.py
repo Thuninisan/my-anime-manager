@@ -1,23 +1,19 @@
 """Metadata orchestration — generate all NFO layers for a single episode download.
 
 Called after a torrent is added to qBittorrent but before it is resumed.
-Generates episode NFO + thumbnail, tvshow.nfo + images (if missing),
-and season.nfo + poster (if missing), then renames the file in qBittorrent.
+Normalises the scattered RSS parameters into the format expected by
+:func:`batch_nfo_generator`, delegates all NFO + image generation to it,
+then renames the file in qBittorrent.
 """
 
 import logging
 from pathlib import Path
 
 from ... import config
-from ...clients.bangumi import get_subject
 from ...clients.qbittorrent import rename_file
 from ...data import get_all_episodes
-from .. import tmdb as tmdb_service
-from ..enrich import _get_bangumi_episodes, _get_bangumi_ep_id
 
-from .generator import format_download_path, write_episode_files
-from .images import download_season_poster, download_show_images
-from .nfo_xml import generate_season_nfo, generate_tv_show_nfo
+from .generator import batch_nfo_generator, format_download_path
 
 logger = logging.getLogger(__name__)
 
@@ -38,102 +34,47 @@ async def generate_metadata(
     bgm_subject_name: str = "",
     series_name: str = "",
 ) -> bool:
-    """Generate NFO files, download images, and rename in qBittorrent.
+    """Generate NFO + images via :func:`batch_nfo_generator`, then rename in qBittorrent.
 
-    *season_dir* is the directory for episode NFO / thumbnails (also
-    used for season.nfo).  *show_dir* is its parent — used for
-    tvshow.nfo and show-level images.  Both are derived from the
-    download path template.
+    All NFO XML writing, image downloading, and metadata fetching is
+    delegated to the shared batch function.  This function only handles
+    RSS-specific concerns: download-history overrides, input normalisation,
+    and the final qBittorrent rename.
     """
-    _season_dir = Path(season_dir)
-    _show_dir = Path(show_dir)
-
-    # ── Read override from download history ────────────────────────
+    # ── Apply download-history overrides ────────────────────────────
     overrides = get_all_episodes(bangumi_id).get(str(sort), {})
-    override_tmdb_ep = overrides.get("tmdb_ep")       # None if not set
-    override_tmdb_season = overrides.get("tmdb_season")  # None if not set
+    eff_tmdb_season = tmdb_season or bgm_season
+    eff_tmdb_ep = sort + (tmdb_ep_offset or 0)
+    if overrides.get("tmdb_season") is not None:
+        eff_tmdb_season = overrides["tmdb_season"]
+    if overrides.get("tmdb_ep") is not None:
+        eff_tmdb_ep = overrides["tmdb_ep"]
 
-    # ── TVDB: fetch episode data ───────────────────────────────────
-    tvdb_ep_data = None
-    tvdb_ep_id = 0
-    ep_rating = 0.0
-    # Episode number variables for path template (initialised to sort as fallback)
-    bangumi_ep_val = sort
-    bgm_ep_name = ""
-    bgm_ep_name_cn = ""
-    tmdb_target_ep = 0
-    if tvdb_id:
-        try:
-            tvdb_ep_offset_val = tvdb_ep_offset or 0
-            try:
-                eps = await _get_bangumi_episodes(bangumi_id)
-                for e in eps:
-                    if (e.get("sort") or e.get("ep", 0)) == sort:
-                        bangumi_ep_val = e.get("ep") or sort
-                        bgm_ep_name = (e.get("name") or "").strip()
-                        bgm_ep_name_cn = (e.get("name_cn") or "").strip()
-                        break
-            except Exception:
-                pass
-            if tvdb_ep < 1:
-                tvdb_ep = 1
+    eff_tvdb_season = tvdb_season or bgm_season
+    tvdb_ep_val = tvdb_ep or 1
 
-            target_tvdb_season = tvdb_season or 1
-            logger.info(
-                "fetching TVDB series=%d season=%d ep=%d (bgm_sort=%d, offset=%d)",
-                tvdb_id, target_tvdb_season, tvdb_ep,
-                bangumi_ep_val, tvdb_ep_offset_val,
-            )
+    # ── Normalise to batch_nfo_generator format ─────────────────────
+    pre_path = str(Path(show_dir).parent)
+    nfo_episodes = [{
+        "bangumi_subject_id": bangumi_id,
+        "bangumi_episode_sort": sort,
+        "tvdb_id": tvdb_id,
+        "tvdb_season": eff_tvdb_season,
+        "tvdb_episode": tvdb_ep_val,
+        "tmdb_id": tmdb_id,
+        "tmdb_season": eff_tmdb_season,
+        "tmdb_episode": eff_tmdb_ep,
+    }]
 
-            from .. import tvdb as tvdb_service
-            result = await tvdb_service.get_episode(
-                tvdb_id, target_tvdb_season, tvdb_ep,
-                language="zho",
-            )
-            if result:
-                tvdb_ep_data = result
-                tvdb_ep_id = result["tvdb_ep_id"]
-                ep_rating = result.get("site_rating", 0) or 0
-        except Exception:
-            logger.exception("TVDB episode fetch failed")
-
-    if not tvdb_ep_data:
-        logger.error("TVDB episode data not available for S%d E%d, skipping NFO",
-                     tvdb_season or 1, tvdb_ep)
+    # ── Delegate to shared NFO + image pipeline ─────────────────────
+    summary = await batch_nfo_generator(pre_path, nfo_episodes)
+    if summary.get("nfoGenerated", 0) == 0:
+        logger.error("NFO generation produced no output")
         return False
+    logger.info("batch NFO complete: %s", summary)
 
-    tmdb_ep = tvdb_ep_data
-
-    # ── Episode plot fallback (TMDB zh-CN → TVDB zh → Bangumi+DeepSeek) ─
-    tmdb_ep_num = sort + (tmdb_ep_offset or 0)
-    try:
-        from .plot_fallback import resolve_episode_plot
-        chinese_plot = await resolve_episode_plot(
-            tmdb_id=tmdb_id,
-            tvdb_id=tvdb_id,
-            tvdb_season=tvdb_season or 1,
-            tvdb_ep=tvdb_ep,
-            tmdb_season=tmdb_season or 1,
-            tmdb_ep_num=tmdb_ep_num,
-            bangumi_id=bangumi_id,
-            bangumi_sort=sort,
-        )
-        if chinese_plot:
-            tmdb_ep["overview"] = chinese_plot
-            logger.info("Episode plot resolved via fallback chain")
-    except Exception:
-        logger.exception("Episode plot fallback failed (non-fatal)")
-
-    # ── Season directory ──────────────────────────────────────────
-    _season_dir.mkdir(parents=True, exist_ok=True)
-
-    # ── Episode thumb + NFO ───────────────────────────────────────
-    # Override episode title from Bangumi (Chinese names)
-    if bgm_ep_name_cn:
-        tmdb_ep["name"] = bgm_ep_name_cn
-
-    # Compute file stem from path template (same as media file)
-    _tmpl = config.RSS_PATH_TEMPLATE
+    # ── Rename in qBittorrent ───────────────────────────────────────
+    ext = Path(old_torrent_path).suffix
     _stem_sub = {
         "name": show_name,
         "bgm": {
@@ -141,104 +82,13 @@ async def generate_metadata(
             "subject_name": bgm_subject_name or show_name,
             "season": bgm_season,
         },
-        "tvdb": {"season": tvdb_season},
-        "tmdb": {"season": tmdb_season},
+        "tvdb": {"season": eff_tvdb_season},
+        "tmdb": {"season": eff_tmdb_season},
     }
-    _stem_path = format_download_path(
-        _tmpl, _stem_sub, sort=sort, ext="",
-        bangumi_sort=sort, bangumi_ep=int(bangumi_ep_val),
-        tvdb_episode=tvdb_ep, tmdb_episode=tmdb_target_ep,
-    )
-    file_stem = Path(_stem_path).stem
-
-    # Look up the Bangumi episode ID from the cached episode list
-    bgm_ep_id = await _get_bangumi_ep_id(bangumi_id, sort)
-    result = await write_episode_files(
-        tmdb_ep,
-        season_number=tvdb_season or bgm_season,
-        episode_number=tvdb_ep,
-        bangumi_ep_id=bgm_ep_id,
-        show_name=show_name,
-        original_name=bgm_ep_name or show_name,
-        bangumi_subject_name=bgm_subject_name or show_name,
-        rating=ep_rating,
-        output_dir=str(_season_dir),
-        thumb_source="tvdb" if tvdb_id and tvdb_ep_data else "tmdb",
-        file_stem=file_stem,
-    )
-    logger.info("episode NFO: %s", result["nfo_path"])
-
-    # ── Show-level NFO + images (only once) ───────────────────────
-    tvshow_nfo = _show_dir / "tvshow.nfo"
-    if not tvshow_nfo.exists() and tmdb_id:
-        try:
-            # Fetch TMDB detail in zh-CN for Chinese title + overview
-            detail_zh = await tmdb_service.get_tv_show_detail(tmdb_id, language="zh-CN")
-
-            title_zh = detail_zh.get("name", "") or show_name
-            original_zh = detail_zh.get("original_name", "") or show_name
-            plot_zh = detail_zh.get("overview", "")
-
-            # Fallback: if TMDB zh-CN overview is empty, use Bangumi summary + translate
-            if not plot_zh:
-                from .plot_fallback import resolve_season_plot
-                subject = await get_subject(bgm_subject_id)
-                plot_zh = await resolve_season_plot(subject.get("summary", ""))
-
-            generate_tv_show_nfo(
-                title=title_zh,
-                original_title=original_zh,
-                plot=plot_zh,
-                output_dir=str(_show_dir),
-                tvdb_id=tvdb_id,
-                tmdb_id=tmdb_id,
-            )
-            logger.info("tvshow.nfo generated")
-            await download_show_images(tmdb_id, str(_show_dir))
-        except Exception:
-            logger.exception("tvshow.nfo failed")
-
-    # ── Season NFO ────────────────────────────────────────────────
-    season_nfo = _season_dir / "season.nfo"
-    if not season_nfo.exists():
-        try:
-            season_title = show_name
-            season_plot = ""
-            season_premiered = ""
-
-            # Still download Bangumi poster
-            subject = await get_subject(bgm_subject_id)
-            season_title = (subject.get("name_cn") or subject.get("name") or show_name).strip()
-            effective_season = tvdb_season or tmdb_season or bgm_season
-            poster = await download_season_poster(subject, str(_show_dir), effective_season)
-            if poster:
-                logger.info("Season %d poster downloaded", effective_season)
-
-            # Resolve season plot (Bangumi → inline extract or DeepSeek)
-            if not season_plot:
-                from .plot_fallback import resolve_season_plot
-                season_plot = await resolve_season_plot(subject.get("summary", ""))
-
-            generate_season_nfo(
-                title=season_title,
-                original_title=subject.get("name", ""),
-                plot=season_plot,
-                premiered=season_premiered or subject.get("date", ""),
-                season_number=tvdb_season or bgm_season,
-                bangumi_id=bgm_subject_id,
-                output_dir=str(_season_dir),
-                tvdb_season_id=0,
-            )
-            logger.info("Season %d season.nfo generated", effective_season)
-        except Exception:
-            logger.exception("season.nfo failed")
-
-    # ── Rename in qBittorrent ─────────────────────────────────────
-    ext = Path(old_torrent_path).suffix
     new_path = format_download_path(
-        _tmpl, _stem_sub, sort=sort, ext=ext,
-        bangumi_sort=sort, bangumi_ep=int(bangumi_ep_val),
-        tvdb_episode=tvdb_ep, tmdb_episode=tmdb_target_ep,
+        config.RSS_PATH_TEMPLATE, _stem_sub, sort=sort, ext=ext,
+        bangumi_sort=sort, bangumi_ep=sort,
+        tvdb_episode=tvdb_ep_val, tmdb_episode=eff_tmdb_ep,
     )
     try:
         await rename_file(qb_client, info_hash, old_torrent_path, new_path)
