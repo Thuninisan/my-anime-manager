@@ -129,7 +129,10 @@ async def serve_frontend(full_path: str):
         return FileResponse(str(file_path))
     index = _frontend_dist / "index.html"
     if index.exists():
-        return FileResponse(str(index))
+        return FileResponse(
+            str(index),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
     return {"message": "My Anime Manager API", "version": __version__}
 
 

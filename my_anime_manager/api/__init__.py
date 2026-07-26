@@ -154,7 +154,10 @@ async def root():
     index_path = _frontend_dist / "index.html"
     if index_path.exists():
         from fastapi.responses import FileResponse
-        return FileResponse(str(index_path))
+        return FileResponse(
+            str(index_path),
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+        )
 
     return {
         "service": "My Anime Manager",
@@ -364,13 +367,70 @@ async def torrent_bangumi_episodes(bangumi_id: int):
 
 # ── /api/torrent/download ──
 
-# Track active download-monitor tasks so they don't get garbage-collected
-_download_tasks: dict[str, asyncio.Task] = {}
-
 
 def _sanitize_path_component(name: str) -> str:
     """Remove characters that are illegal in directory / file names."""
     return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
+
+
+def _make_sub_for_path(f: dict, series_name: str = "") -> dict:
+    """Build a pseudo-subscription dict for :func:`format_download_path`."""
+    bgm_name = f.get("bangumi_show_name", "")
+    return {
+        "name": bgm_name,
+        "bgm": {
+            "series_name": series_name or bgm_name,
+            "subject_name": bgm_name,
+            "season": 1,
+        },
+        "tvdb": {
+            "season": f.get("tvdb_season") or f.get("tmdb_season", 1),
+        },
+        "tmdb": {
+            "season": f.get("tmdb_season", 1),
+        },
+    }
+
+
+def _find_tmdb_id(preview_data: dict | None, show_name: str) -> int:
+    """Find TMDB ID from preview_data for a given show name."""
+    if not preview_data:
+        return 0
+    search_results = preview_data.get("search_results", {})
+    for entry in search_results.values():
+        tmdb = entry.get("tmdb", {}) if isinstance(entry, dict) else {}
+        if tmdb.get("id"):
+            return tmdb["id"]
+    return 0
+
+
+def _find_tvdb_id(preview_data: dict | None, bgm_id: int) -> int:
+    """Find TVDB ID from preview_data's map_entries for a given BGM ID."""
+    if not preview_data or not bgm_id:
+        return 0
+    search_results = preview_data.get("search_results", {})
+    for entry in search_results.values():
+        map_entries = entry.get("map_entries", []) if isinstance(entry, dict) else []
+        for me in map_entries:
+            if me.get("bangumi_id") == bgm_id and me.get("tvdb_id"):
+                return me["tvdb_id"]
+    return 0
+
+
+def _derive_series_name(preview_data: dict | None) -> str:
+    """Derive a series name from preview_data's BGM entries.
+
+    Uses the first BGM entry's name as the series root.
+    """
+    if not preview_data:
+        return ""
+    episode_data = preview_data.get("episode_data", {})
+    bgm_data: dict = episode_data.get("bangumi", {})
+    if bgm_data:
+        first = next(iter(bgm_data.values()))
+        if isinstance(first, dict):
+            return first.get("name", "")
+    return ""
 
 
 async def _monitor_download(
@@ -379,6 +439,7 @@ async def _monitor_download(
     files: list[dict],
     uploaded_subtitles: list[dict],
     hardlink_root: str,
+    series_name: str = "",
     *,
     skip_nfo: bool = False,
 ):
@@ -426,21 +487,36 @@ async def _monitor_download(
             save_path = t.get("save_path", hardlink_root)
             logger.info("下载完成 [%s], 开始创建硬链接/复制字幕...", torrent_name)
 
+            template = config.RSS_PATH_TEMPLATE
+            from ..services.nfo import format_download_path
+            from ..services.nfo import (
+                write_episode_files,
+                generate_tv_show_nfo,
+                generate_season_nfo,
+            )
+
             created = 0
+            seen_show_dirs: set[str] = set()
+            seen_season_dirs: set[str] = set()
+
             for f in files:
                 torrent_path = f["torrent_path"]
                 is_sub = f.get("is_subtitle", False)
-                tmdb_name = _sanitize_path_component(f.get("tmdb_show_name", "Unknown"))
-                bgm_name = _sanitize_path_component(f.get("bangumi_show_name", torrent_name))
-                bgm_sort = f.get("bangumi_sort", 1)
-                tmdb_season = f.get("tmdb_season", 1)
                 src_ext = Path(torrent_path).suffix
 
-                # Destination: align with NFO path {hardlink_root}/{tmdb_name}/Season {N}/
-                dest_dir = Path(hardlink_root) / tmdb_name / f"Season {tmdb_season}"
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                dest_filename = f"{bgm_name} {bgm_sort:02d}{src_ext}"
-                dest_path = dest_dir / dest_filename
+                sub = _make_sub_for_path(f, series_name)
+                tvdb_ep = f.get("tvdb_episode") or 0
+                tmdb_ep = f.get("tmdb_episode") or 0
+
+                rel_path = format_download_path(
+                    template, sub,
+                    tvdb_episode=tvdb_ep, tmdb_episode=tmdb_ep,
+                ).lstrip("/")
+                # Replace extension with the actual source extension
+                rel_path = str(Path(rel_path).with_suffix(src_ext))
+
+                dest_path = Path(hardlink_root) / rel_path
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
 
                 # Source: qBittorrent save_path / torrent_path
                 src_path = Path(save_path) / torrent_path
@@ -450,7 +526,6 @@ async def _monitor_download(
                         if is_sub:
                             shutil.copy2(src_path, dest_path)
                         else:
-                            # Remove existing destination so os.link doesn't fail
                             if dest_path.exists():
                                 dest_path.unlink()
                             os.link(src_path, dest_path)
@@ -464,21 +539,23 @@ async def _monitor_download(
             # Copy user-uploaded subtitles
             for usub in uploaded_subtitles:
                 stored_name = usub.get("stored_filename", "")
-                tmdb_name = _sanitize_path_component(usub.get("tmdb_show_name", "Unknown"))
-                bgm_name = _sanitize_path_component(usub.get("bangumi_show_name", torrent_name))
-                bgm_sort = usub.get("bangumi_sort", 1)
-                tmdb_season = usub.get("tmdb", {}).get("season", 1)
                 src_sub = subtitle_dir / stored_name
-
                 if not src_sub.exists():
                     logger.warning("   上传的字幕文件不存在: %s", src_sub)
                     continue
 
-                dest_dir = Path(hardlink_root) / tmdb_name / f"Season {tmdb_season}"
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                dest_ext = src_sub.suffix
-                dest_filename = f"{bgm_name} {bgm_sort:02d}{dest_ext}"
-                dest_path = dest_dir / dest_filename
+                sub = _make_sub_for_path(usub, series_name)
+                tvdb_ep = usub.get("tvdb_episode") or 0
+                tmdb_ep = usub.get("tmdb_episode") or 0
+
+                rel_path = format_download_path(
+                    template, sub,
+                    tvdb_episode=tvdb_ep, tmdb_episode=tmdb_ep,
+                ).lstrip("/")
+                rel_path = str(Path(rel_path).with_suffix(src_sub.suffix))
+
+                dest_path = Path(hardlink_root) / rel_path
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
 
                 try:
                     shutil.copy2(src_sub, dest_path)
@@ -491,84 +568,83 @@ async def _monitor_download(
             nfo_generated = 0
             if skip_nfo:
                 logger.info("NFO 已预生成，跳过内联 NFO 生成 [%s]", torrent_name)
-            seen_tvshow_nfos: set[str] = set()      # dedup by tmdb_name
-            seen_season_nfos: set[int] = set()       # dedup by bangumi_id
-
-            if not skip_nfo:
+            else:
                 for f in files:
-                    tmdb_n = _sanitize_path_component(f.get("tmdb_show_name", "Unknown"))
-                    bgm_n = _sanitize_path_component(f.get("bangumi_show_name", torrent_name))
-                    bgm_sort = f.get("bangumi_sort", 1)
-                    bgm_id = f.get("bangumi_id", 0)
-                    bgm_ep_id = f.get("bangumi_ep_id")
-                    tmdb_season = f.get("tmdb_season", 0)
-                    tmdb_episode = f.get("tmdb_episode", 0)
                     is_sub = f.get("is_subtitle", False)
-
-                    # Skip subtitle files for episode NFO (only video files get episode NFO)
                     if is_sub:
                         continue
 
-                    dest_dir = Path(hardlink_root) / tmdb_n / f"Season {tmdb_season}"
-                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    sub = _make_sub_for_path(f, series_name)
+                    tvdb_ep = f.get("tvdb_episode") or 0
+                    tmdb_ep = f.get("tmdb_episode") or 0
 
-                    # tvshow.nfo (once per tmdb_name)
-                    if tmdb_n not in seen_tvshow_nfos:
-                        seen_tvshow_nfos.add(tmdb_n)
-                        tvshow_dir = Path(hardlink_root) / tmdb_n
-                        tvshow_dir.mkdir(parents=True, exist_ok=True)
-                        tvshow_nfo = tvshow_dir / "tvshow.nfo"
-                        tvshow_nfo.write_text(
-                            '<?xml version="1.0" encoding="utf-8"?>\n'
-                            f'<tvshow>\n'
-                            f'  <title>{f.get("tmdb_show_name", "Unknown")}</title>\n'
-                            f'  <originaltitle>{f.get("bangumi_show_name", "")}</originaltitle>\n'
-                            f'</tvshow>\n',
-                            encoding="utf-8",
+                    # Compute paths via template
+                    rel_path = format_download_path(
+                        template, sub,
+                        tvdb_episode=tvdb_ep, tmdb_episode=tmdb_ep,
+                    ).lstrip("/")
+                    file_stem = Path(rel_path).stem
+                    season_dir = Path(hardlink_root) / Path(rel_path).parent
+                    show_dir = season_dir.parent
+                    season_dir.mkdir(parents=True, exist_ok=True)
+
+                    # tvshow.nfo (once per show_dir)
+                    show_key = str(show_dir)
+                    if show_key not in seen_show_dirs:
+                        seen_show_dirs.add(show_key)
+                        generate_tv_show_nfo(
+                            title=f.get("tmdb_show_name", ""),
+                            original_title=f.get("bangumi_show_name", ""),
+                            plot="",
+                            output_dir=str(show_dir),
                         )
                         nfo_generated += 1
-                        logger.info("   tvshow.nfo → %s", tvshow_nfo)
+                        logger.info("   tvshow.nfo → %s", show_dir / "tvshow.nfo")
 
-                    # season.nfo (once per bangumi_id)
-                    if bgm_id and bgm_id not in seen_season_nfos:
-                        seen_season_nfos.add(bgm_id)
-                        season_nfo = dest_dir / "season.nfo"
-                        season_nfo.write_text(
-                            '<?xml version="1.0" encoding="utf-8"?>\n'
-                            f'<season>\n'
-                            f'  <bangumiid>{bgm_id}</bangumiid>\n'
-                            f'</season>\n',
-                            encoding="utf-8",
+                    # season.nfo (once per season_dir)
+                    season_key = str(season_dir)
+                    if season_key not in seen_season_dirs:
+                        seen_season_dirs.add(season_key)
+                        bgm_id = f.get("bangumi_id", 0)
+                        tmdb_season = f.get("tmdb_season", 0)
+                        generate_season_nfo(
+                            title=f"Season {tmdb_season}",
+                            original_title="",
+                            plot="",
+                            premiered="",
+                            season_number=tmdb_season,
+                            bangumi_id=bgm_id,
+                            output_dir=str(season_dir),
                         )
                         nfo_generated += 1
-                        logger.info("   season.nfo → %s (bangumi_id=%d)", season_nfo, bgm_id)
+                        logger.info("   season.nfo → %s", season_dir / "season.nfo")
 
-                    # Episode NFO (next to video file, same stem)
-                    src_ext = Path(f["torrent_path"]).suffix
-                    video_stem = f"{bgm_n} {bgm_sort:02d}"
-                    ep_nfo = dest_dir / f"{video_stem}.nfo"
-                    ep_nfo.write_text(
-                        '<?xml version="1.0" encoding="utf-8"?>\n'
-                        f'<episodedetails>\n'
-                        f'  <bangumiid>{bgm_ep_id or ""}</bangumiid>\n'
-                        f'  <tmdbseason>{tmdb_season}</tmdbseason>\n'
-                        f'  <tmdepisode>{tmdb_episode}</tmdepisode>\n'
-                        f'</episodedetails>\n',
-                        encoding="utf-8",
+                    # Episode NFO
+                    await write_episode_files(
+                        {},  # tmdb_ep (empty = skip thumb download)
+                        season_number=f.get("tmdb_season", 0),
+                        episode_number=f.get("tmdb_episode", 0),
+                        bangumi_ep_id=f.get("bangumi_ep_id"),
+                        show_name=f.get("tmdb_show_name", ""),
+                        original_name=f.get("bangumi_show_name", ""),
+                        bangumi_subject_name=f.get("bangumi_show_name", ""),
+                        studios=[],
+                        rating=0,
+                        output_dir=str(season_dir),
+                        thumb_source="tmdb",
+                        file_stem=file_stem,
                     )
                     nfo_generated += 1
-                    logger.info("   episode.nfo → %s", ep_nfo)
-            else:
-                logger.info("NFO 已在下载前生成，跳过内联版本 [%s]", torrent_name)
+                    logger.info("   episode.nfo → %s", season_dir / f"{file_stem}.nfo")
 
             logger.info("下载后处理完成 [%s]: 创建了 %d 个文件, 生成了 %d 个 NFO", torrent_name, created, nfo_generated)
 
             # Remove task from tracker
-            _download_tasks.pop(info_hash, None)
+            state._download_tasks.pop(info_hash, None)
             return
 
     logger.warning("下载监控超时 [%s] (24h)", torrent_name)
-    _download_tasks.pop(info_hash, None)
+    state._download_tasks.pop(info_hash, None)
 
 
 async def _build_metadata_from_preview(
@@ -819,30 +895,42 @@ async def torrent_download(body: dict):
     except Exception as e:
         logger.warning("设置文件优先级失败 (将继续下载所有文件): %s", e)
 
+    # ── Derive series name for path template ──
+    series_name = _derive_series_name(preview_data)
+
     # ── Generate NFO + images BEFORE resuming (if metadata provided) ──
     nfo_generated = False
     if preview_data:
         try:
-            meta = await _build_metadata_from_preview(preview_data, files)
-            if meta:
-                tvshow, seasons, episodes = meta
-                # Place NFO under {hardlink_root}/{show_name}/ to match
-                # the RSS convention (parent dir per show).
-                nfo_root = str(
-                    Path(hardlink_root)
-                    / _sanitize_path_component(tvshow["title"])
-                )
-                from ..services.batch_service import generate_metadata_collection
-                summary = await generate_metadata_collection(
-                    tvshow, seasons, episodes, output_root=nfo_root,
-                )
+            # Build episode list for batch_nfo_generator
+            nfo_episodes: list[dict] = []
+            for f in files:
+                if f.get("is_subtitle"):
+                    continue
+                # Resolve bangumi_subject_id from the file's bangumi_id
+                # (the search_result's bangumi.id for this show_name)
+                bgm_id = f.get("bangumi_id", 0)
+                nfo_episodes.append({
+                    "bangumi_subject_id": bgm_id,
+                    "bangumi_episode_sort": f.get("bangumi_sort", 0),
+                    "tvdb_id": f.get("tvdb_season") and f.get("tvdb_episode") and _find_tvdb_id(preview_data, bgm_id) or 0,
+                    "tvdb_season": f.get("tvdb_season") or 0,
+                    "tvdb_episode": f.get("tvdb_episode") or 0,
+                    "tmdb_id": _find_tmdb_id(preview_data, f.get("tmdb_show_name", "")),
+                    "tmdb_season": f.get("tmdb_season", 0),
+                    "tmdb_episode": f.get("tmdb_episode", 0),
+                })
+
+            if nfo_episodes:
+                from ..services.nfo.generator import batch_nfo_generator
+                summary = await batch_nfo_generator(hardlink_root, nfo_episodes)
+                nfo_generated = True
                 logger.info(
                     "预生成元数据完成 [%s]: NFO=%d, images=%d",
                     torrent_name,
                     summary.get("nfoGenerated", 0),
                     summary.get("imagesDownloaded", 0),
                 )
-                nfo_generated = True
         except Exception as e:
             logger.warning("预生成元数据失败 [%s]: %s — 将在下载完成后重试", torrent_name, e)
 
@@ -861,6 +949,7 @@ async def torrent_download(body: dict):
             files=files,
             uploaded_subtitles=uploaded_subtitles,
             hardlink_root=hardlink_root,
+            series_name=series_name,
             skip_nfo=nfo_generated,
         )
     )
