@@ -45,12 +45,17 @@ def format_download_path(
     bgm = sub.get("bgm", {})
     tvdb = sub.get("tvdb", {})
     tmdb = sub.get("tmdb", {})
+    # Use ``is not None`` guards — season 0 is a valid value (Specials)
+    # and must not be treated as falsy by ``or``.
+    _tvdb_s = tvdb.get("season")
+    _tmdb_s = tmdb.get("season")
+    _bgm_s = bgm.get("season", 1)
     return template.format(
         series_name=bgm.get("series_name") or sub.get("name", ""),
         bangumi_title=bgm.get("subject_name") or sub.get("name", ""),
-        bgm_season=bgm.get("season", 1),
-        tvdb_season=tvdb.get("season") or bgm.get("season", 1),
-        tmdb_season=tmdb.get("season") or bgm.get("season", 1),
+        bgm_season=_bgm_s,
+        tvdb_season=_tvdb_s if _tvdb_s is not None else _bgm_s,
+        tmdb_season=_tmdb_s if _tmdb_s is not None else _bgm_s,
         sort=bangumi_sort or sort,
         bangumi_sort=bangumi_sort or sort,
         bangumi_ep=bangumi_ep or bangumi_sort or sort,
@@ -290,7 +295,7 @@ async def batch_nfo_generator(
         bgm_id = ep["bangumi_subject_id"]
         bgm_sort = ep.get("bangumi_episode_sort", 0)
         tvdb_id = ep.get("tvdb_id") or 0
-        tvdb_season = ep.get("tvdb_season") or 0
+        tvdb_season = ep.get("tvdb_season")  # keep None — 0 is valid (Specials)
         tvdb_ep = ep.get("tvdb_episode") or 0
         tmdb_id = ep["tmdb_id"]
         tmdb_season = ep.get("tmdb_season", 0)
@@ -315,7 +320,8 @@ async def batch_nfo_generator(
         tvdb_ep_data: dict = {}
         if tvdb_id and tvdb_id in tvdb_cache:
             tvdb_seasons = tvdb_cache[tvdb_id].get("seasons", {})
-            season_data = tvdb_seasons.get(str(tvdb_season), {})
+            _lookup_tvdb_s = tvdb_season if tvdb_season is not None else tmdb_season
+            season_data = tvdb_seasons.get(str(_lookup_tvdb_s), {})
             for tv_ep in season_data.get("episodes", []):
                 if tv_ep.get("epNum") == tvdb_ep:
                     tvdb_ep_data = {
@@ -386,7 +392,7 @@ async def batch_nfo_generator(
                 "subject_name": tmdb_title,
                 "season": 1,
             },
-            "tvdb": {"season": tvdb_season or tmdb_season},
+            "tvdb": {"season": tvdb_season if tvdb_season is not None else tmdb_season},
             "tmdb": {"season": tmdb_season},
         }
         rel_path = format_download_path(
@@ -431,7 +437,7 @@ async def batch_nfo_generator(
         season_key = str(season_dir)
         if season_key not in seen_season:
             seen_season.add(season_key)
-            effective_tvdb_season = tvdb_season or tmdb_season
+            effective_tvdb_season = tvdb_season if tvdb_season is not None else tmdb_season
 
             # Resolve season plot: TMDB overview → BGM summary fallback
             season_plot = show.get("overview", "")
@@ -476,7 +482,7 @@ async def batch_nfo_generator(
                     pass
 
         # ── Episode: collect thumb coroutine + metadata ──
-        eff_season = tvdb_season or tmdb_season
+        eff_season = tvdb_season if tvdb_season is not None else tmdb_season
         eff_episode = tvdb_ep or tmdb_ep_num
 
         # Collect thumbnail download coroutine (deferred to Phase 3b)
