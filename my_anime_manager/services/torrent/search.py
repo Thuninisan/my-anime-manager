@@ -13,8 +13,8 @@ from ..torrent_preview import _parse_file, _deduplicate_show_names, SKIP_EXTENSI
 from ...utils.torrent_file_reader import read_torrent_file_list, read_torrent_name
 from ...clients import tmdb as tmdb_client
 from ...clients import bangumi as bgm_client
-from ...clients import tvdb as tvdb_client
 from .. import tmdb as tmdb_service
+from ..tvdb import fetch_tvdb_series_episodes
 from ... import data as data_store
 from ... import config
 
@@ -60,62 +60,7 @@ async def _search_tmdb_single(name: str) -> dict | None:
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# TVDB episode fetching
-# ═══════════════════════════════════════════════════════════════════════
-
-async def _fetch_tvdb_episodes(
-    tvdb_id: int, series_name: str = "",
-) -> dict | None:
-    """Fetch all episodes for a TVDB series, grouped by season.
-
-    Args:
-        tvdb_id: TVDB series ID.
-        series_name: Fallback name if API call fails.
-
-    Returns:
-        ``{name, seasons: {season_num: {name, episodes: [...]}}}``
-        or ``None`` on failure.
-    """
-    try:
-        resp = await tvdb_client.get_series_episodes(tvdb_id, language="jpn")
-    except Exception:
-        print(f"   ⚠️ TVDB {tvdb_id} 剧集获取失败")
-        return None
-
-    payload = resp.json()
-    data = payload.get("data", payload)
-    raw_episodes: list[dict] = data.get("episodes", [])
-
-    # Use series name from the first episode's seriesName if available
-    ep_name = series_name
-    if raw_episodes and not ep_name:
-        ep_name = raw_episodes[0].get("seriesName", str(tvdb_id))
-
-    # Group by season
-    seasons: dict[int, dict] = {}
-    for ep in raw_episodes:
-        sn = ep.get("seasonNumber", 1)
-        if sn not in seasons:
-            seasons[sn] = {"name": f"Season {sn}", "episodes": []}
-        seasons[sn]["episodes"].append({
-            "epNum": ep.get("number", 0),
-            "tvdbId": ep.get("id", 0),
-            "name": ep.get("name", ""),
-            "overview": ep.get("overview", ""),
-            "airDate": ep.get("aired", ""),
-            "runtime": ep.get("runtime", 0),
-            "stillPath": ep.get("image", ""),
-            "siteRating": ep.get("siteRating") or 0,
-            "absoluteNumber": ep.get("absoluteNumber"),
-        })
-
-    # Sort episodes within each season
-    for sn in seasons:
-        seasons[sn]["episodes"].sort(key=lambda e: e["epNum"])
-
-    print(f"   TVDB {tvdb_id} ({ep_name}): {len(seasons)} 季, {len(raw_episodes)} 集")
-    return {"name": ep_name or str(tvdb_id), "seasons": seasons}
+# TVDB episode fetching — delegated to services.tvdb.fetch_tvdb_series_episodes
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -228,7 +173,7 @@ async def _fetch_all_episode_data(tmdb_id: int) -> dict:
         match = next((me for me in map_entries if me.get("tvdb_id") == tid), None)
         fallback_name = match["name"] if match else ""
         async with tvdb_sem:
-            return str(tid), await _fetch_tvdb_episodes(tid, series_name=fallback_name)
+            return str(tid), await fetch_tvdb_series_episodes(tid, series_name=fallback_name)
 
     if tvdb_ids:
         tvdb_tasks = [_fetch_one_tvdb(tid) for tid in tvdb_ids]
@@ -412,6 +357,7 @@ async def search_by_tmdb(
     print()
 
     return {
+        "index": "tmdb",
         "torrent_name": torrent_name,
         "torrent_path": torrent_path,
         "total_files": len(file_list),

@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { MatchRow, BgmEpisode } from '@/components/MatchTable';
+import type { MatchRow, BgmEpisode } from '@/types/matchTable';
 import { uploadSubtitle } from '@/api/torrentApi';
 
 export interface TmdbSeasonOption {
@@ -37,11 +37,19 @@ interface MappingCardProps {
   tmdbEpOptions?: TmdbEpOption[];
   tmdbEpValue?: string | number;
   tmdbEpTitle?: string;
+  // TVDB options (pre-computed by caller; omitted for movies)
+  tvdbSeasonOptions?: TmdbSeasonOption[];
+  tvdbSeasonValue?: string | number;
+  tvdbEpOptions?: TmdbEpOption[];
+  tvdbEpValue?: string | number;
+  tvdbEpTitle?: string;
   // Handlers (ep/season handlers omitted for movies)
   onBgmEntryChange: (value: string) => void;
   onBgmEpChange?: (value: string) => void;
   onTmdbSeasonChange?: (value: string) => void;
   onTmdbEpChange?: (value: string) => void;
+  onTvdbSeasonChange?: (value: string) => void;
+  onTvdbEpChange?: (value: string) => void;
   onToggleMatched: () => void;
 }
 
@@ -62,10 +70,17 @@ export default function MappingCard({
   tmdbEpOptions,
   tmdbEpValue,
   tmdbEpTitle,
+  tvdbSeasonOptions,
+  tvdbSeasonValue,
+  tvdbEpOptions,
+  tvdbEpValue,
+  tvdbEpTitle,
   onBgmEntryChange,
   onBgmEpChange,
   onTmdbSeasonChange,
   onTmdbEpChange,
+  onTvdbSeasonChange,
+  onTvdbEpChange,
   onToggleMatched,
 }: MappingCardProps) {
   const isSp = variant === 'sp';
@@ -259,13 +274,40 @@ export default function MappingCard({
             </select>
           </div>
         )}
-        {!isMovie && row.tvdb_season != null && row.tvdb_ep != null && (
-          <div className="flex items-center gap-1.5 pl-2 border-l border-slate-200 dark:border-white/10">
-            <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TVDB</span>
-            <span className="text-[11px] font-mono text-slate-500 tabular-nums">
-              S{row.tvdb_season} E{row.tvdb_ep}
-            </span>
-          </div>
+        {!isMovie && (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TVDB S</span>
+              <select
+                className={`text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium focus:ring-1 focus:ring-primary/30 cursor-pointer ${seasonSelectClass}`}
+                value={tvdbSeasonValue ?? ''}
+                onChange={(e) => onTvdbSeasonChange?.(e.target.value)}
+              >
+                {tvdbSeasonValue == null && <option value="" disabled>-</option>}
+                {(tvdbSeasonOptions || []).map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">TVDB Ep</span>
+              <select
+                className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
+                value={tvdbEpValue ?? ''}
+                onChange={(e) => onTvdbEpChange?.(e.target.value)}
+                title={tvdbEpTitle}
+              >
+                {(tvdbEpOptions || []).length === 0 && (
+                  <option value="" disabled>{tvdbEpTitle || '-'}</option>
+                )}
+                {(tvdbEpOptions || []).map((ep) => (
+                  <option key={`${i}-tvdb-${ep.epNum}`} value={ep.epNum}>
+                    E{ep.epNum} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
         )}
         <div className="ml-auto">
           <button

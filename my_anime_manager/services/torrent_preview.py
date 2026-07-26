@@ -856,9 +856,37 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                 except Exception as exc:
                     print(f"   ⚠️ 番外篇 {special_bid} 剧集获取失败: {exc}")
 
+    # ── Fetch TVDB episode data (via map entries from Bangumi IDs) ──
+    tvdb_data: dict = {}
+    tvdb_ids: set[int] = set()
+    from .tvdb import fetch_tvdb_series_episodes
+
+    for key, entry in search_results.items():
+        bgm_id = entry.get("bangumi", {}).get("id") if entry.get("bangumi") else None
+        if bgm_id:
+            map_entry = data_store.get_map_entry(bgm_id)
+            if map_entry and map_entry.get("tvdb_id"):
+                tvdb_ids.add(map_entry["tvdb_id"])
+
+    if tvdb_ids:
+        tvdb_sem = asyncio.Semaphore(1)
+        async def _fetch_one_tvdb(tid: int):
+            async with tvdb_sem:
+                return str(tid), await fetch_tvdb_series_episodes(tid)
+
+        tvdb_tasks = [_fetch_one_tvdb(tid) for tid in sorted(tvdb_ids)]
+        tvdb_results = await asyncio.gather(*tvdb_tasks, return_exceptions=True)
+        for r in tvdb_results:
+            if isinstance(r, BaseException):
+                print(f"   ⚠️ TVDB fetch 异常: {r}")
+            elif r[1] is not None:
+                tid_str, data = r
+                tvdb_data[tid_str] = data
+
     return {
         "tmdb": tmdb_data,
         "bangumi": bangumi_data,
+        "tvdb": tvdb_data,
     }
 
 
@@ -1022,6 +1050,25 @@ async def parse_and_search(torrent_path: str) -> dict:
     episode_data = await _fetch_episode_data(search_results, parsed_files)
     print()
 
+    # ── Add map_entries to each search result (for frontend BGM→TVDB lookup) ──
+    for key, entry in search_results.items():
+        bgm_id = entry.get("bangumi", {}).get("id") if entry.get("bangumi") else None
+        if bgm_id:
+            map_entry = data_store.get_map_entry(bgm_id)
+            if map_entry:
+                entry["map_entries"] = [{
+                    "bangumi_id": bgm_id,
+                    "name": map_entry.get("name", ""),
+                    "name_original": map_entry.get("name_original"),
+                    "tvdb_id": map_entry.get("tvdb_id"),
+                    "tvdb_season": map_entry.get("tvdb_season"),
+                    "tmdb_season": map_entry.get("tmdb_season"),
+                }]
+            else:
+                entry["map_entries"] = []
+        else:
+            entry["map_entries"] = []
+
     # ── Step 6: Collect SP/Extra files (no re-parsing) ──
     # Files in special directories were marked is_extra during Step 2.
     # Return them directly so the frontend can present them for manual mapping.
@@ -1037,6 +1084,7 @@ async def parse_and_search(torrent_path: str) -> dict:
     print()
 
     return {
+        "index": "tvdb",
         "torrent_name": torrent_name,
         "torrent_path": torrent_path,
         "total_files": len(file_list),
