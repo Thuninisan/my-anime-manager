@@ -26,8 +26,12 @@ frontend/dist/
 Thumbs.db
 .DS_Store
 
-# Runtime data (user data, settings, community map, etc.)
-my_anime_manager/data/
+# User data (runtime, per-installation)
+my_anime_manager/data/settings.json
+my_anime_manager/data/subscriptions.json
+my_anime_manager/data/download_history.json
+my_anime_manager/data/rss_settings.json
+my_anime_manager/data/subtitles/
 
 # Docs (reference / migration data, not runtime)
 docs/
