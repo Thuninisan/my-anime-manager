@@ -89,7 +89,6 @@ class BgmMeta(BaseModel):
     season: int = 1
     sortrange: list[int] = []
     subject_name: str = ""
-    series_name: str = ""
     rating: float = 0.0
     air_date: str = ""
 
@@ -117,6 +116,7 @@ class RssSource(BaseModel):
 class SubscriptionOut(BaseModel):
     name: str
     bangumi_id: int
+    series_name: str = ""
     created_at: str = ""
     updated_at: str = ""
     download_path: str = ""

@@ -67,7 +67,7 @@ async def generate_metadata(
     }]
 
     # ── Delegate to shared NFO + image pipeline ─────────────────────
-    summary = await batch_nfo_generator(pre_path, nfo_episodes)
+    summary = await batch_nfo_generator(pre_path, nfo_episodes, series_name=series_name)
     if summary.get("nfoGenerated", 0) == 0:
         logger.error("NFO generation produced no output")
         return False
@@ -77,8 +77,8 @@ async def generate_metadata(
     ext = Path(old_torrent_path).suffix
     _stem_sub = {
         "name": show_name,
+        "series_name": series_name or show_name,
         "bgm": {
-            "series_name": series_name or show_name,
             "subject_name": bgm_subject_name or show_name,
             "season": bgm_season,
         },

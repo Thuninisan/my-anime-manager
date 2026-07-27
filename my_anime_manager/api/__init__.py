@@ -379,8 +379,8 @@ def _make_sub_for_path(f: dict, series_name: str = "") -> dict:
     bgm_name = f.get("bangumi_show_name", "")
     return {
         "name": bgm_name,
+        "series_name": series_name or bgm_name,
         "bgm": {
-            "series_name": series_name or bgm_name,
             "subject_name": bgm_name,
             "season": 1,
         },
@@ -924,7 +924,7 @@ async def torrent_download(body: dict):
 
             if nfo_episodes:
                 from ..services.nfo.generator import batch_nfo_generator
-                summary = await batch_nfo_generator(hardlink_root, nfo_episodes)
+                summary = await batch_nfo_generator(hardlink_root, nfo_episodes, series_name=series_name)
                 nfo_generated = True
                 logger.info(
                     "预生成元数据完成 [%s]: NFO=%d, images=%d",
@@ -1159,7 +1159,7 @@ async def manual_subscribe(body: ManualSubscribeIn):
     return SubscriptionOut(**sub)
 
 
-ENRICH_GROUPS = ("bgm", "tvdb", "tmdb")
+ENRICH_GROUPS = ("bgm", "tvdb", "tmdb", "series_name")
 
 
 def _get_cached_enrichment(bangumi_id: int) -> dict | None:
@@ -1729,7 +1729,7 @@ async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = 
     if not sub:
         raise HTTPException(404, "订阅不存在")
     show_name = sub.get("name", str(bangumi_id))
-    series_name = sub.get("bgm", {}).get("series_name") or show_name
+    series_name = sub.get("series_name") or show_name
     bgm_season = sub.get("bgm", {}).get("season", 1)
     tmdb_id = sub.get("tmdb", {}).get("id", 0)
     tmdb_season = sub.get("tmdb", {}).get("season")
@@ -1876,7 +1876,7 @@ async def replace_episode_torrent(bangumi_id: int, sort: int, file: UploadFile =
     if not sub:
         raise HTTPException(404, "订阅不存在")
     show_name = sub.get("name", str(bangumi_id))
-    series_name = sub.get("bgm", {}).get("series_name") or show_name
+    series_name = sub.get("series_name") or show_name
     bgm_season = sub.get("bgm", {}).get("season", 1)
     tmdb_id = sub.get("tmdb", {}).get("id", 0)
     tmdb_season = sub.get("tmdb", {}).get("season")
@@ -2009,7 +2009,7 @@ async def update_episode_overrides(
             if info_hash and sub.get("tmdb", {}).get("id"):
                 try:
                     show_name = sub.get("name", str(bangumi_id))
-                    series_name = sub.get("bgm", {}).get("series_name") or show_name
+                    series_name = sub.get("series_name") or show_name
                     bgm_season = sub.get("bgm", {}).get("season", 1)
                     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
                     sub_path = f"{series_name}/Season {bgm_season}"

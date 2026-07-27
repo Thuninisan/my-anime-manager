@@ -6,6 +6,8 @@ from typing import Any, Callable
 
 from .. import config
 from ..clients import bangumi as bgm_client
+from ..clients import tmdb as tmdb_client
+from ..clients import tvdb as tvdb_client
 from ..clients.bangumi import get_subject
 from ..data import (
     get_tmdb_id, get_tmdb_season, get_tvdb_id, get_tvdb_season,
@@ -783,6 +785,34 @@ async def enrich_subscription(
                     bangumi_id, tvdb_id, tvdb_season, _emit,
                 )
 
+        # 4c. Resolve series_name: TMDB zh-CN > TVDB zho > BGM chain root
+        series_name = root_name  # BGM fallback
+        if tmdb_id:
+            try:
+                resp = await tmdb_client.get_tv_detail(tmdb_id, language="zh-CN")
+                tmdb_name = resp.json().get("name", "").strip()
+                if tmdb_name:
+                    series_name = tmdb_name
+                    _emit(f"✅ series_name={series_name} (from TMDB zh-CN)")
+            except Exception:
+                pass
+        if series_name == root_name and tvdb_id:
+            try:
+                resp = await tvdb_client.get_series_translations(tvdb_id, "zho")
+                data = resp.json()
+                translations = data.get("data", data)
+                if isinstance(translations, list):
+                    tvdb_name = translations[0].get("name", "").strip() if translations else ""
+                else:
+                    tvdb_name = translations.get("name", "").strip()
+                if tvdb_name:
+                    series_name = tvdb_name
+                    _emit(f"✅ series_name={series_name} (from TVDB zho)")
+            except Exception:
+                pass
+        if series_name == root_name:
+            _emit(f"✅ series_name={series_name} (from BGM chain root)")
+
         # 5. Extract this season's Bangumi subject name for file naming
         bgm_subject_name = ""
         try:
@@ -817,10 +847,10 @@ async def enrich_subscription(
                           f"(first_sort={first_sort} - first_rss_ep={smallest})")
 
         return {
+            "series_name": series_name,
             "bgm": {
                 "season": bgm_season,
                 "sortrange": bgm_sortrange,
-                "series_name": series_name,
                 "subject_name": bgm_subject_name,
                 "rating": bgm_rating,
                 "air_date": air_date,

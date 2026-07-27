@@ -514,7 +514,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     show_name = sub.get("name", str(bangumi_id))
     bgm = sub.get("bgm", {})
     bgm_subject_name = bgm.get("subject_name") or show_name
-    series_name = bgm.get("series_name") or show_name
+    series_name = sub.get("series_name") or show_name
     tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
     template = config.RSS_PATH_TEMPLATE

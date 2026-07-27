@@ -51,7 +51,7 @@ def format_download_path(
     _tmdb_s = tmdb.get("season")
     _bgm_s = bgm.get("season", 1)
     return template.format(
-        series_name=bgm.get("series_name") or sub.get("name", ""),
+        series_name=sub.get("series_name") or sub.get("name", ""),
         bangumi_title=bgm.get("subject_name") or sub.get("name", ""),
         bgm_season=_bgm_s,
         tvdb_season=_tvdb_s if _tvdb_s is not None else _bgm_s,
@@ -61,7 +61,7 @@ def format_download_path(
         bangumi_ep=bangumi_ep or bangumi_sort or sort,
         tvdb_episode=tvdb_episode or bangumi_ep or bangumi_sort or sort,
         tmdb_episode=tmdb_episode or bangumi_sort or sort,
-        tmdb_title=tmdb_title or bgm.get("series_name") or sub.get("name", ""),
+        tmdb_title=tmdb_title or sub.get("series_name") or sub.get("name", ""),
     ) + ext
 
 
@@ -160,6 +160,7 @@ async def write_episode_files(
 async def batch_nfo_generator(
     pre_path: str,
     episodes: list[dict],
+    series_name: str = "",
 ) -> dict:
     """Generate NFO files + images for a batch of episodes.
 
@@ -387,8 +388,8 @@ async def batch_nfo_generator(
         # ── Compute paths via template ──
         sub = {
             "name": tmdb_title,
+            "series_name": series_name or tmdb_title,
             "bgm": {
-                "series_name": tmdb_title,
                 "subject_name": tmdb_title,
                 "season": 1,
             },

@@ -101,7 +101,6 @@ export interface BgmMeta {
   season?: number;
   sortrange?: number[];
   subject_name?: string;
-  series_name?: string;
   rating?: number;
   air_date?: string;
 }
@@ -129,6 +128,7 @@ export interface RssSourceMeta {
 export interface SubscriptionOut {
   name: string;
   bangumi_id: number;
+  series_name?: string;
   created_at: string;
   updated_at: string;
   download_path?: string;
