@@ -385,6 +385,11 @@ def add_subscription(
 
     for s in subs:
         if s["bangumi_id"] == bangumi_id:
+            # Preserve existing offsets when the corresponding URL is unchanged.
+            # Without this, subscribing to a second RSS feed would wipe
+            # the offset computed by the first enrichment run.
+            old_primary_offset = s.get("primary", {}).get("offset")
+            old_backup_offset = s.get("backup", {}).get("offset")
             s["name"] = name
             s["primary"] = {
                 "rss_url": rss_url,
@@ -400,6 +405,10 @@ def add_subscription(
                 "filter_tags": backup_filter_tags or [],
                 "exclude_patterns": backup_exclude_patterns or [],
             }
+            if old_primary_offset is not None and rss_url == s["primary"]["rss_url"]:
+                s["primary"]["offset"] = old_primary_offset
+            if old_backup_offset is not None and backup_rss_url == s["backup"]["rss_url"]:
+                s["backup"]["offset"] = old_backup_offset
             if download_path:
                 s["download_path"] = download_path
             s["updated_at"] = now

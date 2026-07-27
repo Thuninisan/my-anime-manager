@@ -38,6 +38,7 @@ from .. import config
 from ..services.batch_service import process_torrent
 from ..services import rss as rss_service
 from ..services import downloader
+from ..services.enrich import _compute_rss_offset
 from ..services import tmdb as tmdb_service
 from ..services.nfo import images as image_service
 from ..clients.qbittorrent import login as qb_login, get_torrents_by_hashes, delete_torrent, add_torrent, resume_torrent, get_torrent_files, set_file_priority
@@ -1205,11 +1206,42 @@ async def enrich_subscription_stream(bangumi_id: int):
 
     async def generate():
         # Check for cached enrichment — if this bangumi_id already has
-        # enrichment data from a sibling subscription, return it immediately
-        # instead of re-running the full Bangumi API chain.
+        # enrichment data from a sibling subscription, skip the expensive
+        # Bangumi API chain.  We still compute RSS offsets because they
+        # depend on the RSS feed contents, not on Bangumi metadata, and may
+        # have been wiped (e.g. when adding a second feed via add_subscription).
         cached = _get_cached_enrichment(bangumi_id)
         if cached:
             yield (_json.dumps({"type": "step", "message": "Using cached enrichment"}, ensure_ascii=False) + "\n").encode("utf-8")
+
+            # Re-compute RSS offsets from cached bgm data + current RSS URLs
+            subs = data.list_subscriptions()
+            sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+            primary_rss = sub.get("primary", {}).get("rss_url", "") if sub else ""
+            backup_rss = sub.get("backup", {}).get("rss_url", "") if sub else ""
+
+            primary_offset: int | None = None
+            backup_offset: int | None = None
+            bgm_sortrange = cached.get("bgm", {}).get("sortrange")
+            air_date = cached.get("bgm", {}).get("air_date", "")
+            if bgm_sortrange and bgm_sortrange[0] > 0 and air_date:
+                first_sort = bgm_sortrange[0]
+                if primary_rss:
+                    smallest = await _compute_rss_offset(primary_rss, air_date)
+                    if smallest is not None:
+                        primary_offset = first_sort - smallest
+                if backup_rss:
+                    smallest = await _compute_rss_offset(backup_rss, air_date)
+                    if smallest is not None:
+                        backup_offset = first_sort - smallest
+
+            if primary_offset is not None:
+                data.set_subscription_rss_offset(bangumi_id, "primary", primary_offset)
+            if backup_offset is not None:
+                data.set_subscription_rss_offset(bangumi_id, "backup", backup_offset)
+
+            cached["primary_offset"] = primary_offset
+            cached["backup_offset"] = backup_offset
             yield (_json.dumps({"type": "done", "result": cached}, ensure_ascii=False) + "\n").encode("utf-8")
             return
 
