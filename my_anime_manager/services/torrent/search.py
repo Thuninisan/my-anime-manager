@@ -369,8 +369,8 @@ async def search_by_tmdb(
         if tmdb_info is None:
             search_results[name] = {
                 "tmdb": None,
-                "bangumi_ids": [],
-                "tvdb_ids": [],
+                "bangumi": None,
+                "media_type": "movie" if is_movie else None,
                 "map_entries": [],
             }
             continue
@@ -381,6 +381,7 @@ async def search_by_tmdb(
             # Movie: reverse lookup map.json for Bangumi ID + name
             map_entries = data_store.get_map_entries_by_tmdb_id(tmdb_id)
             bangumi_ids = sorted({me["bangumi_id"] for me in map_entries})
+            bangumi_id = bangumi_ids[0] if bangumi_ids else 0
             bangumi_name = map_entries[0]["name"] if map_entries else ""
 
             print(f"   ✅ TMDB 电影 {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
@@ -392,9 +393,7 @@ async def search_by_tmdb(
             search_results[name] = {
                 "tmdb": tmdb_info,
                 "media_type": "movie",
-                "bangumi_ids": bangumi_ids,
-                "bangumi_name": bangumi_name,
-                "tvdb_ids": [],
+                "bangumi": {"id": bangumi_id, "name": bangumi_name} if bangumi_id else None,
                 "map_entries": map_entries,
             }
         else:
