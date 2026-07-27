@@ -194,5 +194,6 @@ export interface AppConfig {
   TORRENT_DOWNLOAD_PATH: string;
   TORRENT_EXCLUDE_PATTERNS: string;
   TORRENT_HARDLINK_PATH: string;
+  MOVIE_HARDLINK_PATH: string;
   RSS_PATH_TEMPLATE: string;
 }

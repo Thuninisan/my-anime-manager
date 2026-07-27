@@ -237,3 +237,43 @@ def generate_season_nfo(
 
     file_path.write_text(xml, encoding="utf-8")
     return str(file_path)
+
+
+def generate_movie_nfo(
+    tmdb_id: int,
+    bangumi_id: int = 0,
+    output_dir: str = ".",
+) -> str:
+    """Generate a minimal movie.nfo file with TMDB and Bangumi IDs.
+
+    For ktnbytes movie torrents — only the essential IDs are written
+    so Jellyfin can identify the movie.  Full metadata (plot, cast,
+    images) can be added later.
+
+    Args:
+        tmdb_id: TMDB movie ID.
+        bangumi_id: Bangumi subject ID (0 if unavailable).
+        output_dir: Output directory (the movie folder).
+
+    Returns:
+        Path to the generated NFO file.
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    file_path = output_path / "movie.nfo"
+
+    # Skip if already exists
+    if file_path.exists():
+        print(f"   ⏭️ 已存在，跳过: {file_path}")
+        return str(file_path)
+
+    tmdb_tag = f"  <tmdbid>{tmdb_id}</tmdbid>"
+    bangumi_tag = f"  <bangumiid>{bangumi_id}</bangumiid>" if bangumi_id else ""
+
+    xml = f"""<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<movie>
+{tmdb_tag}
+{bangumi_tag + chr(10) if bangumi_tag else ""}</movie>
+"""
+    file_path.write_text(xml, encoding="utf-8")
+    return str(file_path)

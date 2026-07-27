@@ -36,6 +36,7 @@ _DEFAULTS: dict[str, Any] = {
     "TORRENT_DOWNLOAD_PATH": "/data/downloads",
     "TORRENT_EXCLUDE_PATTERNS": "cds,scans,pv,cm,menu,iv,preview,mka,nced,ncop",
     "TORRENT_HARDLINK_PATH": "/Media/BD",
+    "MOVIE_HARDLINK_PATH": "/Media/剧场版",
 }
 
 # Runtime overrides (set via API) — highest priority, in-memory only

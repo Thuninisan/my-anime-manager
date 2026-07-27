@@ -60,6 +60,37 @@ async def _search_tmdb_single(name: str) -> dict | None:
     }
 
 
+async def _search_tmdb_movie(name: str) -> dict | None:
+    """Search TMDB for a movie with Chinese-language results.
+
+    Uses ``language="zh-CN"`` directly so the returned title is the
+    Chinese name — no need for a second round-trip.
+
+    Args:
+        name: Movie name to search for.
+
+    Returns:
+        dict with ``id, name, original_name, release_date, overview``,
+        or ``None`` if no result was found.
+    """
+    res = await tmdb_client.search_movie(name, language="zh-CN")
+    results = res.json().get("results", [])
+
+    if not results:
+        print(f'   ❌ TMDB 电影无结果: "{name}"')
+        return None
+
+    first = results[0]
+    return {
+        "id": first["id"],
+        "name": first.get("title", ""),
+        "original_name": first.get("original_title", ""),
+        "release_date": first.get("release_date", ""),
+        "overview": first.get("overview", ""),
+        "media_type": "movie",
+    }
+
+
 # TVDB episode fetching — delegated to services.tvdb.fetch_tvdb_series_episodes
 
 
@@ -309,16 +340,31 @@ async def search_by_tmdb(
     # ── Step 4 + 5 + 6: Search TMDB → map lookup → fetch episode data ──
     print("🔍 TMDB 直搜 + 关联数据获取...")
 
+    # Count files per show name for movie detection
+    file_counts: dict[str, int] = {}
+    for p in parsed_files:
+        sn = p.get("show_name", "")
+        file_counts[sn] = file_counts.get(sn, 0) + 1
+
     search_results: dict = {}
     episode_data: dict = {
         "tmdb": {},
         "bangumi": {},
         "tvdb": {},
     }
+    any_movie = False
 
     for name in show_names:
-        print(f'\n   🔎 搜索: "{name}"')
-        tmdb_info = await _search_tmdb_single(name)
+        file_count = file_counts.get(name, 0)
+        is_movie = file_count == 1  # ktnbytes: single file = movie
+
+        if is_movie:
+            any_movie = True
+            print(f'\n   🎬 搜索电影: "{name}"')
+            tmdb_info = await _search_tmdb_movie(name)
+        else:
+            print(f'\n   🔎 搜索: "{name}"')
+            tmdb_info = await _search_tmdb_single(name)
 
         if tmdb_info is None:
             search_results[name] = {
@@ -330,34 +376,57 @@ async def search_by_tmdb(
             continue
 
         tmdb_id = tmdb_info["id"]
-        print(f"   ✅ TMDB {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
 
-        # Fetch episode data from all sources
-        all_data = await _fetch_all_episode_data(tmdb_id)
+        if is_movie:
+            # Movie: reverse lookup map.json for Bangumi ID + name
+            map_entries = data_store.get_map_entries_by_tmdb_id(tmdb_id)
+            bangumi_ids = sorted({me["bangumi_id"] for me in map_entries})
+            bangumi_name = map_entries[0]["name"] if map_entries else ""
 
-        # Merge into episode_data
-        episode_data["tmdb"].update(all_data["tmdb"])
-        episode_data["bangumi"].update(all_data["bangumi"])
-        episode_data["tvdb"].update(all_data["tvdb"])
+            print(f"   ✅ TMDB 电影 {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
+            if map_entries:
+                print(f"   🗺 map.json: {len(map_entries)} 个关联条目")
+                for me in map_entries:
+                    print(f"     - Bangumi {me['bangumi_id']} ({me['name']})")
 
-        map_entries = all_data["map_entries"]
-        bangumi_ids = sorted({me["bangumi_id"] for me in map_entries})
-        tvdb_ids = sorted({
-            me["tvdb_id"] for me in map_entries
-            if me.get("tvdb_id") is not None
-        })
+            search_results[name] = {
+                "tmdb": tmdb_info,
+                "media_type": "movie",
+                "bangumi_ids": bangumi_ids,
+                "bangumi_name": bangumi_name,
+                "tvdb_ids": [],
+                "map_entries": map_entries,
+            }
+        else:
+            # TV: existing episode data fetch
+            print(f"   ✅ TMDB {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
 
-        search_results[name] = {
-            "tmdb": tmdb_info,
-            "bangumi_ids": bangumi_ids,
-            "tvdb_ids": tvdb_ids,
-            "map_entries": map_entries,
-        }
+            # Fetch episode data from all sources
+            all_data = await _fetch_all_episode_data(tmdb_id)
+
+            # Merge into episode_data
+            episode_data["tmdb"].update(all_data["tmdb"])
+            episode_data["bangumi"].update(all_data["bangumi"])
+            episode_data["tvdb"].update(all_data["tvdb"])
+
+            map_entries = all_data["map_entries"]
+            bangumi_ids = sorted({me["bangumi_id"] for me in map_entries})
+            tvdb_ids = sorted({
+                me["tvdb_id"] for me in map_entries
+                if me.get("tvdb_id") is not None
+            })
+
+            search_results[name] = {
+                "tmdb": tmdb_info,
+                "bangumi_ids": bangumi_ids,
+                "tvdb_ids": tvdb_ids,
+                "map_entries": map_entries,
+            }
 
     print()
 
     return {
-        "index": "tmdb",
+        "index": "movie" if any_movie else "tmdb",
         "torrent_name": torrent_name,
         "torrent_path": torrent_path,
         "total_files": len(file_list),
