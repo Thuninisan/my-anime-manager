@@ -787,16 +787,18 @@ async def enrich_subscription(
 
         # 4c. Resolve series_name: TMDB zh-CN > TVDB zho > BGM chain root
         series_name = root_name  # BGM fallback
+        resolved = False  # tracks whether a higher-priority source succeeded
         if tmdb_id:
             try:
                 resp = await tmdb_client.get_tv_detail(tmdb_id, language="zh-CN")
                 tmdb_name = resp.json().get("name", "").strip()
                 if tmdb_name:
                     series_name = tmdb_name
+                    resolved = True
                     _emit(f"✅ series_name={series_name} (from TMDB zh-CN)")
             except Exception:
                 pass
-        if series_name == root_name and tvdb_id:
+        if not resolved and tvdb_id:
             try:
                 resp = await tvdb_client.get_series_translations(tvdb_id, "zho")
                 data = resp.json()
@@ -807,10 +809,11 @@ async def enrich_subscription(
                     tvdb_name = translations.get("name", "").strip()
                 if tvdb_name:
                     series_name = tvdb_name
+                    resolved = True
                     _emit(f"✅ series_name={series_name} (from TVDB zho)")
             except Exception:
                 pass
-        if series_name == root_name:
+        if not resolved:
             _emit(f"✅ series_name={series_name} (from BGM chain root)")
 
         # 5. Extract this season's Bangumi subject name for file naming
