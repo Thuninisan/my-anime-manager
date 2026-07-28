@@ -419,18 +419,32 @@ def _find_tvdb_id(preview_data: dict | None, bgm_id: int) -> int:
 
 
 def _derive_series_name(preview_data: dict | None) -> str:
-    """Derive a series name from preview_data's BGM entries.
+    """Derive the root series name for path template ``{series_name}``.
 
-    Uses the first BGM entry's name as the series root.
+    Priority: TMDB name from ``search_results`` → BGM name from
+    ``episode_data.bangumi``.  This mirrors the RSS enrichment flow
+    which prefers TMDB zh-CN over BGM.
     """
     if not preview_data:
         return ""
+
+    # 1. Try TMDB name from search_results (usually Chinese or best
+    #    available localised title)
+    search_results = preview_data.get("search_results", {})
+    for entry in search_results.values():
+        if isinstance(entry, dict):
+            tmdb = entry.get("tmdb")
+            if isinstance(tmdb, dict) and tmdb.get("name"):
+                return tmdb["name"]
+
+    # 2. Fallback: first BGM entry from episode_data
     episode_data = preview_data.get("episode_data", {})
     bgm_data: dict = episode_data.get("bangumi", {})
     if bgm_data:
         first = next(iter(bgm_data.values()))
         if isinstance(first, dict):
             return first.get("name", "")
+
     return ""
 
 
@@ -976,7 +990,9 @@ async def torrent_download(body: dict):
                 )
                 tmdb_info = movie_entry.get("tmdb", {})
                 tmdb_id = tmdb_info.get("id", 0)
-                tmdb_name = tmdb_info.get("name", "Unknown")
+                from ..services.nfo.generator import sanitize_path_name
+
+                tmdb_name = sanitize_path_name(tmdb_info.get("name", "Unknown"))
                 bangumi_ids = movie_entry.get("bangumi_ids", [])
                 bangumi_id = bangumi_ids[0] if bangumi_ids else 0
 

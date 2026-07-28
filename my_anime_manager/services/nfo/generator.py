@@ -15,6 +15,18 @@ from .nfo_xml import generate_episode_nfo
 logger = logging.getLogger(__name__)
 
 
+def sanitize_path_name(name: str) -> str:
+    """Replace ``/`` and ``\\`` with a space, collapsing whitespace.
+
+    Since ``/`` is always a path separator on Linux/macOS and ``\\`` is
+    always one on Windows, neither can appear in a file or directory
+    name.  Replacing with a space keeps the name readable (e.g.
+    "Fate stay night") without creating spurious directory levels.
+    """
+    sanitized = name.replace("/", " ").replace("\\", " ")
+    return " ".join(sanitized.split())
+
+
 def format_download_path(
     template: str, sub: dict, sort: int = 0, ext: str = "",
     bangumi_sort: int = 0, bangumi_ep: int = 0,
@@ -51,8 +63,8 @@ def format_download_path(
     _tmdb_s = tmdb.get("season")
     _bgm_s = bgm.get("season", 1)
     return template.format(
-        series_name=sub.get("series_name") or sub.get("name", ""),
-        bangumi_title=bgm.get("subject_name") or sub.get("name", ""),
+        series_name=sanitize_path_name(sub.get("series_name") or sub.get("name", "")),
+        bangumi_title=sanitize_path_name(bgm.get("subject_name") or sub.get("name", "")),
         bgm_season=_bgm_s,
         tvdb_season=_tvdb_s if _tvdb_s is not None else _bgm_s,
         tmdb_season=_tmdb_s if _tmdb_s is not None else _bgm_s,
@@ -61,7 +73,7 @@ def format_download_path(
         bangumi_ep=bangumi_ep or bangumi_sort or sort,
         tvdb_episode=tvdb_episode or bangumi_ep or bangumi_sort or sort,
         tmdb_episode=tmdb_episode or bangumi_sort or sort,
-        tmdb_title=tmdb_title or sub.get("series_name") or sub.get("name", ""),
+        tmdb_title=sanitize_path_name(tmdb_title or sub.get("series_name") or sub.get("name", "")),
     ) + ext
 
 

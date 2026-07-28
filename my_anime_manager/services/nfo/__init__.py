@@ -16,6 +16,7 @@ Image downloaders:
 
 Path & file generation:
   - :func:`.format_download_path`
+  - :func:`.sanitize_path_name`
   - :func:`.write_episode_files`
 
 Metadata orchestration:
@@ -23,7 +24,7 @@ Metadata orchestration:
   - :func:`.batch_nfo_generator`
 """
 
-from .generator import batch_nfo_generator, format_download_path, write_episode_files
+from .generator import batch_nfo_generator, format_download_path, sanitize_path_name, write_episode_files
 from .images import (
     download_episode_thumb,
     download_season_poster,
