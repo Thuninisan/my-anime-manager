@@ -37,14 +37,8 @@ async def _search_tmdb_single(name: str) -> dict | None:
         or ``None`` if no result was found.
     """
     # Primary search with default language (ja)
-    res = await tmdb_client.search_tv(name)
+    res = await tmdb_client.search_tv(name, language="zh-CN")
     results = res.json().get("results", [])
-
-    # Fallback: re-search with zh-CN
-    if not results:
-        print(f'   🔄 TMDB 无结果 (ja)，用 zh-CN 重搜: "{name}"')
-        res = await tmdb_client.search_tv(name, language="zh-CN")
-        results = res.json().get("results", [])
 
     if not results:
         print(f'   ❌ TMDB 无结果: "{name}"')

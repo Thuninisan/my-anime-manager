@@ -257,6 +257,7 @@ async def _search_tmdb_for_name(show_name: str, search_as_movie: bool = False) -
     # Also preserve original_title / original_name for frontend movie matching.
     if first:
         first_name = first.get("title") or first.get("name", "")
+        print(f"   ✅ batch NFO complete: {first_name}")
         first_clean = {"id": first["id"], "name": first_name}
         if search_as_movie:
             ot = first.get("original_title", "")
