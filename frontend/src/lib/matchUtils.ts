@@ -101,22 +101,11 @@ export function fuzzyMatchTmdb(
     }
   }
 
-  // Round 2: contains/substring match
-  for (const { season, ep } of allEps) {
-    const names = [ep.name];
-    if (ep.name_cn) names.push(ep.name_cn);
-    for (const n of names) {
-      const nn = normalise(n);
-      if ((nn && bgmNorm && (nn.includes(bgmNorm) || bgmNorm.includes(nn))) ||
-          (nn && bgmCnNorm && (nn.includes(bgmCnNorm) || bgmCnNorm.includes(nn)))) {
-        return { season, epNum: ep.epNum, name: ep.name };
-      }
-    }
-  }
-
-  // Round 3: character-level Dice similarity (fallback for variant kanji)
+  // Round 2 & 3 combined: collect substring matches + Dice similarity
+  // No short-circuit — always compare both and pick the highest-scoring match.
   const MIN_SIMILARITY = 0.55;
-  let best: { season: number; epNum: number; name: string; score: number } | null = null;
+  let bestSubstr: { season: number; epNum: number; name: string; score: number } | null = null;
+  let bestDice: { season: number; epNum: number; name: string; score: number } | null = null;
   for (const { season, ep } of allEps) {
     const names = [ep.name];
     if (ep.name_cn) names.push(ep.name_cn);
@@ -125,13 +114,31 @@ export function fuzzyMatchTmdb(
       const scoreA = charSimilarity(bgmNorm, nn);
       const scoreB = bgmCnNorm ? charSimilarity(bgmCnNorm, nn) : 0;
       const score = Math.max(scoreA, scoreB);
-      if (score > (best?.score ?? 0)) {
-        best = { season, epNum: ep.epNum, name: ep.name, score };
+
+      // Track best Dice candidate regardless
+      if (score > (bestDice?.score ?? 0)) {
+        bestDice = { season, epNum: ep.epNum, name: ep.name, score };
+      }
+
+      // Also track best substring candidate (with same Dice score for fair comparison)
+      if ((nn && bgmNorm && (nn.includes(bgmNorm) || bgmNorm.includes(nn))) ||
+          (nn && bgmCnNorm && (nn.includes(bgmCnNorm) || bgmCnNorm.includes(nn)))) {
+        if (score > (bestSubstr?.score ?? -1)) {
+          bestSubstr = { season, epNum: ep.epNum, name: ep.name, score };
+        }
       }
     }
   }
-  if (best && best.score >= MIN_SIMILARITY) {
-    return best;
+
+  // Decision: prefer substring when its Dice score is >= the best pure-Dice candidate.
+  // Otherwise fall back to pure Dice if it meets the threshold.
+  // This handles cases like "解答篇" vs "解答編" — one-char difference has higher
+  // Dice than a shorter substring match, so the non-substring candidate wins.
+  if (bestSubstr && (!bestDice || bestSubstr.score >= bestDice.score)) {
+    return { season: bestSubstr.season, epNum: bestSubstr.epNum, name: bestSubstr.name };
+  }
+  if (bestDice && bestDice.score >= MIN_SIMILARITY) {
+    return { season: bestDice.season, epNum: bestDice.epNum, name: bestDice.name };
   }
 
   return null;
@@ -395,27 +402,36 @@ export function fuzzyMatchBgm(
     }
   }
 
-  // Round 2: contains/substring match
-  for (const item of flat) {
-    if ((item.nameNorm && sourceNorm && (item.nameNorm.includes(sourceNorm) || sourceNorm.includes(item.nameNorm))) ||
-        (item.nameCnNorm && sourceNorm && (item.nameCnNorm.includes(sourceNorm) || sourceNorm.includes(item.nameCnNorm)))) {
-      return { bgmId: item.bgmId, bgmEntryName: item.bgmEntryName, bgmEp: item.ep };
-    }
-  }
-
-  // Round 3: Dice similarity
+  // Round 2 & 3 combined: collect substring matches + Dice similarity
+  // No short-circuit — always compare both and pick the highest-scoring match.
   const MIN_SIMILARITY = 0.55;
-  let best: { bgmId: number; bgmEntryName: string; bgmEp: BgmEpisode; score: number } | null = null;
+  let bestSubstr: { bgmId: number; bgmEntryName: string; bgmEp: BgmEpisode; score: number } | null = null;
+  let bestDice: { bgmId: number; bgmEntryName: string; bgmEp: BgmEpisode; score: number } | null = null;
   for (const item of flat) {
     const scoreA = charSimilarity(sourceNorm, item.nameNorm);
     const scoreB = item.nameCnNorm ? charSimilarity(sourceNorm, item.nameCnNorm) : 0;
     const score = Math.max(scoreA, scoreB);
-    if (score > (best?.score ?? 0)) {
-      best = { bgmId: item.bgmId, bgmEntryName: item.bgmEntryName, bgmEp: item.ep, score };
+
+    // Track best Dice candidate regardless
+    if (score > (bestDice?.score ?? 0)) {
+      bestDice = { bgmId: item.bgmId, bgmEntryName: item.bgmEntryName, bgmEp: item.ep, score };
+    }
+
+    // Also track best substring candidate
+    if ((item.nameNorm && sourceNorm && (item.nameNorm.includes(sourceNorm) || sourceNorm.includes(item.nameNorm))) ||
+        (item.nameCnNorm && sourceNorm && (item.nameCnNorm.includes(sourceNorm) || sourceNorm.includes(item.nameCnNorm)))) {
+      if (score > (bestSubstr?.score ?? -1)) {
+        bestSubstr = { bgmId: item.bgmId, bgmEntryName: item.bgmEntryName, bgmEp: item.ep, score };
+      }
     }
   }
-  if (best && best.score >= MIN_SIMILARITY) {
-    return { bgmId: best.bgmId, bgmEntryName: best.bgmEntryName, bgmEp: best.bgmEp };
+
+  // Decision: prefer substring when its Dice score is >= the best pure-Dice candidate.
+  if (bestSubstr && (!bestDice || bestSubstr.score >= bestDice.score)) {
+    return { bgmId: bestSubstr.bgmId, bgmEntryName: bestSubstr.bgmEntryName, bgmEp: bestSubstr.bgmEp };
+  }
+  if (bestDice && bestDice.score >= MIN_SIMILARITY) {
+    return { bgmId: bestDice.bgmId, bgmEntryName: bestDice.bgmEntryName, bgmEp: bestDice.bgmEp };
   }
 
   return null;
@@ -454,24 +470,33 @@ export function fuzzyMatchTvdb(
     }
   }
 
-  // Round 2: contains/substring match
+  // Round 2 & 3 combined: collect substring matches + Dice similarity
+  // No short-circuit — always compare both and pick the highest-scoring match.
+  const MIN_SIMILARITY = 0.55;
+  let bestSubstr: { tvdbSeason: number; tvdbEp: number; score: number } | null = null;
+  let bestDice: { tvdbSeason: number; tvdbEp: number; score: number } | null = null;
   for (const item of flat) {
+    const score = charSimilarity(sourceNorm, item.nameNorm);
+
+    // Track best Dice candidate regardless
+    if (score > (bestDice?.score ?? 0)) {
+      bestDice = { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp, score };
+    }
+
+    // Also track best substring candidate
     if (item.nameNorm && (item.nameNorm.includes(sourceNorm) || sourceNorm.includes(item.nameNorm))) {
-      return { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp };
+      if (score > (bestSubstr?.score ?? -1)) {
+        bestSubstr = { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp, score };
+      }
     }
   }
 
-  // Round 3: Dice similarity
-  const MIN_SIMILARITY = 0.55;
-  let best: { tvdbSeason: number; tvdbEp: number; score: number } | null = null;
-  for (const item of flat) {
-    const score = charSimilarity(sourceNorm, item.nameNorm);
-    if (score > (best?.score ?? 0)) {
-      best = { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp, score };
-    }
+  // Decision: prefer substring when its Dice score is >= the best pure-Dice candidate.
+  if (bestSubstr && (!bestDice || bestSubstr.score >= bestDice.score)) {
+    return { tvdbSeason: bestSubstr.tvdbSeason, tvdbEp: bestSubstr.tvdbEp };
   }
-  if (best && best.score >= MIN_SIMILARITY) {
-    return { tvdbSeason: best.tvdbSeason, tvdbEp: best.tvdbEp };
+  if (bestDice && bestDice.score >= MIN_SIMILARITY) {
+    return { tvdbSeason: bestDice.tvdbSeason, tvdbEp: bestDice.tvdbEp };
   }
 
   return null;
