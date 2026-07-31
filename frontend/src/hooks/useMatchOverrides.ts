@@ -7,7 +7,7 @@
 
 import { useState, useMemo } from 'react';
 import type { MatchRow, SearchEntry, BgmEpisode, BgmEntry, TmdbSeason } from '@/types/matchTable';
-import { fuzzyMatchTmdb, mergeAllTmdbSeasons, computeMatches, DuplicateEpisodeError } from '@/lib/matchUtils';
+import { computeMatches, DuplicateEpisodeError } from '@/lib/matchUtils';
 
 // ── Override record shape ──
 export interface MatchOverrides {
@@ -122,6 +122,33 @@ export function useMatchOverrides(
     return bgmData[String(entryId)]?.episodes || [];
   };
 
+  // ── Base override builder ──
+  // Returns a complete MatchOverrides for a row by layering:
+  //   existing override > initialRow auto-matched values > sentinel defaults.
+  // Handlers spread this and only change the field(s) the user actually
+  // touched, so unrelated values are never reset to 0 / first-episode.
+  const buildBaseOverride = (
+    rowIndex: number,
+    existing: MatchOverrides | undefined,
+  ): MatchOverrides => {
+    const ir = initialRows[rowIndex];
+    const se = ir ? searchResults[ir.show_name] : undefined;
+    const mapEntry = se?.map_entries?.find(
+      (me: any) => me.bangumi_id === ir?.bgm_entry_id,
+    );
+    return {
+      bgmEntryId: existing?.bgmEntryId ?? ir?.bgm_entry_id ?? 0,
+      bgmEpSort: existing?.bgmEpSort ?? ir?.bgm_sort ?? 0,
+      bgmEpId: existing?.bgmEpId ?? ir?.bgm_ep_id ?? undefined,
+      tmdbSeason: existing?.tmdbSeason ?? ir?.tmdb_season ?? undefined,
+      tmdbEp: existing?.tmdbEp ?? ir?.tmdb_ep ?? undefined,
+      tmdbShowId: existing?.tmdbShowId ?? se?.tmdb?.id,
+      tvdbShowId: existing?.tvdbShowId ?? mapEntry?.tvdb_id,
+      tvdbSeason: existing?.tvdbSeason ?? ir?.tvdb_season ?? undefined,
+      tvdbEp: existing?.tvdbEp ?? ir?.tvdb_ep ?? undefined,
+    };
+  };
+
   // ── Handlers ──
 
   const handleBgmEntryChange = (rowIndex: number, entryIdStr: string) => {
@@ -129,11 +156,11 @@ export function useMatchOverrides(
     const eps = getBgmEpisodes(entryId);
     const firstEp = eps[0];
     setOverrides((prev) => {
-      const existing = prev[rowIndex] || {};
+      const existing = prev[rowIndex];
       return {
         ...prev,
         [rowIndex]: {
-          ...existing,
+          ...buildBaseOverride(rowIndex, existing),
           bgmEntryId: entryId,
           bgmEpSort: firstEp?.sort ?? 0,
           bgmEpId: firstEp?.id,
@@ -147,12 +174,11 @@ export function useMatchOverrides(
     const eps = getBgmEpisodes(entryId);
     const ep = eps.find(e => e.id === epId);
     setOverrides((prev) => {
-      const existing = prev[rowIndex] || {};
+      const existing = prev[rowIndex];
       return {
         ...prev,
         [rowIndex]: {
-          ...existing,
-          bgmEntryId: entryId,
+          ...buildBaseOverride(rowIndex, existing),
           bgmEpSort: ep?.sort ?? 0,
           bgmEpId: epId,
         },
@@ -172,13 +198,10 @@ export function useMatchOverrides(
       const firstEp = sortedEps[0]?.epNum;
       setOverrides((prev) => {
         const existing = prev[rowIndex];
-        const initialRow = initialRows[rowIndex];
         return {
           ...prev,
           [rowIndex]: {
-            bgmEntryId: existing?.bgmEntryId ?? initialRow?.bgm_entry_id ?? 0,
-            bgmEpSort: existing?.bgmEpSort ?? initialRow?.bgm_sort ?? 0,
-            bgmEpId: existing?.bgmEpId ?? initialRow?.bgm_ep_id ?? undefined,
+            ...buildBaseOverride(rowIndex, existing),
             tmdbSeason: season,
             tmdbEp: firstEp,
             tmdbShowId: tmdbShowId,
@@ -197,13 +220,10 @@ export function useMatchOverrides(
     const firstEp = sortedEps[0]?.epNum;
     setOverrides((prev) => {
       const existing = prev[rowIndex];
-      const initialRow = initialRows[rowIndex];
       return {
         ...prev,
         [rowIndex]: {
-          bgmEntryId: existing?.bgmEntryId ?? initialRow?.bgm_entry_id ?? 0,
-          bgmEpSort: existing?.bgmEpSort ?? initialRow?.bgm_sort ?? 0,
-          bgmEpId: existing?.bgmEpId ?? initialRow?.bgm_ep_id ?? undefined,
+          ...buildBaseOverride(rowIndex, existing),
           tmdbSeason: season,
           tmdbEp: firstEp,
         },
@@ -213,10 +233,13 @@ export function useMatchOverrides(
 
   const handleToggleMatched = (rowIndex: number, currentMatched: boolean) => {
     setOverrides((prev) => {
-      const existing = prev[rowIndex] || { bgmEntryId: 0, bgmEpSort: 0 };
+      const existing = prev[rowIndex];
       return {
         ...prev,
-        [rowIndex]: { ...existing, manualMatched: !currentMatched },
+        [rowIndex]: {
+          ...buildBaseOverride(rowIndex, existing),
+          manualMatched: !currentMatched,
+        },
       };
     });
   };
@@ -228,11 +251,8 @@ export function useMatchOverrides(
       return {
         ...prev,
         [rowIndex]: {
-          bgmEntryId: existing?.bgmEntryId ?? 0,
-          bgmEpSort: existing?.bgmEpSort ?? 0,
-          tmdbSeason: existing?.tmdbSeason ?? 0,
+          ...buildBaseOverride(rowIndex, existing),
           tmdbEp: ep,
-          tmdbShowId: existing?.tmdbShowId,
         },
       };
     });
@@ -248,12 +268,11 @@ export function useMatchOverrides(
       const sortedEps = [...(seasonData?.episodes || [])].sort((a: any, b: any) => a.epNum - b.epNum);
       const firstEp = sortedEps[0]?.epNum;
       setOverrides((prev) => {
-        const existing = prev[rowIndex] || {};
+        const existing = prev[rowIndex];
         return {
           ...prev,
           [rowIndex]: {
-            bgmEntryId: existing?.bgmEntryId ?? 0,
-            bgmEpSort: existing?.bgmEpSort ?? 0,
+            ...buildBaseOverride(rowIndex, existing),
             tvdbShowId: tvdbShowId,
             tvdbSeason: season,
             tvdbEp: firstEp,
@@ -265,8 +284,9 @@ export function useMatchOverrides(
 
     const season = Number(seasonStr);
     setOverrides((prev) => {
-      const existing = prev[rowIndex] || {};
-      const tvdbId = existing.tvdbShowId;
+      const existing = prev[rowIndex];
+      const base = buildBaseOverride(rowIndex, existing);
+      const tvdbId = base.tvdbShowId;
       const tvdbSeries = (tvdbId && episodeData?.tvdb?.[String(tvdbId)]) || null;
       const seasonData = tvdbSeries?.seasons?.[String(season)];
       const sortedEps = [...(seasonData?.episodes || [])].sort((a: any, b: any) => a.epNum - b.epNum);
@@ -274,9 +294,7 @@ export function useMatchOverrides(
       return {
         ...prev,
         [rowIndex]: {
-          bgmEntryId: existing?.bgmEntryId ?? 0,
-          bgmEpSort: existing?.bgmEpSort ?? 0,
-          tvdbShowId: tvdbId,
+          ...base,
           tvdbSeason: season,
           tvdbEp: firstEp,
         },
@@ -291,37 +309,45 @@ export function useMatchOverrides(
       return {
         ...prev,
         [rowIndex]: {
-          bgmEntryId: existing?.bgmEntryId ?? 0,
-          bgmEpSort: existing?.bgmEpSort ?? 0,
-          tvdbShowId: existing?.tvdbShowId,
-          tvdbSeason: existing?.tvdbSeason ?? 0,
+          ...buildBaseOverride(rowIndex, existing),
           tvdbEp: ep,
         },
       };
     });
   };
 
-  // ── Effective rows (apply overrides + re-compute TMDB match) ──
+  // ── Effective rows (pure merge: initialRow + override overlay) ──
   const rows = useMemo(() => {
     return initialRows.map((r, i) => {
       const ov = overrides[i];
       if (!ov) return r;
 
-      const applyManualMatched = (row: MatchRow, _computedMatched: boolean): MatchRow => {
-        if (ov.manualMatched !== undefined) {
-          return { ...row, matched: ov.manualMatched };
-        }
-        return row;
-      };
-
+      // BGM name lookup
       const ovEntry = bgmEntryOptions.find((e) => e.id === ov.bgmEntryId);
       const eps = getBgmEpisodes(ov.bgmEntryId);
       const ovEp = ov.bgmEpId != null
         ? eps.find((e) => e.id === ov.bgmEpId)
         : eps.find((e) => e.sort === ov.bgmEpSort);
 
+      // TMDB ep name lookup (display only)
+      let tmdbEpName = r.tmdb_ep_name;
+      const effTmdbSeason = ov.tmdbSeason ?? r.tmdb_season;
+      const effTmdbEp = ov.tmdbEp ?? r.tmdb_ep;
+      if (effTmdbSeason != null && effTmdbEp != null) {
+        const tmdbId = ov.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
+        const tmdbSeasons: Record<string, any> =
+          (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+        const sData = tmdbSeasons[String(effTmdbSeason)];
+        const eData = sData?.episodes?.find((e: any) => e.epNum === effTmdbEp);
+        tmdbEpName = eData?.name || '-';
+      }
+
+      let matched = r.matched;
+      if (ov.manualMatched !== undefined) matched = ov.manualMatched;
+
+      // Movie rows: only BGM entry changes, no season/ep
       if (r.media_type === "movie") {
-        return applyManualMatched({
+        return {
           ...r,
           bgm_entry: ovEntry?.name || `ID ${ov.bgmEntryId}`,
           bgm_entry_id: ov.bgmEntryId,
@@ -329,93 +355,25 @@ export function useMatchOverrides(
           bgm_ep_name_cn: '',
           bgm_ep_id: null,
           bgm_sort: null,
-        }, r.matched);
+          matched,
+        };
       }
 
-      const resolveTmdbId = ov.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
-      const resolveAutoSeasons: Record<string, TmdbSeason> =
-        (resolveTmdbId && episodeData.tmdb?.[String(resolveTmdbId)]) || {};
-      const tmdbSeasons: Record<string, TmdbSeason> =
-        Object.keys(resolveAutoSeasons).length > 0
-          ? resolveAutoSeasons
-          : mergeAllTmdbSeasons(episodeData);
-
-      if (!ovEp) {
-        let tvdbSeasonOv = r.tvdb_season;
-        let tvdbEpOv = r.tvdb_ep;
-        if (ov.tvdbSeason != null) {
-          tvdbSeasonOv = ov.tvdbSeason;
-          tvdbEpOv = ov.tvdbEp ?? null;
-        }
-        if (ov.tmdbSeason != null && ov.tmdbEp != null) {
-          const sData = tmdbSeasons[String(ov.tmdbSeason)];
-          const eData = sData?.episodes?.find(e => e.epNum === ov.tmdbEp);
-          return applyManualMatched({
-            ...r,
-            tmdb_season: ov.tmdbSeason,
-            tmdb_ep: ov.tmdbEp,
-            tmdb_ep_name: eData?.name || '-',
-            tvdb_season: tvdbSeasonOv,
-            tvdb_ep: tvdbEpOv,
-            matched: true,
-          }, true);
-        }
-        if (ov.tvdbSeason != null) {
-          return applyManualMatched({
-            ...r,
-            tvdb_season: tvdbSeasonOv,
-            tvdb_ep: tvdbEpOv,
-          }, r.matched);
-        }
-        return applyManualMatched(r, r.matched);
-      }
-
-      const tmdbMatch = fuzzyMatchTmdb(
-        ovEp.name,
-        ovEp.name_cn || "",
-        tmdbSeasons,
-      );
-
-      let finalSeason = tmdbMatch?.season ?? null;
-      let finalEp = tmdbMatch?.epNum ?? null;
-      let finalEpName = tmdbMatch?.name || '-';
-      let finalMatched = tmdbMatch !== null;
-
-      if (ov.tmdbSeason != null && ov.tmdbEp != null) {
-        finalSeason = ov.tmdbSeason;
-        finalEp = ov.tmdbEp;
-        finalMatched = true;
-        const sData = tmdbSeasons[String(ov.tmdbSeason)];
-        const eData = sData?.episodes?.find(e => e.epNum === ov.tmdbEp);
-        finalEpName = eData?.name || '-';
-      }
-
-      if (finalSeason == null && ov.tmdbSeason != null) {
-        finalSeason = ov.tmdbSeason;
-      }
-
-      let finalTvdbSeason = r.tvdb_season;
-      let finalTvdbEp = r.tvdb_ep;
-      if (ov.tvdbSeason != null) {
-        finalTvdbSeason = ov.tvdbSeason;
-        finalTvdbEp = ov.tvdbEp ?? null;
-      }
-
-      return applyManualMatched({
+      return {
         ...r,
         bgm_entry: ovEntry?.name || `ID ${ov.bgmEntryId}`,
         bgm_entry_id: ov.bgmEntryId,
-        bgm_sort: ovEp.sort,
-        bgm_ep_name: ovEp.name,
-        bgm_ep_name_cn: ovEp.name_cn || '',
-        bgm_ep_id: ovEp.id,
-        tmdb_season: finalSeason,
-        tmdb_ep: finalEp,
-        tmdb_ep_name: finalEpName,
-        tvdb_season: finalTvdbSeason,
-        tvdb_ep: finalTvdbEp,
-        matched: finalMatched,
-      }, finalMatched);
+        bgm_sort: ovEp?.sort ?? r.bgm_sort,
+        bgm_ep_name: ovEp?.name || r.bgm_ep_name,
+        bgm_ep_name_cn: ovEp?.name_cn || r.bgm_ep_name_cn,
+        bgm_ep_id: ovEp?.id ?? r.bgm_ep_id,
+        tmdb_season: effTmdbSeason,
+        tmdb_ep: effTmdbEp,
+        tmdb_ep_name: tmdbEpName,
+        tvdb_season: ov.tvdbSeason ?? r.tvdb_season,
+        tvdb_ep: ov.tvdbEp ?? r.tvdb_ep,
+        matched,
+      };
     });
   }, [initialRows, overrides, bgmEntryOptions, searchResults, episodeData]);
 
