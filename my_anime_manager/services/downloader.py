@@ -494,7 +494,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
                 old_hash = old_entry["info_hash"]
                 try:
                     qb = await qb_login(config.QBITTORRENT_URL, config.QBITTORRENT_USERNAME, config.QBITTORRENT_PASSWORD)
-                    await delete_torrent(qb, old_hash, delete_files=False)
+                    await delete_torrent(qb, old_hash, delete_files=True)
                     remove_episode_record(bangumi_id, sort)
                     print(f"         🗑️ 删除旧种子 [{old_hash[:12]}…]，替换为 {source}")
                 except Exception as e:
