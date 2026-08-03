@@ -317,6 +317,7 @@ async def _fetch_passed_items(
         except (ValueError, TypeError):
             pass
     covered: set[int] = set(downloaded_sorts)
+    seen_in_batch: set[int] = set()  # intra-batch dedup only
 
     # ── Log initial range state ──
     if bgm_sortrange and bgm_sortrange[0] > 0:
@@ -350,8 +351,11 @@ async def _fetch_passed_items(
                 continue  # outside expected range, skip
         item["sort"] = sort
 
-        # ── Sort-range duplicate filter ──
-        if sort in covered:
+        # ── Intra-batch duplicate filter ──
+        # Only skip sorts already seen in *this* batch.  Previously
+        # downloaded sorts are NOT skipped here — they go through the
+        # source-priority check below so primary can replace backup.
+        if sort in seen_in_batch:
             continue
 
         # Skip episodes that have already failed too many times
@@ -384,6 +388,7 @@ async def _fetch_passed_items(
 
         candidates.append(item)
         covered.add(sort)
+        seen_in_batch.add(sort)
 
         # ── Stop when sortrange is fully covered ──
         if bgm_sortrange and bgm_sortrange[0] > 0:
@@ -463,12 +468,25 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     if bgm_sortrange[0] > 0 and (sort < bgm_sortrange[0] or sort > bgm_sortrange[1]):
         print(f"         ⚠️ sort={sort} 超出 bgm_sortrange={bgm_sortrange}，但仍继续处理")
 
-    # ── v2 replacement: delete old torrent from qBittorrent ─────────
+    # ── Replacement: delete old torrent from qBittorrent ─────────
     item_pub_date = item.get("pub_date", "")
     existing_source = get_episode_source(bangumi_id, sort)
-    if existing_source and item_pub_date:
-        existing_pub = get_episode_pub_date(bangumi_id, sort)
-        if existing_pub and item_pub_date > existing_pub:
+    if existing_source:
+        PRIORITY = {"add": 0, "backup": 1, "primary": 2, "edit": 3}
+        new_prio = PRIORITY.get(source, -1)
+        exist_prio = PRIORITY.get(existing_source, -1)
+
+        should_replace = False
+        if new_prio > exist_prio:
+            # Higher-priority source always replaces lower (e.g. primary → backup)
+            should_replace = True
+        elif new_prio == exist_prio:
+            # Same-source v2: only replace if pub_date is newer
+            existing_pub = get_episode_pub_date(bangumi_id, sort)
+            if item_pub_date and existing_pub and item_pub_date > existing_pub:
+                should_replace = True
+
+        if should_replace:
             # Fetch old info_hash to delete the old torrent
             old_entries = get_all_episodes(bangumi_id)
             old_entry = old_entries.get(str(sort))
@@ -478,7 +496,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
                     qb = await qb_login(config.QBITTORRENT_URL, config.QBITTORRENT_USERNAME, config.QBITTORRENT_PASSWORD)
                     await delete_torrent(qb, old_hash, delete_files=False)
                     remove_episode_record(bangumi_id, sort)
-                    print(f"         🗑️ 删除旧种子 [{old_hash[:12]}…]，替换为 v2")
+                    print(f"         🗑️ 删除旧种子 [{old_hash[:12]}…]，替换为 {source}")
                 except Exception as e:
                     print(f"         ⚠️ 删除旧种子失败: {e}")
 
