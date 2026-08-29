@@ -99,7 +99,10 @@ async def translate_ja_to_zh(text: str) -> str:
         text: Japanese text to translate.
 
     Returns:
-        Chinese translation, or ``""`` on failure / empty input.
+        Chinese translation; ``""`` for empty input.  When every
+        attempt fails (API down, empty output, or output that still
+        looks Japanese) the original Japanese *text* is returned as a
+        last resort — a Japanese plot is better than none.
 
     Failed translations (API error, empty output, or output that still
     looks Japanese) are logged and retried up to ``MAX_ATTEMPTS`` times
@@ -161,8 +164,11 @@ async def translate_ja_to_zh(text: str) -> str:
         )
         return translated
 
+    # Last resort: keep the original Japanese text — not cached, so a
+    # later regen can retry the translation.
     logger.error(
-        "DeepSeek translation failed after %d attempts — plot will be empty",
+        "DeepSeek translation failed after %d attempts — "
+        "falling back to original Japanese text",
         MAX_ATTEMPTS,
     )
-    return ""
+    return text

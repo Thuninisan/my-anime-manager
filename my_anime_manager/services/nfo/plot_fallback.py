@@ -38,7 +38,9 @@ async def resolve_episode_plot(
     All parameters are keyword-only.  Each tier is skipped when its
     required IDs are zero / missing.
 
-    Returns ``""`` when every tier comes up empty.
+    Returns ``""`` when every tier comes up empty.  Tier 3 falls back
+    to the original Japanese Bangumi ``desc`` when the DeepSeek
+    translation fails entirely (a Japanese plot is better than none).
     """
     # ── Tier 1: TMDB zh-CN ─────────────────────────────────────────
     if tmdb_id and tmdb_season and tmdb_ep_num:
@@ -83,7 +85,8 @@ async def resolve_season_plot(bangumi_summary: str) -> str:
         bangumi_summary: Raw ``summary`` field from Bangumi subject API.
 
     Returns:
-        Chinese plot text, or ``""`` on empty / failure.
+        Chinese plot text, or ``""`` on empty input.  On translation
+        failure the original Japanese summary is returned as-is.
     """
     text = bangumi_summary.strip()
     if not text:
