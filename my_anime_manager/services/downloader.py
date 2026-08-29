@@ -7,8 +7,10 @@ import traceback
 from pathlib import Path
 import httpx
 
+from fastapi import HTTPException
+
 from .. import config
-from ..clients.qbittorrent import login as qb_login, add_torrent, resume_torrent, delete_torrent
+from ..clients.qbittorrent import login as qb_login, add_torrent, resume_torrent, delete_torrent, get_torrent_files
 from ..clients.qbittorrent import (
     login as qb_login, add_torrent, resume_torrent,
 )
@@ -609,3 +611,58 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     await _check_completion(bangumi_id, sub)
 
     return True
+
+
+async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
+    """Regenerate NFO for one downloaded episode using its stored overrides.
+
+    Everything is derived server-side (subscription, info_hash, per-episode
+    TMDB overrides, paths) — callers only need to identify the episode.
+    Raises HTTPException(4xx) on missing data, HTTPException(500) on failure.
+    """
+    subs = list_subscriptions()
+    sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+    if not sub:
+        raise HTTPException(404, "订阅不存在")
+    if not sub.get("tmdb", {}).get("id"):
+        raise HTTPException(400, "订阅未关联 TMDB ID，无法生成 NFO")
+    ep = get_all_episodes(bangumi_id).get(str(sort))
+    if not ep:
+        raise HTTPException(404, "该集的下载记录不存在")
+    info_hash = ep.get("info_hash", "")
+    if not info_hash:
+        raise HTTPException(400, "该集没有关联的种子信息")
+
+    show_name = sub.get("name", str(bangumi_id))
+    series_name = sub.get("series_name") or show_name
+    bgm_season = sub.get("bgm", {}).get("season", 1)
+    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
+    rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
+    rel_path = format_download_path(
+        config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_ep_val,
+    ).lstrip("/")
+    rel_dir = str(Path(rel_path).parent)
+    season_dir = str(Path(rss_base) / rel_dir)
+    show_dir = str(Path(season_dir).parent)
+
+    qb = await qb_login(
+        config.QBITTORRENT_URL,
+        config.QBITTORRENT_USERNAME,
+        config.QBITTORRENT_PASSWORD,
+    )
+    files = await get_torrent_files(qb, info_hash)
+    old_path = files[0]["name"] if files else ep.get("guid", "")
+    ok = await generate_metadata(
+        qb, info_hash, bangumi_id, sort,
+        bangumi_id, sub["tmdb"]["id"], show_name,
+        old_path, ep.get("guid", ""),
+        bgm_season=bgm_season,
+        tmdb_season=sub.get("tmdb", {}).get("season"),
+        season_dir=season_dir, show_dir=show_dir,
+        series_name=series_name,
+    )
+    if not ok:
+        raise HTTPException(500, "NFO 生成失败")
+    logger.info("regen-nfo: NFO regenerated for bangumi=%d sort=%d", bangumi_id, sort)
+
+

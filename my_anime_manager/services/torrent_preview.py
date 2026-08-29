@@ -1103,3 +1103,39 @@ async def parse_and_search(torrent_path: str) -> dict:
         "search_results_backup": search_results_backup,
         "episode_data": episode_data,
     }
+
+
+# ═════════════════════════════════════════════════════════════════════
+# Series name derivation
+# ═════════════════════════════════════════════════════════════════════
+
+def derive_series_name(preview_data: dict | None) -> str:
+    """Derive the root series name for path template ``{series_name}``.
+
+    Priority: TMDB name from ``search_results`` → BGM name from
+    ``episode_data.bangumi``.  This mirrors the RSS enrichment flow
+    which prefers TMDB zh-CN over BGM.
+    """
+    if not preview_data:
+        return ""
+
+    # 1. Try TMDB name from search_results (usually Chinese or best
+    #    available localised title)
+    search_results = preview_data.get("search_results", {})
+    for entry in search_results.values():
+        if isinstance(entry, dict):
+            tmdb = entry.get("tmdb")
+            if isinstance(tmdb, dict) and tmdb.get("name"):
+                return tmdb["name"]
+
+    # 2. Fallback: first BGM entry from episode_data
+    episode_data = preview_data.get("episode_data", {})
+    bgm_data: dict = episode_data.get("bangumi", {})
+    if bgm_data:
+        first = next(iter(bgm_data.values()))
+        if isinstance(first, dict):
+            return first.get("name", "")
+
+    return ""
+
+
