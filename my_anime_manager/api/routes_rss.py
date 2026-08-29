@@ -441,7 +441,7 @@ async def delete_subscription(bangumi_id: int, delete_files: bool = False):
                     except Exception:
                         pass  # best-effort per torrent
             except Exception as e:
-                print(f"⚠️ qBittorrent 连接失败，跳过种子删除: {e}")
+                logger.warning("qBittorrent 连接失败，跳过种子删除: %s", e)
         data.clear_download_history(bangumi_id)
 
     if data.remove_subscription(bangumi_id):

@@ -74,24 +74,14 @@ async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = 
     if not file.filename or not file.filename.lower().endswith(".torrent"):
         raise HTTPException(400, "Only .torrent files are accepted")
 
-    # ── Read subscription ──
-    subs = data.list_subscriptions()
-    sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
-    if not sub:
-        raise HTTPException(404, "订阅不存在")
+    # ── Read subscription + resolve download dirs ──
+    sub, season_dir, show_dir = downloader.resolve_episode_paths(bangumi_id, sort)
     show_name = sub.get("name", str(bangumi_id))
     series_name = sub.get("series_name") or show_name
     bgm_season = sub.get("bgm", {}).get("season", 1)
     tmdb_id = sub.get("tmdb", {}).get("id", 0)
     tmdb_season = sub.get("tmdb", {}).get("season")
-    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    from my_anime_manager.services.nfo import format_download_path
-    template = config.RSS_PATH_TEMPLATE
-    rel_path = format_download_path(template, sub, sort=sort, tvdb_episode=tvdb_ep_val).lstrip("/")
-    rel_dir = str(Path(rel_path).parent)
-    _season_dir = str(Path(rss_base) / rel_dir)
-    _show_dir = str(Path(_season_dir).parent)
 
     # ── Save .torrent to temp file ──
     tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
@@ -152,8 +142,8 @@ async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = 
                     old_path, torrent_name,
                     bgm_season=bgm_season,
                     tmdb_season=tmdb_season,
-                    season_dir=_season_dir,
-                    show_dir=_show_dir,
+                    season_dir=season_dir,
+                    show_dir=show_dir,
                     series_name=series_name,
                 )
                 logger.info("metadata generated")
@@ -221,24 +211,14 @@ async def replace_episode_torrent(bangumi_id: int, sort: int, file: UploadFile =
         except Exception:
             logger.exception("replace: delete old torrent failed, continuing")
 
-    # ── Read subscription ──
-    subs = data.list_subscriptions()
-    sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
-    if not sub:
-        raise HTTPException(404, "订阅不存在")
+    # ── Read subscription + resolve download dirs ──
+    sub, season_dir, show_dir = downloader.resolve_episode_paths(bangumi_id, sort)
     show_name = sub.get("name", str(bangumi_id))
     series_name = sub.get("series_name") or show_name
     bgm_season = sub.get("bgm", {}).get("season", 1)
     tmdb_id = sub.get("tmdb", {}).get("id", 0)
     tmdb_season = sub.get("tmdb", {}).get("season")
-    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    from my_anime_manager.services.nfo import format_download_path
-    template = config.RSS_PATH_TEMPLATE
-    rel_path = format_download_path(template, sub, sort=sort, tvdb_episode=tvdb_ep_val).lstrip("/")
-    rel_dir = str(Path(rel_path).parent)
-    _season_dir = str(Path(rss_base) / rel_dir)
-    _show_dir = str(Path(_season_dir).parent)
 
     # ── Save .torrent to temp file ──
     tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
@@ -286,7 +266,7 @@ async def replace_episode_torrent(bangumi_id: int, sort: int, file: UploadFile =
                     bangumi_id, tmdb_id, show_name,
                     old_path, torrent_name,
                     bgm_season=bgm_season, tmdb_season=tmdb_season,
-                    season_dir=_season_dir, show_dir=_show_dir,
+                    season_dir=season_dir, show_dir=show_dir,
                     series_name=series_name,
                 )
                 logger.info("replace: metadata generated")

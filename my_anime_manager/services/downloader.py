@@ -610,6 +610,29 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
     return True
 
 
+def resolve_episode_paths(bangumi_id: int, sort: int) -> tuple[dict, str, str]:
+    """Resolve the subscription and download dirs for one episode.
+
+    Shared by the download-history routes (upload/replace) and NFO
+    regeneration.  Returns ``(sub, season_dir, show_dir)``.  Raises
+    HTTPException(404) when the subscription does not exist.
+    """
+    subs = list_subscriptions()
+    sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
+    if not sub:
+        raise HTTPException(404, "订阅不存在")
+
+    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
+    rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
+    rel_path = format_download_path(
+        config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_ep_val,
+    ).lstrip("/")
+    rel_dir = str(Path(rel_path).parent)
+    season_dir = str(Path(rss_base) / rel_dir)
+    show_dir = str(Path(season_dir).parent)
+    return sub, season_dir, show_dir
+
+
 async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     """Regenerate NFO for one downloaded episode using its stored overrides.
 
@@ -617,10 +640,7 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     TMDB overrides, paths) — callers only need to identify the episode.
     Raises HTTPException(4xx) on missing data, HTTPException(500) on failure.
     """
-    subs = list_subscriptions()
-    sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
-    if not sub:
-        raise HTTPException(404, "订阅不存在")
+    sub, season_dir, show_dir = resolve_episode_paths(bangumi_id, sort)
     if not sub.get("tmdb", {}).get("id"):
         raise HTTPException(400, "订阅未关联 TMDB ID，无法生成 NFO")
     ep = get_all_episodes(bangumi_id).get(str(sort))
@@ -633,14 +653,6 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     show_name = sub.get("name", str(bangumi_id))
     series_name = sub.get("series_name") or show_name
     bgm_season = sub.get("bgm", {}).get("season", 1)
-    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
-    rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    rel_path = format_download_path(
-        config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_ep_val,
-    ).lstrip("/")
-    rel_dir = str(Path(rel_path).parent)
-    season_dir = str(Path(rss_base) / rel_dir)
-    show_dir = str(Path(season_dir).parent)
 
     qb = await qb_login(
         config.QBITTORRENT_URL,
