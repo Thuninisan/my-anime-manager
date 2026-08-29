@@ -33,6 +33,7 @@ async def generate_metadata(
     show_dir: str = "",
     bgm_subject_name: str = "",
     series_name: str = "",
+    rename_in_qbit: bool = True,
 ) -> bool:
     """Generate NFO + images via :func:`batch_nfo_generator`, then rename in qBittorrent.
 
@@ -40,6 +41,10 @@ async def generate_metadata(
     delegated to the shared batch function.  This function only handles
     RSS-specific concerns: download-history overrides, input normalisation,
     and the final qBittorrent rename.
+
+    ``rename_in_qbit=False`` skips the rename entirely (NFO-only
+    regeneration, e.g. when the torrent may already be removed).  In that
+    case ``qb_client``, ``info_hash`` and ``old_torrent_path`` are unused.
     """
     # ── Apply download-history overrides ────────────────────────────
     overrides = get_all_episodes(bangumi_id).get(str(sort), {})
@@ -73,27 +78,28 @@ async def generate_metadata(
         return False
     logger.info("batch NFO complete: %s", summary)
 
-    # ── Rename in qBittorrent ───────────────────────────────────────
-    ext = Path(old_torrent_path).suffix
-    _stem_sub = {
-        "name": show_name,
-        "series_name": series_name or show_name,
-        "bgm": {
-            "subject_name": bgm_subject_name or show_name,
-            "season": bgm_season,
-        },
-        "tvdb": {"season": eff_tvdb_season},
-        "tmdb": {"season": eff_tmdb_season},
-    }
-    new_path = format_download_path(
-        config.RSS_PATH_TEMPLATE, _stem_sub, sort=sort, ext=ext,
-        bangumi_sort=sort, bangumi_ep=sort,
-        tvdb_episode=tvdb_ep_val, tmdb_episode=eff_tmdb_ep,
-    ).lstrip("/")
-    try:
-        await rename_file(qb_client, info_hash, old_torrent_path, new_path)
-        logger.info("renamed: %s → %s", old_torrent_path, new_path)
-    except Exception:
-        logger.exception("rename failed")
+    # ── Rename in qBittorrent (skipped for NFO-only regeneration) ────
+    if rename_in_qbit:
+        ext = Path(old_torrent_path).suffix
+        _stem_sub = {
+            "name": show_name,
+            "series_name": series_name or show_name,
+            "bgm": {
+                "subject_name": bgm_subject_name or show_name,
+                "season": bgm_season,
+            },
+            "tvdb": {"season": eff_tvdb_season},
+            "tmdb": {"season": eff_tmdb_season},
+        }
+        new_path = format_download_path(
+            config.RSS_PATH_TEMPLATE, _stem_sub, sort=sort, ext=ext,
+            bangumi_sort=sort, bangumi_ep=sort,
+            tvdb_episode=tvdb_ep_val, tmdb_episode=eff_tmdb_ep,
+        ).lstrip("/")
+        try:
+            await rename_file(qb_client, info_hash, old_torrent_path, new_path)
+            logger.info("renamed: %s → %s", old_torrent_path, new_path)
+        except Exception:
+            logger.exception("rename failed")
 
     return True

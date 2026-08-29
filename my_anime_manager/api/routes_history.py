@@ -343,8 +343,8 @@ async def update_episode_overrides(
 async def regen_episode_nfo(bangumi_id: int, sort: int):
     """Regenerate NFO for a single episode using its stored TMDB overrides.
 
-    No request body — all inputs (subscription, info_hash, per-episode
-    overrides, paths) are derived server-side.
+    No request body — all inputs (subscription, per-episode overrides,
+    paths) are derived server-side.  NFO-only, never touches qBittorrent.
     """
     try:
         await downloader.regen_episode_nfo(bangumi_id, sort)

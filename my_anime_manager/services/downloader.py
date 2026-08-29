@@ -636,8 +636,10 @@ def resolve_episode_paths(bangumi_id: int, sort: int) -> tuple[dict, str, str]:
 async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     """Regenerate NFO for one downloaded episode using its stored overrides.
 
-    Everything is derived server-side (subscription, info_hash, per-episode
-    TMDB overrides, paths) — callers only need to identify the episode.
+    Everything is derived server-side (subscription, per-episode TMDB
+    overrides, paths) — callers only need to identify the episode.
+    NFO-only: rewrites NFO + images on disk and never touches qBittorrent
+    (no rename), so it works even after the torrent has been removed.
     Raises HTTPException(4xx) on missing data, HTTPException(500) on failure.
     """
     sub, season_dir, show_dir = resolve_episode_paths(bangumi_id, sort)
@@ -646,29 +648,22 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     ep = get_all_episodes(bangumi_id).get(str(sort))
     if not ep:
         raise HTTPException(404, "该集的下载记录不存在")
-    info_hash = ep.get("info_hash", "")
-    if not info_hash:
-        raise HTTPException(400, "该集没有关联的种子信息")
 
     show_name = sub.get("name", str(bangumi_id))
     series_name = sub.get("series_name") or show_name
     bgm_season = sub.get("bgm", {}).get("season", 1)
 
-    qb = await qb_login(
-        config.QBITTORRENT_URL,
-        config.QBITTORRENT_USERNAME,
-        config.QBITTORRENT_PASSWORD,
-    )
-    files = await get_torrent_files(qb, info_hash)
-    old_path = files[0]["name"] if files else ep.get("guid", "")
+    # qb_client / info_hash / old_torrent_path are only consumed by the
+    # rename step, which regen skips (rename_in_qbit=False) — placeholders.
     ok = await generate_metadata(
-        qb, info_hash, bangumi_id, sort,
+        None, "", bangumi_id, sort,
         bangumi_id, sub["tmdb"]["id"], show_name,
-        old_path, ep.get("guid", ""),
+        "", "",
         bgm_season=bgm_season,
         tmdb_season=sub.get("tmdb", {}).get("season"),
         season_dir=season_dir, show_dir=show_dir,
         series_name=series_name,
+        rename_in_qbit=False,
     )
     if not ok:
         raise HTTPException(500, "NFO 生成失败")
