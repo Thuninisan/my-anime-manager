@@ -652,6 +652,11 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     show_name = sub.get("name", str(bangumi_id))
     series_name = sub.get("series_name") or show_name
     bgm_season = sub.get("bgm", {}).get("season", 1)
+    # Same episode-number inputs as the download flow (downloader.py) so the
+    # NFO filename matches the one computed when the episode was downloaded.
+    tvdb_meta = sub.get("tvdb", {})
+    tmdb_meta = sub.get("tmdb", {})
+    tvdb_ep_val = sort + tvdb_meta.get("ep_offset", 0)
 
     # qb_client / info_hash / old_torrent_path are only consumed by the
     # rename step, which regen skips (rename_in_qbit=False) — placeholders.
@@ -660,7 +665,12 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
         bangumi_id, sub["tmdb"]["id"], show_name,
         "", "",
         bgm_season=bgm_season,
-        tmdb_season=sub.get("tmdb", {}).get("season"),
+        tmdb_season=tmdb_meta.get("season"),
+        tmdb_ep_offset=tmdb_meta.get("ep_offset", 0),
+        tvdb_id=tvdb_meta.get("id") or 0,
+        tvdb_season=tvdb_meta.get("season"),
+        tvdb_ep_offset=tvdb_meta.get("ep_offset", 0),
+        tvdb_ep=tvdb_ep_val,
         season_dir=season_dir, show_dir=show_dir,
         series_name=series_name,
         rename_in_qbit=False,
