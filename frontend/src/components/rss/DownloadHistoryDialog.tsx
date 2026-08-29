@@ -3,6 +3,7 @@ import type { DownloadHistoryResponse, SubscriptionOut, SeasonInfo } from '@/typ
 import { updateSubscription, deleteSubscriptionRss, deleteEpisodeHistory, addEpisodeWithTorrent, replaceEpisodeWithTorrent, getTmdbSeasonMap, regenEpisodeNfo } from '@/api/rssApi';
 import LeftSidebar from './LeftSidebar';
 import EpisodeTable, { formatBytes } from './EpisodeTable';
+import { showLoadingToast, updateToast } from '@/lib/toast';
 
 interface Props {
   open: boolean;
@@ -151,11 +152,17 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
 
   const refreshNfo = async (sort: number) => {
     if (!data) return;
+    const epLabel = `EP${sort.toString().padStart(2, '0')}`;
+    const toastId = showLoadingToast(`${epLabel} NFO 重新生成中...`);
     try {
       await regenEpisodeNfo(data.bangumi_id, sort);
+      updateToast(toastId, `${epLabel} NFO 重新生成完成`, 'success');
       onRefresh();
       setExpandedSort(null);
-    } catch { /* */ }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      updateToast(toastId, `${epLabel} NFO 重新生成失败: ${msg}`, 'error');
+    }
   };
 
   // ── Render ──

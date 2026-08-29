@@ -259,7 +259,15 @@ export async function updateEpisodeHistory(bangumiId: number, sort: number, fiel
 
 export async function regenEpisodeNfo(bangumiId: number, sort: number): Promise<void> {
   const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}/regen-nfo`, { method: 'POST' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    // Surface the backend detail message (e.g. "订阅未关联 TMDB ID") if present
+    let detail = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.detail) detail = String(body.detail);
+    } catch { /* keep HTTP status */ }
+    throw new Error(detail);
+  }
 }
 
 export async function addEpisodeHistory(bangumiId: number, sort: number): Promise<void> {
