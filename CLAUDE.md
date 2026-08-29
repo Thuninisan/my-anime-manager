@@ -154,6 +154,7 @@ python scripts/bump_version.py X.Y.Z
 | POST/DELETE/PATCH | `/api/rss/download-history/{id}/{sort}` | 增删改历史记录 |
 | POST | `/api/rss/download-history/{id}/{sort}/upload` | 上传 .torrent 补全 |
 | POST | `/api/rss/download-history/{id}/{sort}/replace` | 替换种子 |
+| POST | `/api/rss/download-history/{id}/{sort}/regen-nfo` | 重新生成该集 NFO |
 | **TMDB** | | |
 | GET | `/api/rss/tmdb-search` | 搜索 TMDB 节目 |
 | GET | `/api/rss/tmdb/{id}/seasons` | 获取 TMDB 季剧集数据 |

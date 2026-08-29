@@ -257,6 +257,11 @@ export async function updateEpisodeHistory(bangumiId: number, sort: number, fiel
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
+export async function regenEpisodeNfo(bangumiId: number, sort: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}/regen-nfo`, { method: 'POST' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
 export async function addEpisodeHistory(bangumiId: number, sort: number): Promise<void> {
   const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}`, { method: 'POST' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

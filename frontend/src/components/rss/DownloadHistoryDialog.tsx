@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { DownloadHistoryResponse, SubscriptionOut, SeasonInfo } from '@/types/preview';
-import { updateSubscription, deleteSubscriptionRss, deleteEpisodeHistory, addEpisodeWithTorrent, replaceEpisodeWithTorrent, getTmdbSeasonMap } from '@/api/rssApi';
+import { updateSubscription, deleteSubscriptionRss, deleteEpisodeHistory, addEpisodeWithTorrent, replaceEpisodeWithTorrent, getTmdbSeasonMap, regenEpisodeNfo } from '@/api/rssApi';
 import LeftSidebar from './LeftSidebar';
 import EpisodeTable, { formatBytes } from './EpisodeTable';
 
@@ -149,6 +149,15 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
     } catch { /* */ }
   };
 
+  const refreshNfo = async (sort: number) => {
+    if (!data) return;
+    try {
+      await regenEpisodeNfo(data.bangumi_id, sort);
+      onRefresh();
+      setExpandedSort(null);
+    } catch { /* */ }
+  };
+
   // ── Render ──
   if (!open) return null;
   return (
@@ -188,7 +197,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
             fileInputRef={fileInputRef} fileIntentRef={fileIntentRef}
             expandedSort={expandedSort} tmdbForm={tmdbForm} setTmdbForm={setTmdbForm}
             tmdbSeasonMap={tmdbSeasonMap}
-            onOpenTmdb={openTmdbDropdown} onSaveTmdb={saveTmdbOverrides}
+            onOpenTmdb={openTmdbDropdown} onSaveTmdb={saveTmdbOverrides} onRefreshNfo={refreshNfo}
             onDeleteEpisode={handleDeleteEpisode}
             onClose={onClose}
           />
