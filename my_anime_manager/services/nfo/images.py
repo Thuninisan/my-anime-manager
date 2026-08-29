@@ -6,7 +6,7 @@ from ...clients.tmdb import TMDB_IMAGE_BASE, get_tv_images
 from ...utils.http_retry import fetch_with_retry
 
 
-async def _download_image(url: str, file_path_no_ext: str) -> str | None:
+async def _download_image(url: str, file_path_no_ext: str, overwrite: bool = False) -> str | None:
     """Download an image and save it, detecting extension from Content-Type.
 
     Uses the shared retry wrapper so transient network errors are
@@ -15,6 +15,8 @@ async def _download_image(url: str, file_path_no_ext: str) -> str | None:
     Args:
         url: Image URL
         file_path_no_ext: Save path without file extension
+        overwrite: Re-download even if a file with the same base name
+            exists (old files are removed first, e.g. regen)
 
     Returns:
         Full saved path with extension, or None on failure
@@ -26,9 +28,12 @@ async def _download_image(url: str, file_path_no_ext: str) -> str | None:
     parent = Path(file_path_no_ext).parent
     base = Path(file_path_no_ext).name
     existing = list(parent.glob(base + ".*"))
-    if existing:
+    if existing and not overwrite:
         print(f"   ⏭️ 图片已存在，跳过: {existing[0]}")
         return str(existing[0])
+    if existing and overwrite:
+        for stale in existing:
+            stale.unlink()
 
     try:
         res = await fetch_with_retry(url, timeout=30.0, label="图片")
@@ -90,6 +95,7 @@ async def download_episode_thumb(
     still_path: str,
     output_dir: str,
     base_filename: str,
+    overwrite: bool = False,
 ) -> str | None:
     """Download episode still image as thumbnail.
 
@@ -97,6 +103,7 @@ async def download_episode_thumb(
         still_path: TMDB still_path
         output_dir: Output directory
         base_filename: Base filename without extension
+        overwrite: Re-download even if a thumb already exists (regen)
 
     Returns:
         Saved file path or None
@@ -106,7 +113,7 @@ async def download_episode_thumb(
     Path(output_dir).mkdir(parents=True, exist_ok=True)
     url = f"{TMDB_IMAGE_BASE}{still_path}"
     file_path = str(Path(output_dir) / f"{base_filename}-thumb")
-    return await _download_image(url, file_path)
+    return await _download_image(url, file_path, overwrite=overwrite)
 
 
 TVDB_ARTWORK_BASE = "https://artworks.thetvdb.com/banners"
@@ -116,6 +123,7 @@ async def download_tvdb_episode_thumb(
     image_path: str,
     output_dir: str,
     base_filename: str,
+    overwrite: bool = False,
 ) -> str | None:
     """Download episode thumbnail from TVDB artwork CDN.
 
@@ -124,6 +132,7 @@ async def download_tvdb_episode_thumb(
                     ``banners/v4/episode/123/screencap/abc.jpg``)
         output_dir: Output directory
         base_filename: Base filename without extension
+        overwrite: Re-download even if a thumb already exists (regen)
 
     Returns:
         Saved file path or None
@@ -142,7 +151,7 @@ async def download_tvdb_episode_thumb(
             clean = clean[len("banners/"):]
         url = f"{TVDB_ARTWORK_BASE}/{clean}"
     file_path = str(Path(output_dir) / f"{base_filename}-thumb")
-    return await _download_image(url, file_path)
+    return await _download_image(url, file_path, overwrite=overwrite)
 
 
 async def download_show_images(

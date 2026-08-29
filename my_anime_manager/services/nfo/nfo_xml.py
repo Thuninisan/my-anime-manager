@@ -58,6 +58,7 @@ def generate_episode_nfo(
     output_dir: str = ".",
     tvdb_ep_id: int = 0,
     file_stem: str = "",
+    overwrite: bool = False,
 ) -> str:
     """Generate an episode NFO file.
 
@@ -82,6 +83,7 @@ def generate_episode_nfo(
         tvdb_ep_id: TVDB episode ID
         file_stem: Base filename (without extension), from path template.
             If empty, falls back to ``{bangumi_subject_name} {ep:02d}``.
+        overwrite: Rewrite the NFO even if it already exists (regen).
 
     Returns:
         Path to the generated NFO file
@@ -106,8 +108,8 @@ def generate_episode_nfo(
     filename = f"{file_base}.nfo"
     file_path = Path(output_dir) / filename
 
-    # Skip if already exists
-    if file_path.exists():
+    # Skip if already exists (unless explicitly overwriting, e.g. regen)
+    if file_path.exists() and not overwrite:
         print(f"   ⏭️ 已存在，跳过: {file_path}")
         return str(file_path)
 

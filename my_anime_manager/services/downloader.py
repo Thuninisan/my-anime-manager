@@ -674,6 +674,7 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
         season_dir=season_dir, show_dir=show_dir,
         series_name=series_name,
         rename_in_qbit=False,
+        overwrite=True,
     )
     if not ok:
         raise HTTPException(500, "NFO 生成失败")

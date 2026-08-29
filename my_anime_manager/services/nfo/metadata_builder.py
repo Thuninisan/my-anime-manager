@@ -34,6 +34,7 @@ async def generate_metadata(
     bgm_subject_name: str = "",
     series_name: str = "",
     rename_in_qbit: bool = True,
+    overwrite: bool = False,
 ) -> bool:
     """Generate NFO + images via :func:`batch_nfo_generator`, then rename in qBittorrent.
 
@@ -45,6 +46,9 @@ async def generate_metadata(
     ``rename_in_qbit=False`` skips the rename entirely (NFO-only
     regeneration, e.g. when the torrent may already be removed).  In that
     case ``qb_client``, ``info_hash`` and ``old_torrent_path`` are unused.
+
+    ``overwrite=True`` rewrites the episode NFO + thumb even when they
+    already exist (used together with ``rename_in_qbit=False`` by regen).
     """
     # ── Apply download-history overrides ────────────────────────────
     overrides = get_all_episodes(bangumi_id).get(str(sort), {})
@@ -72,7 +76,9 @@ async def generate_metadata(
     }]
 
     # ── Delegate to shared NFO + image pipeline ─────────────────────
-    summary = await batch_nfo_generator(pre_path, nfo_episodes, series_name=series_name)
+    summary = await batch_nfo_generator(
+        pre_path, nfo_episodes, series_name=series_name, overwrite=overwrite,
+    )
     if summary.get("nfoGenerated", 0) == 0:
         logger.error("NFO generation produced no output")
         return False

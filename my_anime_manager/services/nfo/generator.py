@@ -173,6 +173,7 @@ async def batch_nfo_generator(
     pre_path: str,
     episodes: list[dict],
     series_name: str = "",
+    overwrite: bool = False,
 ) -> dict:
     """Generate NFO files + images for a batch of episodes.
 
@@ -187,6 +188,7 @@ async def batch_nfo_generator(
             ``bangumi_subject_id``, ``bangumi_episode_sort``,
             ``tvdb_id``, ``tvdb_season``, ``tvdb_episode``,
             ``tmdb_id``, ``tmdb_season``, ``tmdb_episode``.
+        overwrite: Rewrite episode NFO + thumbs even if they exist (regen).
 
     Returns:
         ``{"nfoGenerated": int, "imagesDownloaded": int}``.
@@ -508,12 +510,16 @@ async def batch_nfo_generator(
         if still:
             if still_source == "tvdb":
                 thumb_coros.append((
-                    download_tvdb_episode_thumb(still, str(season_dir), file_stem),
+                    download_tvdb_episode_thumb(
+                        still, str(season_dir), file_stem, overwrite=overwrite,
+                    ),
                     len(pending_eps),
                 ))
             else:
                 thumb_coros.append((
-                    download_episode_thumb(still, str(season_dir), file_stem),
+                    download_episode_thumb(
+                        still, str(season_dir), file_stem, overwrite=overwrite,
+                    ),
                     len(pending_eps),
                 ))
 
@@ -563,6 +569,7 @@ async def batch_nfo_generator(
             output_dir=rec["season_dir"],
             tvdb_ep_id=rec["merged_ep"].get("tvdb_ep_id", 0),
             file_stem=rec["file_stem"],
+            overwrite=overwrite,
         )
         nfo_count += 1
         logger.info("   episode.nfo → %s", Path(rec["season_dir"]) / f"{rec['file_stem']}.nfo")
