@@ -231,6 +231,18 @@ def get_bangumi_id_by_tmdb_id(tmdb_id: int) -> int | None:
     return None
 
 
+def get_map_entry(bangumi_id: int) -> dict | None:
+    """Get the full Bangumi→Mikan map entry for a Bangumi ID.
+
+    Returns the raw entry dict (name, name_original, mikan_id, tmdb_id,
+    tmdb_season, tvdb_id, tvdb_season, anidb_id, ...), or None.
+    """
+    global _bangumi_mikan_map
+    if _bangumi_mikan_map is None:
+        _bangumi_mikan_map = _load()
+    return _bangumi_mikan_map.get(bangumi_id)
+
+
 def get_map_entries_by_tmdb_id(tmdb_id: int) -> list[dict]:
     """Return all map entries that share the same TMDB ID.
 
