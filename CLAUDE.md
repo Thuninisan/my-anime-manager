@@ -13,7 +13,16 @@ My Anime Manager — TMDB + Bangumi + qBittorrent 联动工具，为 Jellyfin �
 
 ```
 my_anime_manager/
-├── api.py               # FastAPI 应用 (~2230 行) — 所有路由 + 后台 worker
+├── api/                 # FastAPI 应用 (按领域拆分, __init__.py 仅 re-export app)
+│   ├── app.py           # app 组装 — 路由注册、CORS、静态文件、lifespan 生命周期
+│   ├── models.py        # Pydantic 请求/响应模型
+│   ├── state.py         # 后台任务共享状态 (扫描/监控/下载任务)
+│   ├── routes_torrent.py    # Torrent 路由 (字幕上传/删除、parse-and-search、download)
+│   ├── routes_rss.py        # RSS 订阅路由 (搜索、订阅 CRUD、enrich、feed、history-stream)
+│   ├── routes_history.py    # 下载历史路由 (增删、上传/替换种子、regen-nfo)
+│   ├── routes_downloader.py # 下载器控制路由 (/api/rss/downloader/*)
+│   ├── routes_settings.py   # 配置路由 (/config)
+│   └── routes_system.py     # 扫描/监控/更新/SPA 路由 (必须最后注册)
 ├── config.py            # 配置管理 (内存覆盖 > settings.json > 默认值)
 ├── data/
 │   ├── __init__.py      # 数据层 — JSON 文件读写 (订阅/历史/设置/映射)
@@ -31,8 +40,10 @@ my_anime_manager/
 │   ├── bangumi.py       # Bangumi 搜索、续集链、剧集匹配
 │   ├── tmdb.py          # TMDB 搜索、详情、季→集映射
 │   ├── batch_service.py # Torrent 批量处理 (preview→confirm→execute)
-│   ├── torrent_preview.py  # 前端 torrent 解析管线 (parse + search)
-│   ├── downloader.py    # RSS 下载 worker
+│   ├── torrent_preview.py  # 前端 torrent 解析管线 (parse + search + 系列名推导)
+│   ├── torrent_monitor.py  # 下载完成监控 (硬链接 + 字幕复制 + 内联 NFO)
+│   ├── torrent_metadata.py # 下载前 NFO 预生成 (preview 数据 → movie.nfo/TV 元数据)
+│   ├── downloader.py    # RSS 下载 worker (+ 单集 NFO 重生成)
 │   ├── rss.py           # RSS 订阅管理 (Mikan 查找 + feed 解析)
 │   ├── nfo/             # NFO 元数据子包 (XML 生成 + 图片下载 + 编排)
 │   │   ├── nfo_xml.py, images.py, generator.py, metadata_builder.py
@@ -43,6 +54,7 @@ my_anime_manager/
 │   ├── torrent_parser.py    # torrent 文件名批量解析
 │   ├── torrent_file_reader.py  # bencode torrent 文件读取
 │   ├── torrent_hash.py  # info hash 计算
+│   ├── paths.py         # 共享文件路径 (字幕存储目录等)
 │   ├── episode_name_match.py  # 模糊匹配 (NFKC→exact→substr→Dice)
 │   └── http_retry.py    # HTTP 重试封装
 └── vendor/anitopy/      # 内嵌的 anime 文件名解析器

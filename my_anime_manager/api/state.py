@@ -4,7 +4,6 @@ Avoids circular imports between __init__.py and route files.
 """
 
 import asyncio
-from pathlib import Path
 from typing import Optional
 
 # ── Scan ──

@@ -11,9 +11,6 @@ from fastapi import HTTPException
 
 from .. import config
 from ..clients.qbittorrent import login as qb_login, add_torrent, resume_torrent, delete_torrent, get_torrent_files
-from ..clients.qbittorrent import (
-    login as qb_login, add_torrent, resume_torrent,
-)
 from ..data import (
     get_tmdb_id, get_tvdb_id,
     list_subscriptions, mark_downloaded, get_episode_source,
