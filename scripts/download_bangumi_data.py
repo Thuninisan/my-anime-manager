@@ -3,13 +3,14 @@
 Usage:
     python scripts/download_bangumi_data.py
 
-Writes a compact ``{bangumi_id: mikan_id}`` JSON mapping to
-``backend/data/bangumi_mikan_map.json``.
+Writes a bundled mapping JSON used for first-run import. The RSS update
+endpoint passes ``--output`` and imports the result into SQLite.
 """
 
 import json
 import re
 import urllib.request
+import argparse
 from pathlib import Path
 
 BANGUMI_DATA_URL = "https://unpkg.com/bangumi-data@0.3/dist/data.json"
@@ -18,6 +19,9 @@ OUTPUT_FILE = Path(__file__).parent.parent / "backend" / "data" / "bangumi_mikan
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, default=OUTPUT_FILE)
+    output_file = parser.parse_args().output
     print(f"[download] Fetching bangumi-data from {BANGUMI_DATA_URL} ...")
     with urllib.request.urlopen(BANGUMI_DATA_URL) as resp:
         data = json.loads(resp.read().decode("utf-8"))
@@ -98,12 +102,12 @@ def main() -> None:
                     entry["tvdb_season"] = int(k_tvdb_season)
             mapping[bangumi_id] = entry
 
-    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT_FILE.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    output_file.write_text(json.dumps(mapping, ensure_ascii=False, indent=2), encoding="utf-8")
 
     print(f"   [ok] Mapped: {len(mapping)} Bangumi entries")
     print(f"   [ok] With TVDB ID: {tvdb_count}")
-    print(f"   [ok] Written to: {OUTPUT_FILE}")
+    print(f"   [ok] Written to: {output_file}")
 
 
 if __name__ == "__main__":

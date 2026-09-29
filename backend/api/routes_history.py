@@ -69,7 +69,7 @@ async def upload_episode_torrent(bangumi_id: int, sort: int, file: UploadFile = 
     1. Parse torrent → extract name + info_hash
     2. Determine save path from subscription (same logic as RSS downloader)
     3. Add to qBittorrent (paused)
-    4. Record in download_history.json (source='add')
+    4. Record in SQLite download history (source='add')
     """
     if not file.filename or not file.filename.lower().endswith(".torrent"):
         raise HTTPException(400, "Only .torrent files are accepted")
@@ -354,5 +354,4 @@ async def regen_episode_nfo(bangumi_id: int, sort: int):
         logger.exception("regen-nfo: unhandled error")
         raise HTTPException(500, f"NFO 重新生成失败: {e}")
     return {"ok": True}
-
 

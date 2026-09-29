@@ -599,7 +599,7 @@ async def enrich_subscription(
 
     Called once when a subscription is added (or lazily when an
     existing subscription is first downloaded).  Returns fields
-    to write into subscriptions.json.
+    to store with the subscription in SQLite.
 
     Args:
         bangumi_id: Bangumi subject ID.

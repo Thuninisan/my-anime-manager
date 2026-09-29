@@ -93,3 +93,31 @@ class LegacyImport(Base):
 
     name: Mapped[str] = mapped_column(Text, primary_key=True)
     imported_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class BangumiMapping(Base):
+    __tablename__ = "bangumi_mappings"
+    __table_args__ = (Index("idx_bangumi_mappings_tmdb", "tmdb_id"),
+                      Index("idx_bangumi_mappings_tvdb", "tvdb_id"))
+
+    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tmdb_id: Mapped[int | None] = mapped_column(Integer)
+    tvdb_id: Mapped[int | None] = mapped_column(Integer)
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    overrides: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+
+class JsonDocument(Base):
+    """Mutable application documents whose legacy format is a JSON object."""
+    __tablename__ = "json_documents"
+
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON, nullable=False)

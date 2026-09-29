@@ -5,6 +5,7 @@ import json as _json
 import logging
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -114,7 +115,7 @@ async def get_bangumi_rss(bangumi_id: int):
 async def assign_mikan_id(bangumi_id: int, body: AssignMikanRequest):
     """Assign a Mikan ID to a Bangumi entry and return subtitle groups.
 
-    Saves the mapping to bangumi_mikan_map.json so future lookups work.
+    Saves the mapping in SQLite so future lookups work.
     Then fetches subtitle groups from Mikan for the given mikan_id.
     """
     name = data.get_bangumi_name(bangumi_id)
@@ -132,41 +133,32 @@ async def assign_mikan_id(bangumi_id: int, body: AssignMikanRequest):
 
 @router.get("/api/rss/data-status")
 async def rss_data_status():
-    """Check whether the bangumi-data mapping file exists."""
-    from ..data import _MAP_FILE
-    exists = _MAP_FILE.exists()
-    count = 0
-    if exists:
-        import json
-        try:
-            raw = json.loads(_MAP_FILE.read_text(encoding="utf-8"))
-            count = len(raw)
-        except Exception:
-            pass
-    return {"exists": exists, "count": count}
+    """Report the active database mapping."""
+    count = data.mapping_count()
+    return {"exists": count > 0, "count": count}
 
 
 @router.post("/api/rss/download-data")
 async def rss_download_data():
     """Download the latest bangumi-data and rebuild the Mikan mapping."""
-    script = Path(__file__).parent.parent / "scripts" / "download_bangumi_data.py"
+    script = Path(__file__).resolve().parents[2] / "scripts" / "download_bangumi_data.py"
     if not script.exists():
         raise HTTPException(500, f"下载脚本不存在: {script}")
 
-    try:
-        proc = subprocess.run(
-            [sys.executable, str(script)],
-            capture_output=True, text=True, timeout=120,
-        )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(500, "下载超时，请重试")
-
-    if proc.returncode != 0:
-        raise HTTPException(500, f"下载失败:\n{proc.stderr or proc.stdout}")
-
-    # Clear the in-memory cache so it reloads
-    from .. import data as data_module
-    data_module._bangumi_mikan_map = None
+    # Import the bundled legacy mapping before fetching new upstream data.
+    data.mapping_count()
+    with tempfile.TemporaryDirectory() as directory:
+        output = Path(directory) / "bangumi_mikan_map.json"
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(script), "--output", str(output)],
+                capture_output=True, text=True, timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            raise HTTPException(500, "下载超时，请重试")
+        if proc.returncode != 0:
+            raise HTTPException(500, f"下载失败:\n{proc.stderr or proc.stdout}")
+        data.replace_mappings(_json.loads(output.read_text(encoding="utf-8")))
 
     return {"ok": True, "output": proc.stdout}
 
@@ -412,7 +404,7 @@ async def search_tmdb_shows(q: str) -> list[TmdbSearchResult]:
 async def set_subscription_tmdb(bangumi_id: int, body: SetTmdbRequest):
     """Manually set the TMDB ID (and optional season) for a subscription.
 
-    Persists to both subscriptions.json and bangumi_mikan_map.json.
+    Persists the subscription and Bangumi mapping in SQLite.
     Used by the Tier-2 manual override in the frontend.
     """
     # Update the subscription record

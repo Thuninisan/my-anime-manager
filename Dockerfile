@@ -1,5 +1,5 @@
 FROM python:3.12-alpine
-LABEL org.opencontainers.image.version="1.0.0"
+LABEL org.opencontainers.image.version="1.0.1"
 
 # Install git + Node.js for hot-update capability (git clone/pull + frontend rebuild)
 RUN apk add --no-cache git nodejs npm tzdata

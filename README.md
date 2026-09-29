@@ -21,7 +21,7 @@ Dockerfile               前端构建 + Python 运行镜像
 docker-compose.yml       本地构建及持久化挂载
 ```
 
-后端 Python 包名是 `backend`。`backend/api/` 定义 API，`backend/services/` 处理下载、元数据和资源采集，`backend/db/` 管理 SQLite，`backend/data/` 管理订阅、历史和映射数据。设置由 `backend/config.py` 定义，并通过 `GET/PATCH /api/settings` 读写。
+后端 Python 包名是 `backend`。`backend/api/` 定义 API，`backend/services/` 处理下载、元数据和资源采集，`backend/db/` 管理 SQLite，`backend/data/` 提供数据访问接口并管理仍使用 JSON 的历史和设置。设置由 `backend/config.py` 定义，并通过 `GET/PATCH /api/settings` 读写。
 
 ## Docker 安装
 
@@ -60,7 +60,7 @@ python run.py
 
 首次打开网页后，在设置页填写 TMDB API Key、qBittorrent 连接信息、下载及整理路径。路径应填写**应用容器内**看到的路径。TVDB 和 DeepSeek 密钥是可选项。设置保存到 `MAM_DATA_DIR/settings.json`（Docker 中为 `/app/data/settings.json`）；环境变量仅在设置文件不存在的首次启动时初始化同名设置，之后以网页保存值为准。敏感字段在 API 中显示为 `***`。
 
-RSS 排除词、RSS 下载轮询间隔和资源采集轮询间隔也保存在同一设置文件。旧版 `rss_settings.json` 的排除词会自动迁入。订阅和下载历史保存在数据目录的 JSON 文件，资源与种子关系保存在 `mam.sqlite3`。
+RSS 排除词、RSS 下载轮询间隔和资源采集轮询间隔也保存在同一设置文件。旧版 `rss_settings.json` 的排除词会自动迁入 `settings.json`。订阅、下载历史、Bangumi 映射、资源与种子关系均保存在 `MAM_DATA_DIR/mam.sqlite3`。首次使用新版本时，旧 `subscriptions.json`、`download_history.json`、`torrents.json` 和随程序提供的 `bangumi_mikan_map.json` 会自动导入数据库，原文件不会删除；此后以数据库为准。降级到旧版本前，先停止应用，运行 `python scripts/export_legacy_json.py /path/to/export`，将导出的用户数据 JSON 复制到旧版的数据目录、映射文件复制到旧版的 `backend/data/` 目录。
 
 如果启用 `WATCH_DIR=/torrents`，应用会扫描该目录下的 `.torrent` 文件。处理成功后文件会删除，失败时移到 `failed/`。RSS 下载器的开关是运行状态；重启后需在设置页重新开启，轮询间隔仍会保留。
 
