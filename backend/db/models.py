@@ -1,6 +1,6 @@
 """ORM models for the application database."""
 
-from sqlalchemy import Float, Index, Integer, JSON, Text, UniqueConstraint, text
+from sqlalchemy import Float, Index, Integer, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -30,7 +30,6 @@ class Resource(Base):
     size_label: Mapped[str] = mapped_column(Text, nullable=False, default="")
     torrent_path: Mapped[str] = mapped_column(Text, nullable=False, default="")
     torrent_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    torrent_files: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
     collected_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
@@ -42,14 +41,22 @@ class ResourceSource(Base):
 
     name: Mapped[str] = mapped_column(Text, primary_key=True)
     rss_url: Mapped[str] = mapped_column(Text, nullable=False)
-    downloadtag: Mapped[dict] = mapped_column(JSON, nullable=False)
+    download_tag: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    download_attribute: Mapped[str | None] = mapped_column(Text)
     index_type: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ResourceTorrentFile(Base):
+    __tablename__ = "resource_torrent_files"
+
+    resource_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class ResourceRecognition(Base):
     __tablename__ = "resource_recognitions"
     resource_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    title_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
@@ -83,9 +90,42 @@ class TorrentCard(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, default="")
     encoding_group: Mapped[str] = mapped_column(Text, nullable=False, default="")
     video_codec: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    bangumi_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    processing: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
-    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    processing_mode: Mapped[str | None] = mapped_column(Text)
+    replace_bangumi_id: Mapped[int | None] = mapped_column(Integer)
+    processing_present: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
+class TorrentCardBangumi(Base):
+    __tablename__ = "torrent_card_bangumi"
+    card_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bangumi_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class TorrentCardOperation(Base):
+    __tablename__ = "torrent_card_operations"
+    card_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    torrent_path: Mapped[str | None] = mapped_column(Text)
+    source_path: Mapped[str | None] = mapped_column(Text)
+    target_path: Mapped[str | None] = mapped_column(Text)
+    action: Mapped[str | None] = mapped_column(Text)
+    bangumi_sort: Mapped[int | None] = mapped_column(Integer)
+
+
+class StructuredNode(Base):
+    """Typed tree nodes for extension data without opaque JSON columns."""
+    __tablename__ = "structured_nodes"
+    __table_args__ = (Index("idx_structured_nodes_owner", "owner_kind", "owner_id", "root_field"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    owner_id: Mapped[str] = mapped_column(Text, nullable=False)
+    root_field: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(Integer)
+    key_name: Mapped[str | None] = mapped_column(Text)
+    position: Mapped[int | None] = mapped_column(Integer)
+    value_type: Mapped[str] = mapped_column(Text, nullable=False)
+    value_text: Mapped[str | None] = mapped_column(Text)
 
 
 class LegacyImport(Base):
@@ -96,31 +136,75 @@ class LegacyImport(Base):
 
 
 class Subscription(Base):
-    __tablename__ = "subscriptions"
+    __tablename__ = "rss_subscriptions"
 
     bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
-    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    series_name: Mapped[str | None] = mapped_column(Text)
+    download_path: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    active: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_at: Mapped[str | None] = mapped_column(Text)
+    bgm_season: Mapped[int | None] = mapped_column(Integer)
+    bgm_sort_start: Mapped[int | None] = mapped_column(Integer)
+    bgm_sort_end: Mapped[int | None] = mapped_column(Integer)
+    bgm_subject_name: Mapped[str | None] = mapped_column(Text)
+    bgm_series_name: Mapped[str | None] = mapped_column(Text)
+    bgm_rating: Mapped[float | None] = mapped_column(Float)
+    bgm_air_date: Mapped[str | None] = mapped_column(Text)
+    tmdb_id: Mapped[int | None] = mapped_column(Integer)
+    tmdb_season: Mapped[int | None] = mapped_column(Integer)
+    tmdb_ep_offset: Mapped[int | None] = mapped_column(Integer)
+    tvdb_id: Mapped[int | None] = mapped_column(Integer)
+    tvdb_season: Mapped[int | None] = mapped_column(Integer)
+    tvdb_ep_offset: Mapped[int | None] = mapped_column(Integer)
+
+
+class SubscriptionFeed(Base):
+    __tablename__ = "rss_subscription_feeds"
+
+    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    rss_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    subgroup_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    subgroup_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    offset: Mapped[int | None] = mapped_column(Integer)
+
+
+class SubscriptionFeedRule(Base):
+    __tablename__ = "rss_subscription_feed_rules"
+
+    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    rule_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class BangumiMapping(Base):
-    __tablename__ = "bangumi_mappings"
+    __tablename__ = "bangumi_mappings_v2"
     __table_args__ = (Index("idx_bangumi_mappings_tmdb", "tmdb_id"),
                       Index("idx_bangumi_mappings_tvdb", "tvdb_id"))
 
     bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str | None] = mapped_column(Text)
+    name_original: Mapped[str | None] = mapped_column(Text)
+    mikan_id: Mapped[int | None] = mapped_column(Integer)
+    anidb_id: Mapped[int | None] = mapped_column(Integer)
     tmdb_id: Mapped[int | None] = mapped_column(Integer)
     tvdb_id: Mapped[int | None] = mapped_column(Integer)
-    data: Mapped[dict] = mapped_column(JSON, nullable=False)
-    overrides: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    tmdb_season: Mapped[int | None] = mapped_column(Integer)
+    tvdb_season: Mapped[int | None] = mapped_column(Integer)
 
 
-class JsonDocument(Base):
-    """Mutable application documents whose legacy format is a JSON object."""
-    __tablename__ = "json_documents"
+class BangumiMappingOverride(Base):
+    __tablename__ = "bangumi_mapping_overrides"
 
-    name: Mapped[str] = mapped_column(Text, primary_key=True)
-    data: Mapped[dict] = mapped_column(JSON, nullable=False)
+    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    field: Mapped[str] = mapped_column(Text, primary_key=True)
+    text_value: Mapped[str | None] = mapped_column(Text)
+    int_value: Mapped[int | None] = mapped_column(Integer)
 
 
 class DownloadEpisode(Base):

@@ -17,9 +17,10 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .. import __version__
+from .. import __version__, data
 from ..clients.errors import MissingAPIKeyError
 from ..db import torrents as torrent_store
+from ..db import download_history
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
 from ..services import downloader, initial_rss_poll
 from ..services.resource_monitor import worker as resource_worker
@@ -42,6 +43,14 @@ _frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 async def lifespan(_app: FastAPI):
     """Startup/shutdown handling (replaces the deprecated @app.on_event)."""
     # ── Startup ──
+    def migrate_user_data() -> None:
+        # Complete all SQLite schema upgrades before background workers read
+        # subscriptions or download history.
+        data.mapping_count()
+        data.list_subscriptions()
+        download_history.ensure_imported(data._HIST_FILE)
+
+    await asyncio.to_thread(migrate_user_data)
     # Mount static assets after all routes are registered (production mode)
     if _frontend_dist.exists() and _frontend_dist.is_dir():
         assets_dir = _frontend_dist / "assets"

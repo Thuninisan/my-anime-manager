@@ -5,6 +5,13 @@ import re
 
 from .connection import new_session
 from .models import ResourceSource
+from . import structured_values
+
+
+def _downloadtag(session, source: ResourceSource) -> dict:
+    return {**structured_values.read(session, "resource_source", source.name,
+                                     "downloadtag_extra", {}),
+            "tag": source.download_tag, "attribute": source.download_attribute}
 
 
 def list_sources() -> dict[str, dict]:
@@ -13,11 +20,13 @@ def list_sources() -> dict[str, dict]:
         for slug, config in SOURCES.items():
             if session.get(ResourceSource, slug) is None:
                 session.add(ResourceSource(name=slug, rss_url=config["rss_url"],
-                                           downloadtag=config["downloadtag"],
+                                           download_tag=config["downloadtag"]["tag"],
+                                           download_attribute=config["downloadtag"].get("attribute"),
                                            index_type=config["index_type"]))
         session.flush()
         return {source.name: {"name": source.name, "rss_url": source.rss_url,
-                              "downloadtag": source.downloadtag, "index_type": source.index_type}
+                              "downloadtag": _downloadtag(session, source),
+                              "index_type": source.index_type}
                 for source in session.scalars(select(ResourceSource))}
 
 
@@ -36,7 +45,11 @@ def save_source(name: str, rss_url: str, downloadtag: dict, index_type: str) -> 
             source = ResourceSource(name=name)
             session.add(source)
         source.rss_url = rss_url
-        source.downloadtag = downloadtag
+        source.download_tag = downloadtag["tag"]
+        source.download_attribute = downloadtag.get("attribute")
+        structured_values.replace(session, "resource_source", name, "downloadtag_extra",
+                                  {key: value for key, value in downloadtag.items()
+                                   if key not in {"tag", "attribute"}})
         source.index_type = index_type
     return {"name": name, "rss_url": rss_url, "downloadtag": downloadtag,
             "index_type": index_type}

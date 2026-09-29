@@ -8,10 +8,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert
 
 from .connection import new_session
-from .models import DownloadEpisode, JsonDocument, LegacyImport
+from .models import DownloadEpisode, LegacyImport
+from . import structured_values
 
 logger = logging.getLogger(__name__)
 IMPORT_NAME = "download_episodes:v1"
+DOCUMENT_IMPORT_NAME = "download_history:relational:v2"
 FIELDS = ("rss_url", "guid", "source", "pub_date", "info_hash", "at",
           "tmdb_ep", "tmdb_season", "tvdb_ep", "tmdb_ep_calc", "fail_count")
 
@@ -26,29 +28,44 @@ def _entry(row):
 def ensure_imported(path: Path):
     with new_session() as session, session.begin():
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
-        if session.get(LegacyImport, IMPORT_NAME):
+        if session.get(LegacyImport, DOCUMENT_IMPORT_NAME):
             return
-        old = session.get(JsonDocument, "download_history")
-        document = old.data if old else json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        old_table = session.connection().exec_driver_sql(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='json_documents'").first()
+        old_raw = session.connection().exec_driver_sql(
+            "SELECT data FROM json_documents WHERE name='download_history'").scalar() if old_table else None
+        document = (json.loads(old_raw) if old_raw else
+                    json.loads(path.read_text(encoding="utf-8")) if
+                    session.get(LegacyImport, IMPORT_NAME) is None and path.is_file() else {})
         if not isinstance(document, dict) or not isinstance(document.get("episodes", {}), dict):
             raise ValueError("Invalid legacy download history")
-        if old is None and document:
-            session.add(JsonDocument(name="download_history", data=document))
+        if old_table:
+            other = session.connection().exec_driver_sql(
+                "SELECT name FROM json_documents WHERE name != 'download_history'").first()
+            if other:
+                raise ValueError(f"Unexpected legacy JSON document: {other[0]}")
+        structured_values.replace(session, "history", "download_history", "metadata",
+                                  {key: value for key, value in document.items() if key != "episodes"})
         count = 0
-        for bangumi_key, episodes in document.get("episodes", {}).items():
-            if not isinstance(episodes, dict):
-                raise ValueError("Invalid legacy download history episodes")
-            for episode_key, entry in episodes.items():
-                if not isinstance(entry, dict):
-                    raise ValueError("Invalid legacy download history entry")
-                values = {field: entry[field] for field in FIELDS if field in entry}
-                values["fail_count"] = entry.get("fail_count") or 0
-                values["status"] = "downloaded" if any(entry.get(k) for k in ("source", "at", "guid", "info_hash")) else "failed"
-                session.execute(insert(DownloadEpisode).values(
-                    bangumi_id=int(bangumi_key), episode_number=int(episode_key), **values
-                ).on_conflict_do_nothing(index_elements=[DownloadEpisode.bangumi_id, DownloadEpisode.episode_number]))
-                count += 1
-        session.add(LegacyImport(name=IMPORT_NAME))
+        if session.get(LegacyImport, IMPORT_NAME) is None:
+            for bangumi_key, episodes in document.get("episodes", {}).items():
+                if not isinstance(episodes, dict):
+                    raise ValueError("Invalid legacy download history episodes")
+                for episode_key, entry in episodes.items():
+                    if not isinstance(entry, dict):
+                        raise ValueError("Invalid legacy download history entry")
+                    values = {field: entry[field] for field in FIELDS if field in entry}
+                    values["fail_count"] = entry.get("fail_count") or 0
+                    values["status"] = "downloaded" if any(entry.get(k) for k in ("source", "at", "guid", "info_hash")) else "failed"
+                    session.execute(insert(DownloadEpisode).values(
+                        bangumi_id=int(bangumi_key), episode_number=int(episode_key), **values
+                    ).on_conflict_do_nothing(index_elements=[DownloadEpisode.bangumi_id, DownloadEpisode.episode_number]))
+                    count += 1
+            session.add(LegacyImport(name=IMPORT_NAME))
+        session.flush()
+        if old_table:
+            session.connection().exec_driver_sql("DROP TABLE json_documents")
+        session.add(LegacyImport(name=DOCUMENT_IMPORT_NAME))
         logger.info("Imported %d download episodes", count)
 
 
@@ -84,8 +101,7 @@ def legacy_document(path: Path):
     """Compatibility view for callers of the private _load_hist helper."""
     ensure_imported(path)
     with new_session() as session:
-        old = session.get(JsonDocument, "download_history")
-        result = {k: v for k, v in (old.data if old else {}).items() if k != "episodes"}
+        result = structured_values.read(session, "history", "download_history", "metadata", {})
         episodes = {}
         for row in session.scalars(select(DownloadEpisode)):
             episodes.setdefault(str(row.bangumi_id), {})[str(row.episode_number)] = _entry(row)
