@@ -2,8 +2,11 @@ import { useEffect, useState } from 'react';
 import { listBangumiResources, type BangumiResource } from '@/api/resourcesApi';
 import { DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogBody } from '@/components/ui/dialog';
 import PosterCard from '@/components/shared/PosterCard';
+import { Button } from '@/components/ui/button';
+import { useNavigate } from 'react-router-dom';
 
 export default function ResourcesPage() {
+  const navigate = useNavigate();
   const [items, setItems] = useState<BangumiResource[]>([]);
   const [selected, setSelected] = useState<BangumiResource | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,8 +50,15 @@ export default function ResourcesPage() {
             <ul className="max-h-[60vh] space-y-2 overflow-y-auto">
               {selected?.torrents.map((torrent) => (
                 <li key={torrent.resource_id} className="rounded-lg border border-border p-3 text-sm">
-                  <p className="break-all font-medium">{torrent.name}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{[torrent.video_codec, torrent.source].filter(Boolean).join(' · ')}</p>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="break-all font-medium">{torrent.name}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{[torrent.video_codec, torrent.source].filter(Boolean).join(' · ')}</p>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={() => navigate('/torrent', { state: { resourceId: torrent.resource_id } })}>
+                      转到下载页面
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>

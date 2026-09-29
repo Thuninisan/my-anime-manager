@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def missing_index_key(index_type: str) -> str | None:
     """Return the setting needed for recognition, if it is not configured."""
     setting = {"tvdb": "TVDB_API_KEY", "tmdb": "TMDB_API_KEY"}.get(index_type)
-    if setting and not getattr(config, setting, ""):
+    if setting and not getattr(config, setting, "").strip():
         return setting
     return None
 

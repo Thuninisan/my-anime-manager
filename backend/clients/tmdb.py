@@ -4,6 +4,7 @@ import httpx
 
 from .. import config
 from ..utils.http_retry import fetch_with_retry
+from .errors import MissingAPIKeyError
 
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/original"
 _BASE = "https://api.themoviedb.org/3"
@@ -22,10 +23,13 @@ async def _tmdb_request(
     merged = dict(_BASE_PARAMS)
     if params:
         merged.update(params)
+    api_key = config.TMDB_API_KEY.strip()
+    if not api_key:
+        raise MissingAPIKeyError("TMDB_API_KEY")
     return await fetch_with_retry(
         f"{_BASE}{path}",
         params=merged,
-        headers={"Authorization": f"Bearer {config.TMDB_API_KEY}"},
+        headers={"Authorization": f"Bearer {api_key}"},
         timeout=30.0,
         label=label,
     )

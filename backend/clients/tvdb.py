@@ -11,6 +11,7 @@ import httpx
 
 from .. import config
 from ..utils.http_retry import fetch_with_retry
+from .errors import MissingAPIKeyError
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +28,11 @@ async def login() -> str:
     without re-authenticating.
     """
     global _token
+    apikey = config.TVDB_API_KEY.strip()
+    if not apikey:
+        raise MissingAPIKeyError("TVDB_API_KEY")
     if _token:
         return _token
-
-    apikey = config.TVDB_API_KEY
-    if not apikey:
-        raise RuntimeError("TVDB_API_KEY is not configured")
 
     url = f"{_BASE}/login"
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -70,6 +70,8 @@ def _clear_token() -> None:
 async def _ensure_auth() -> str:
     """Return a valid JWT token, logging in if necessary."""
     global _token
+    if not config.TVDB_API_KEY.strip():
+        raise MissingAPIKeyError("TVDB_API_KEY")
     if _token:
         return _token
     return await login()

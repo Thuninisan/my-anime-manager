@@ -67,16 +67,28 @@ export function useSubscriptions(): UseSubscriptionsReturn {
       };
     }
 
-    const sub = onProgress
-      ? await rssApi.createSubscriptionWithProgress(body, onProgress)
-      : await rssApi.createSubscription(body);
+    let sub: SubscriptionOut;
+    try {
+      if (onProgress) {
+        sub = await rssApi.createSubscriptionWithProgress(body, onProgress, !existing);
+      } else {
+        sub = await rssApi.createSubscription(body);
+        if (!existing) {
+          await rssApi.waitForInitialPoll(body.bangumi_id);
+          sub = (await rssApi.listSubscriptions()).find(s => s.bangumi_id === body.bangumi_id) ?? sub;
+        }
+      }
+    } catch (error) {
+      await refresh();
+      throw error;
+    }
 
     setSubscriptions(prev => {
       const idx = prev.findIndex(s => s.bangumi_id === result.bangumi_id);
       if (idx >= 0) { const next = [...prev]; next[idx] = sub; return next; }
       return [...prev, sub];
     });
-  }, [subscriptions]);
+  }, [subscriptions, refresh]);
 
   const unsubscribe = useCallback(async (bangumiId: number, deleteFiles?: boolean) => {
     await rssApi.deleteSubscription(bangumiId, deleteFiles);

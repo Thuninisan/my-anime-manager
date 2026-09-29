@@ -13,6 +13,7 @@ export default function TorrentPage() {
   const [searchResult, setSearchResult] = useState<any>(null);
   const [augmentedEpData, setAugmentedEpData] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
+  const [resourceLoading, setResourceLoading] = useState(false);
   const [collections, setCollections] = useState<TorrentCollection[]>([]);
   const [collectionsError, setCollectionsError] = useState<string | null>(null);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
@@ -37,10 +38,20 @@ export default function TorrentPage() {
 
   useEffect(() => {
     if (!replacement?.resourceId) return;
+    let active = true;
+    setResourceLoading(true);
+    setError(null);
+    setSearchResult(null);
     void previewResourceTorrent(replacement.resourceId).then((result) => {
+      if (!active) return;
       setSearchResult(result);
       setAugmentedEpData(null);
-    }).catch((cause) => setError(cause instanceof Error ? cause.message : '资源种子预览失败'));
+    }).catch((cause) => {
+      if (active) setError(cause instanceof Error ? cause.message : '资源种子预览失败');
+    }).finally(() => {
+      if (active) setResourceLoading(false);
+    });
+    return () => { active = false; };
   }, [replacement?.resourceId]);
 
   // Parse-and-search handler for the upload dropzone
@@ -67,8 +78,9 @@ export default function TorrentPage() {
   return (
     <>
       {replacement?.replaceBangumiId && <div className="mb-4 rounded-lg border border-primary p-4 text-sm">正在替换 {replacement.replaceName || replacement.replaceBangumiId} 的 RSS 文件。请上传 BD 种子，并逐集确认映射。</div>}
+      {resourceLoading && <p role="status" className="mb-4 rounded-lg border border-border p-4 text-sm">正在解析资源种子…</p>}
       {/* Upload dropzone — always visible, dimmed when overlay is open */}
-      <div className={showOverlay ? 'opacity-40 pointer-events-none select-none' : ''}>
+      <div className={showOverlay || resourceLoading ? 'opacity-40 pointer-events-none select-none' : ''}>
         <TorrentUpload onParse={handleParseTorrent} />
       </div>
 
@@ -116,7 +128,10 @@ export default function TorrentPage() {
             <p className="text-sm text-muted-foreground mb-6 whitespace-pre-wrap">{error}</p>
             <button
               className="inline-flex items-center gap-2 rounded-lg bg-primary text-primary-foreground px-5 py-2.5 text-sm font-semibold hover:bg-primary/85 shadow-md shadow-primary/15 transition cursor-pointer"
-              onClick={() => setError(null)}
+              onClick={() => {
+                setError(null);
+                if (replacement?.resourceId) navigate('/torrent', { replace: true, state: null });
+              }}
             >
               Try Again
             </button>
@@ -131,7 +146,7 @@ export default function TorrentPage() {
             <span className="text-sm font-semibold text-destructive">Error</span>
             <button
               className="text-muted-foreground hover:text-foreground text-lg leading-none cursor-pointer"
-              onClick={() => setSearchResult(null)}
+              onClick={handleClosePreview}
             >
               &times;
             </button>

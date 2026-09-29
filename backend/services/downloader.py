@@ -97,6 +97,20 @@ async def run_once():
     await _poll_subscriptions()
 
 
+async def poll_subscription(bangumi_id: int) -> dict:
+    """Poll one saved subscription without changing the full worker status."""
+    async with _worker_lock:
+        with operation_context(new_operation_id("rss")):
+            sub = next((item for item in list_subscriptions()
+                        if item["bangumi_id"] == bangumi_id), None)
+            if sub is None:
+                raise ValueError(f"订阅不存在: {bangumi_id}")
+            if sub.get("active") == 0:
+                return {"state": "skipped", "downloaded": 0, "message": "订阅已停用"}
+            downloaded = await _process_subscription(sub, strict=True)
+            return {"state": "completed", "downloaded": downloaded, "message": "首次轮询完成"}
+
+
 async def check_qbit() -> dict:
     """Test qBittorrent connectivity and return status info."""
     try:
@@ -180,12 +194,12 @@ async def _poll_subscriptions_with_context():
         _worker_status["running"] = False
 
 
-async def _process_subscription(sub: dict):
+async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
     bangumi_id = sub["bangumi_id"]
 
     # Skip completed subscriptions
     if sub.get("active") == 0:
-        return
+        return 0
 
     primary = sub.get("primary", {})
     backup = sub.get("backup", {})
@@ -207,11 +221,14 @@ async def _process_subscription(sub: dict):
             extra_exclude_patterns=primary_exclude, source="primary",
             bgm_sortrange=bgm_sortrange, air_date=air_date,
             rss_offset=primary_offset,
+            strict=strict,
         )
         new_downloads = 0
         for item in primary_items:
             if await _download_item(item, bangumi_id, "primary", sub):
                 new_downloads += 1
+            elif strict:
+                raise RuntimeError(f"主订阅资源处理失败: {item.get('title', '?')}")
     else:
         new_downloads = 0
 
@@ -228,14 +245,19 @@ async def _process_subscription(sub: dict):
             extra_exclude_patterns=backup_exclude, source="backup",
             bgm_sortrange=bgm_sortrange, air_date=air_date,
             rss_offset=backup_offset,
+            strict=strict,
         )
         for item in backup_items:
             if await _download_item(item, bangumi_id, "backup", sub):
                 new_downloads += 1
+            elif strict:
+                raise RuntimeError(f"副订阅资源处理失败: {item.get('title', '?')}")
 
     if new_downloads > 0:
         logger.info("RSS 下载新集: bangumi_id=%s name=%s count=%d", bangumi_id, name, new_downloads)
-        _worker_status["downloaded"] += new_downloads
+        if not strict:
+            _worker_status["downloaded"] += new_downloads
+    return new_downloads
 
 
 async def _refresh_sortrange(bangumi_id: int, sub: dict):
@@ -300,6 +322,7 @@ async def _fetch_passed_items(
     bgm_sortrange: list[int] | None = None,
     air_date: str = "",
     rss_offset: int | None = None,
+    strict: bool = False,
 ) -> list[dict]:
     """Fetch RSS and return items that pass filter AND aren't downloaded yet.
 
@@ -325,6 +348,8 @@ async def _fetch_passed_items(
         )
     except Exception as e:
         logger.warning(f"   ⚠️ RSS 获取失败: {e}")
+        if strict:
+            raise
         return []
 
     # Sort RSS items by pub_date (earliest first)

@@ -14,6 +14,7 @@ from .. import config
 from ..db import torrents as torrent_store
 from . import state
 from ..clients import bangumi as bgm_client
+from ..clients.errors import MissingAPIKeyError
 from ..clients.qbittorrent import (
     add_torrent,
     get_torrent_files,
@@ -285,6 +286,9 @@ async def torrent_parse_and_search(file: UploadFile = File(...)):
     try:
         from ..services.torrent.preview import parse_and_search
         result = await parse_and_search(tmp_path)
+    except MissingAPIKeyError:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
     except Exception as e:
         Path(tmp_path).unlink(missing_ok=True)
         logger.exception("种子预览解析失败")

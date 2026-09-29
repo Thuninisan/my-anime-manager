@@ -98,17 +98,22 @@ export default function MikanSearchDialog({ open, bangumiId, bangumiName, meta, 
     setManualError('');
     const toastId = showLoadingToast('订阅中...');
     try {
+      const existed = (await rssApi.listSubscriptions()).some(s => s.bangumi_id === bangumiId);
       await rssApi.manualSubscribe({
         name: bangumiName,
         rss_url: url,
         bangumi_id: bangumiId,
         backup_rss_url: manualBackupUrl.trim(),
       });
+      if (!existed) {
+        await rssApi.waitForInitialPoll(bangumiId, message => updateToast(toastId, message, 'loading'));
+      }
       updateToast(toastId, '订阅完成', 'success');
       onManualSubscribed();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : '订阅失败';
       updateToast(toastId, msg, 'error');
+      if (msg.startsWith('订阅已保存')) onManualSubscribed();
       setManualError(msg);
     } finally {
       setManualSubscribing(false);

@@ -20,6 +20,7 @@ from ..clients.qbittorrent import (
     login as qb_login,
 )
 from ..services import downloader
+from ..services import initial_rss_poll
 from ..services import rss as rss_service
 from ..services import rss_poster
 from ..services import tmdb as tmdb_service
@@ -185,6 +186,7 @@ async def list_subscriptions():
 @router.post("/api/rss/subscriptions", response_model=SubscriptionOut, status_code=201)
 async def create_subscription(body: SubscriptionIn):
     """Add or update a subscription.  The body is the complete desired state."""
+    is_new = not any(s["bangumi_id"] == body.bangumi_id for s in data.list_subscriptions())
     sub = data.add_subscription(
         name=body.name,
         rss_url=body.rss_url,
@@ -213,6 +215,9 @@ async def create_subscription(body: SubscriptionIn):
 
     sub["poster_url"] = rss_poster.poster_url(body.bangumi_id)
 
+    if is_new:
+        initial_rss_poll.start(body.bangumi_id)
+
     return sub
 
 
@@ -223,6 +228,7 @@ async def manual_subscribe(body: ManualSubscribeIn):
     Used when Mikan search returns no results and the user enters RSS
     URLs directly.  No subtitle group is associated (subgroup_id = 0).
     """
+    is_new = not any(s["bangumi_id"] == body.bangumi_id for s in data.list_subscriptions())
     sub = data.add_subscription(
         name=body.name,
         rss_url=body.rss_url,
@@ -234,7 +240,18 @@ async def manual_subscribe(body: ManualSubscribeIn):
     eps = data.get_all_episodes(sub["bangumi_id"])
     sub["downloaded_count"] = len(eps)
     sub["poster_url"] = rss_poster.poster_url(body.bangumi_id)
+    if is_new:
+        initial_rss_poll.start(body.bangumi_id)
     return SubscriptionOut(**sub)
+
+
+@router.get("/api/rss/subscriptions/{bangumi_id}/initial-poll")
+async def initial_poll_status(bangumi_id: int):
+    """Return progress of the server-owned first poll for a new subscription."""
+    status = initial_rss_poll.get_status(bangumi_id)
+    if status is None:
+        raise HTTPException(404, "没有首次轮询任务")
+    return status
 
 
 ENRICH_GROUPS = ("bgm", "tvdb", "tmdb", "series_name")

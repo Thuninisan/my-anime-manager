@@ -12,14 +12,16 @@ from time import perf_counter
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .. import __version__
+from ..clients.errors import MissingAPIKeyError
 from ..db import torrents as torrent_store
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
-from ..services import downloader
+from ..services import downloader, initial_rss_poll
 from ..services.resource_monitor import worker as resource_worker
 from . import state
 from .routes_downloader import router as downloader_router
@@ -70,6 +72,7 @@ async def lifespan(_app: FastAPI):
     # ── Shutdown ──
     logger.info("Shutting down background workers...")
     recovery_task.cancel()
+    await initial_rss_poll.stop()
     await resource_worker.stop()
 
     # Cancel watch worker
@@ -105,6 +108,11 @@ app = FastAPI(
     version=__version__,
     lifespan=lifespan,
 )
+
+
+@app.exception_handler(MissingAPIKeyError)
+async def missing_api_key_handler(_request: Request, exc: MissingAPIKeyError):
+    return JSONResponse(status_code=503, content={"detail": str(exc)})
 
 
 @app.middleware("http")

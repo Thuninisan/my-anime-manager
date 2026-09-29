@@ -119,14 +119,45 @@ export async function createSubscription(sub: SubscriptionIn): Promise<Subscript
   return res.json();
 }
 
+export interface InitialPollStatus {
+  state: 'enriching' | 'polling' | 'completed' | 'skipped' | 'failed';
+  message: string;
+  downloaded: number;
+  finished_at: string;
+}
+
+export async function waitForInitialPoll(bangumiId: number, onProgress?: (msg: string) => void): Promise<InitialPollStatus> {
+  let previous = '';
+  while (true) {
+    const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}/initial-poll`, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`订阅已保存，但无法查询首次轮询状态（HTTP ${res.status}）`);
+    const status: InitialPollStatus = await res.json();
+    if (status.message !== previous) {
+      onProgress?.(status.message);
+      previous = status.message;
+    }
+    if (status.state === 'completed') return status;
+    if (status.state === 'failed' || status.state === 'skipped') {
+      throw new Error(`订阅已保存，${status.message}`);
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+}
+
 /** Subscribe and stream enrichment progress via NDJSON.
  *  Returns the enriched SubscriptionOut on success. */
 export async function createSubscriptionWithProgress(
   sub: SubscriptionIn,
   onProgress: (msg: string) => void,
+  isNew = false,
 ): Promise<SubscriptionOut> {
   // 1. Create subscription (fast, no enrichment)
   const subRes = await createSubscription(sub);
+
+  if (isNew) {
+    await waitForInitialPoll(sub.bangumi_id, onProgress);
+    return (await listSubscriptions()).find(s => s.bangumi_id === sub.bangumi_id) ?? subRes;
+  }
 
   // 2. Stream enrichment progress via NDJSON
   const enrichRes = await fetch(
