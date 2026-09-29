@@ -1,5 +1,6 @@
 """RSS subscription service — Bangumi ID → Mikan subtitle groups, feed parsing."""
 
+import asyncio
 import re
 import xml.etree.ElementTree as ET
 
@@ -135,8 +136,18 @@ async def fetch_and_parse_rss(
     extra_exclude_patterns: list[str] | None = None,
 ) -> dict:
     resp = await fetch_with_retry(rss_url, timeout=30.0, label="RSS")
+    return await asyncio.to_thread(_parse_rss, resp.text, filter_tags, bangumi_id,
+                                   extra_exclude_patterns)
 
-    root = ET.fromstring(resp.text)
+
+def _parse_rss(
+    content: str,
+    filter_tags: list[str] | None,
+    bangumi_id: int | None,
+    extra_exclude_patterns: list[str] | None,
+) -> dict:
+
+    root = ET.fromstring(content)
     channel = root.find("channel")
     feed_title = channel.findtext("title", "") if channel is not None else ""
 

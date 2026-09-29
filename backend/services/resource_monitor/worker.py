@@ -46,7 +46,7 @@ async def run_once() -> dict:
         _status["errors"] = []
         results = []
         try:
-            for source in list_sources():
+            for source in await asyncio.to_thread(list_sources):
                 try:
                     results.append(await collect_source(source))
                 except asyncio.CancelledError:
@@ -55,7 +55,7 @@ async def run_once() -> dict:
                     logger.exception("Resource feed failed: %s", source)
                     _status["errors"].append(f"{source}: {exc}")
             recognized = 0
-            for record in resource_recognitions.list_unrecognized_resources():
+            for record in await asyncio.to_thread(resource_recognitions.list_unrecognized_resources):
                 try:
                     result = await recognize_resource(record)
                     if result["status"] == "complete":

@@ -5,6 +5,7 @@ import unittest
 import asyncio
 import io
 import sys
+import time
 from contextlib import redirect_stdout
 from types import SimpleNamespace
 from pathlib import Path
@@ -90,6 +91,25 @@ class ResourceFeedTests(unittest.TestCase):
         pending.assert_called_once_with()
         recognize.assert_awaited_once_with(record)
         self.assertEqual(result["recognized"], 1)
+
+    def test_resource_poll_does_not_block_other_requests_during_database_read(self):
+        def slow_sources():
+            time.sleep(0.15)
+            return {}
+
+        async def check():
+            with (patch.object(worker, "list_sources", side_effect=slow_sources),
+                  patch.object(worker.resource_recognitions, "list_unrecognized_resources",
+                               return_value=[])):
+                poll = asyncio.create_task(worker.run_once())
+                await asyncio.sleep(0)
+                start = asyncio.get_running_loop().time()
+                await asyncio.sleep(0.02)
+                elapsed = asyncio.get_running_loop().time() - start
+                await poll
+                return elapsed
+
+        self.assertLess(asyncio.run(check()), 0.1)
 
     def test_title_season_range_and_movie(self):
         parsed = parse_title('[VCB-Studio] 咒术回战 / Jujutsu Kaisen 1080p [S1+S2+MOVIE]', 'tvdb')
