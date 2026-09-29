@@ -121,3 +121,22 @@ class JsonDocument(Base):
 
     name: Mapped[str] = mapped_column(Text, primary_key=True)
     data: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class DownloadEpisode(Base):
+    __tablename__ = "download_episodes"
+
+    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    episode_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rss_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    guid: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    pub_date: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    info_hash: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    at: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    tmdb_ep: Mapped[int | None] = mapped_column(Integer)
+    tmdb_season: Mapped[int | None] = mapped_column(Integer)
+    tvdb_ep: Mapped[int | None] = mapped_column(Integer)
+    tmdb_ep_calc: Mapped[int | None] = mapped_column(Integer)
+    fail_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="downloaded")

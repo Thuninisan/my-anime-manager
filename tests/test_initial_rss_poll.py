@@ -57,6 +57,33 @@ class InitialRssPollTests(unittest.IsolatedAsyncioTestCase):
         poll.assert_not_awaited()
         self.assertEqual(initial_rss_poll.get_status(12)["state"], "skipped")
 
+    async def test_stale_poll_snapshot_uses_saved_zero_offset(self):
+        stale = {"bangumi_id": 12, "active": 1, "primary": {"rss_url": "https://feed"}}
+        current = {"bangumi_id": 12, "active": 1,
+                   "bgm": {"sortrange": [2, 12], "air_date": "2026-09-25"},
+                   "primary": {"rss_url": "https://feed", "offset": 0}, "backup": {}}
+        with patch.object(downloader, "list_subscriptions", return_value=[current]), \
+             patch.object(downloader, "_fetch_passed_items", new_callable=AsyncMock,
+                          return_value=[]) as fetch, \
+             patch.object(downloader, "_compute_rss_offset", new_callable=AsyncMock) as compute:
+            self.assertEqual(await downloader._process_subscription(stale), 0)
+        self.assertEqual(fetch.await_args.kwargs["rss_offset"], 0)
+        compute.assert_not_awaited()
+
+    async def test_missing_zero_offset_is_recomputed_and_saved(self):
+        sub = {"bangumi_id": 12, "active": 1,
+               "bgm": {"sortrange": [2, 12], "air_date": "2026-09-25"},
+               "primary": {"rss_url": "https://feed"}, "backup": {}}
+        with patch.object(downloader, "list_subscriptions", return_value=[sub]), \
+             patch.object(downloader, "_compute_rss_offset", new_callable=AsyncMock,
+                          return_value=2), \
+             patch("backend.data.set_subscription_rss_offset", return_value=True) as save, \
+             patch.object(downloader, "_fetch_passed_items", new_callable=AsyncMock,
+                          return_value=[]) as fetch:
+            self.assertEqual(await downloader._process_subscription(sub), 0)
+        save.assert_called_once_with(12, "primary", 0)
+        self.assertEqual(fetch.await_args.kwargs["rss_offset"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

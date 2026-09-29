@@ -24,6 +24,7 @@ from ..utils.rss_dates import publication_datetime, published_before_air_date
 from .enrich import (
     _bgm_ep_cache,
     _get_bangumi_episodes,
+    _compute_rss_offset,
     enrich_subscription,
 )
 from .nfo import generate_metadata, format_download_path
@@ -199,6 +200,11 @@ async def _poll_subscriptions_with_context():
 async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
     bangumi_id = sub["bangumi_id"]
 
+    # A full poll may have loaded its subscription list while enrichment was
+    # still running. Read the latest record before using its nested offsets.
+    sub = next((item for item in list_subscriptions()
+                if item["bangumi_id"] == bangumi_id), sub)
+
     # Skip completed subscriptions
     if sub.get("active") == 0:
         return 0
@@ -213,10 +219,29 @@ async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
     bgm_sortrange = bgm.get("sortrange")
     air_date = bgm.get("air_date", "")
 
+    async def resolve_offset(feed: dict, key: str) -> int | None:
+        offset = feed.get("offset")
+        if offset is not None:
+            return offset
+        rss_url = feed.get("rss_url", "")
+        if not rss_url or not bgm_sortrange or bgm_sortrange[0] <= 0 or not air_date:
+            return None
+        smallest = await _compute_rss_offset(rss_url, air_date)
+        if smallest is None:
+            logger.warning("RSS 集数偏移量仍未确定: bangumi_id=%s source=%s", bangumi_id, key)
+            return None
+        offset = bgm_sortrange[0] - smallest
+        from ..data import set_subscription_rss_offset
+        if set_subscription_rss_offset(bangumi_id, key, offset):
+            feed["offset"] = offset
+            logger.info("RSS 集数偏移量已补算: bangumi_id=%s source=%s offset=%d",
+                        bangumi_id, key, offset)
+        return offset
+
     # 1. Try primary RSS
     primary_exclude = primary.get("exclude_patterns") or []
     primary_rss = primary.get("rss_url", "")
-    primary_offset = primary.get("offset")
+    primary_offset = await resolve_offset(primary, "primary")
     if primary_rss:
         primary_items = await _fetch_passed_items(
             primary_rss, filter_tags, bangumi_id,
@@ -236,7 +261,7 @@ async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
 
     # 2. Always check backup RSS — it may have episodes the primary doesn't
     backup_url = backup.get("rss_url", "")
-    backup_offset = backup.get("offset")
+    backup_offset = await resolve_offset(backup, "backup")
     if backup_url:
         backup_tags = backup.get("filter_tags")
         if backup_tags is None:

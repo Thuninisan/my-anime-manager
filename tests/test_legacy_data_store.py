@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from backend import data
 from backend.db import connection
+from backend.db.models import JsonDocument, DownloadEpisode
 
 
 class LegacyDataStoreTests(unittest.TestCase):
@@ -101,6 +102,23 @@ class LegacyDataStoreTests(unittest.TestCase):
         self.assertTrue(data.remove_episode_record(12, 1))
         self.assertEqual(data.clear_download_history(12), 0)
         self.assertEqual(json.loads(data._HIST_FILE.read_text()), legacy)
+
+    def test_database_document_migration_and_failed_placeholder(self):
+        with connection.new_session() as session, session.begin():
+            session.add(JsonDocument(name="download_history", data={"episodes": {
+                "12": {"1": {"source": "primary", "tmdb_season": 2},
+                       "2": {"fail_count": 3, "source": "", "at": ""}}}}))
+        self.assertTrue(data.is_downloaded(12, 1))
+        self.assertFalse(data.is_downloaded(12, 2))
+        self.assertEqual(data.get_fail_count(12, 2), 3)
+        self.assertEqual(data.get_all_episodes(12)["1"]["tmdb_season"], 2)
+        with connection.new_session() as session:
+            self.assertEqual(session.get(DownloadEpisode, (12, 1)).status, "downloaded")
+        self.assertEqual(data.increment_fail_count(12, 3), 1)
+        self.assertFalse(data.is_downloaded(12, 3))
+        data.mark_downloaded(12, 3, "feed", "guid", "primary")
+        self.assertTrue(data.is_downloaded(12, 3))
+        self.assertEqual(data.get_fail_count(12, 3), 0)
 
 
 if __name__ == "__main__":

@@ -412,159 +412,114 @@ def set_subscription_rss_offset(bangumi_id: int, key: str, offset: int) -> bool:
 _HIST_FILE = _USER_DATA_DIR / "download_history.json"
 
 
+from ..db import download_history as _history
+
+
 def _load_hist() -> dict:
-    return _store.get_history(_HIST_FILE)
+    return _history.legacy_document(_HIST_FILE)
 
 
 def is_downloaded(bangumi_id: int, ep_num: int) -> bool:
-    """Check whether a specific episode of a bangumi entry is already downloaded."""
-    hist = _load_hist()
-    episodes = hist.get("episodes", {})
-    return str(ep_num) in episodes.get(str(bangumi_id), {})
+    _, status = _history.get_episode(_HIST_FILE, bangumi_id, ep_num)
+    return status == "downloaded"
 
 
 def get_episode_source(bangumi_id: int, ep_num: int) -> str | None:
-    """Return 'primary', 'backup', or None for a downloaded episode."""
-    hist = _load_hist()
-    episodes = hist.get("episodes", {})
-    entry = episodes.get(str(bangumi_id), {}).get(str(ep_num))
+    entry, _ = _history.get_episode(_HIST_FILE, bangumi_id, ep_num)
     return entry.get("source") if entry else None
 
 
 def get_episode_pub_date(bangumi_id: int, ep_num: int) -> str | None:
-    """Return the pub_date of a downloaded episode, or None."""
-    hist = _load_hist()
-    episodes = hist.get("episodes", {})
-    entry = episodes.get(str(bangumi_id), {}).get(str(ep_num))
+    entry, _ = _history.get_episode(_HIST_FILE, bangumi_id, ep_num)
     return entry.get("pub_date") if entry else None
 
 
 def remove_episode_record(bangumi_id: int, ep_num: int) -> bool:
-    """Remove a single episode record from download history. Returns True if deleted."""
-    def operation(hist):
-        episodes = hist.setdefault("episodes", {})
-        bgm_key, ep_key = str(bangumi_id), str(ep_num)
-        if bgm_key not in episodes or ep_key not in episodes[bgm_key]:
+    def operation(session, row):
+        if row is None:
             return False
-        del episodes[bgm_key][ep_key]
-        if not episodes[bgm_key]:
-            del episodes[bgm_key]
+        session.delete(row)
         return True
-    return _store.mutate_history(_HIST_FILE, operation)
+    return _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
 
 
 def mark_downloaded(
-    bangumi_id: int,
-    ep_num: int,
-    rss_url: str,
-    guid: str,
-    source: str,
-    pub_date: str = "",
-    info_hash: str = "",
-    tvdb_ep: int = 0,
+    bangumi_id: int, ep_num: int, rss_url: str, guid: str, source: str,
+    pub_date: str = "", info_hash: str = "", tvdb_ep: int = 0,
     tmdb_ep_calc: int = 0,
 ) -> None:
-    """Record a downloaded episode, overwriting any prior record for the same ep.
+    from ..db.models import DownloadEpisode
 
-    Preserves existing ``tmdb_ep`` and ``tmdb_season`` override fields if present.
-    """
-    def operation(hist):
-        episodes: dict[str, dict] = hist.setdefault("episodes", {})
-        bgm_key, ep_key = str(bangumi_id), str(ep_num)
-        existing = episodes.setdefault(bgm_key, {}).get(ep_key, {})
-        episodes[bgm_key][ep_key] = {
-            "rss_url": rss_url, "guid": guid, "source": source,
-            "pub_date": pub_date, "info_hash": info_hash,
-            "at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            "tmdb_ep": existing.get("tmdb_ep"),
-            "tmdb_season": existing.get("tmdb_season"),
-            "tvdb_ep": tvdb_ep or existing.get("tvdb_ep"),
-            "tmdb_ep_calc": tmdb_ep_calc or existing.get("tmdb_ep_calc"),
-        }
-    _store.mutate_history(_HIST_FILE, operation)
+    def operation(session, row):
+        if row is None:
+            row = DownloadEpisode(bangumi_id=bangumi_id, episode_number=ep_num)
+            session.add(row)
+        row.rss_url = rss_url
+        row.guid = guid
+        row.source = source
+        row.pub_date = pub_date
+        row.info_hash = info_hash
+        row.at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        row.tvdb_ep = tvdb_ep or row.tvdb_ep
+        row.tmdb_ep_calc = tmdb_ep_calc or row.tmdb_ep_calc
+        row.fail_count = 0
+        row.status = "downloaded"
+    _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
 
 
 def set_episode_overrides(
-    bangumi_id: int, ep_num: int,
-    tmdb_ep: int | None = None,
+    bangumi_id: int, ep_num: int, tmdb_ep: int | None = None,
     tmdb_season: int | None = None,
 ) -> bool:
-    """Set TMDB episode/season overrides for a downloaded episode.
-
-    Returns False if the episode record doesn't exist.
-    """
-    def operation(hist):
-        episodes: dict[str, dict] = hist.setdefault("episodes", {})
-        bgm_key, ep_key = str(bangumi_id), str(ep_num)
-        if bgm_key not in episodes or ep_key not in episodes[bgm_key]:
+    def operation(session, row):
+        if row is None:
             return False
         if tmdb_ep is not None:
-            episodes[bgm_key][ep_key]["tmdb_ep"] = tmdb_ep
+            row.tmdb_ep = tmdb_ep
         if tmdb_season is not None:
-            episodes[bgm_key][ep_key]["tmdb_season"] = tmdb_season
+            row.tmdb_season = tmdb_season
         return True
-    saved = _store.mutate_history(_HIST_FILE, operation)
-    if not saved:
-        return False
-    logger.info("overrides set for bangumi=%d sort=%d: tmdb_ep=%s tmdb_season=%s",
-                bangumi_id, ep_num, tmdb_ep, tmdb_season)
-    return True
+    saved = _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
+    if saved:
+        logger.info("overrides set for bangumi=%d sort=%d: tmdb_ep=%s tmdb_season=%s",
+                    bangumi_id, ep_num, tmdb_ep, tmdb_season)
+    return saved
 
 
 def get_all_episodes(bangumi_id: int) -> dict[str, dict]:
-    """Return {ep_num: {rss_url, guid, source, at}, ...} for a bangumi entry."""
-    hist = _load_hist()
-    return hist.get("episodes", {}).get(str(bangumi_id), {})
+    return _history.get_all(_HIST_FILE, bangumi_id)
 
 
 def clear_download_history(bangumi_id: int) -> int:
-    """Remove ALL download history entries for a bangumi_id. Returns count."""
-    def operation(hist):
-        episodes = hist.setdefault("episodes", {})
-        return len(episodes.pop(str(bangumi_id), {}))
-    return _store.mutate_history(_HIST_FILE, operation)
+    return _history.clear(_HIST_FILE, bangumi_id)
 
-
-# ── Failure count tracking ───────────────────────────────────────────
-# When a .torrent download fails repeatedly we persist a fail_count so
-# the downloader can eventually give up instead of retrying forever.
 
 MAX_FAIL_COUNT = 5
 
 
 def get_fail_count(bangumi_id: int, ep_num: int) -> int:
-    """Return the consecutive failure count for an episode, or 0."""
-    hist = _load_hist()
-    episodes = hist.get("episodes", {})
-    entry = episodes.get(str(bangumi_id), {}).get(str(ep_num))
+    entry, _ = _history.get_episode(_HIST_FILE, bangumi_id, ep_num)
     return entry.get("fail_count", 0) if entry else 0
 
 
 def increment_fail_count(bangumi_id: int, ep_num: int) -> int:
-    """Increment the failure count for an episode and return the new value.
+    from ..db.models import DownloadEpisode
 
-    If no history entry exists yet a minimal stub is created (without the
-    fields that ``mark_downloaded`` would normally fill in — the stub only
-    carries ``fail_count`` so the filter can skip the item).
-    """
-    def operation(hist):
-        episodes: dict[str, dict] = hist.setdefault("episodes", {})
-        entry = episodes.setdefault(str(bangumi_id), {}).setdefault(str(ep_num), {
-            "rss_url": "", "guid": "", "source": "",
-            "pub_date": "", "info_hash": "", "at": "",
-        })
-        entry["fail_count"] = entry.get("fail_count", 0) + 1
-        return entry["fail_count"]
-    return _store.mutate_history(_HIST_FILE, operation)
+    def operation(session, row):
+        if row is None:
+            row = DownloadEpisode(bangumi_id=bangumi_id, episode_number=ep_num,
+                                  status="failed", fail_count=0)
+            session.add(row)
+        row.fail_count += 1
+        return row.fail_count
+    return _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
 
 
 def reset_fail_count(bangumi_id: int, ep_num: int) -> None:
-    """Clear the failure count for an episode (called after a successful download)."""
-    def operation(hist):
-        entry = hist.get("episodes", {}).get(str(bangumi_id), {}).get(str(ep_num))
-        if entry:
-            entry.pop("fail_count", None)
-    _store.mutate_history(_HIST_FILE, operation)
+    def operation(session, row):
+        if row:
+            row.fail_count = 0
+    _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
 
 
 # ═══════════════════════════════════════════════════════════════════════
