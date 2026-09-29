@@ -87,5 +87,6 @@ def list_bangumi_resources() -> list[dict]:
             "name": resource.torrent_name or resource.title,
             "video_codec": snapshots.get(resource.id, {}).get("video_codec") or "",
             "source": resource.source,
+            "published_at": resource.published_at,
         })
     return list(grouped.values())

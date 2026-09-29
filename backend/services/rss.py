@@ -135,17 +135,39 @@ async def fetch_and_parse_rss(
     bangumi_id: int | None = None,
     extra_exclude_patterns: list[str] | None = None,
 ) -> dict:
+    feed = await fetch_rss_snapshot(rss_url)
+    return apply_rss_state(feed, filter_tags, bangumi_id, extra_exclude_patterns)
+
+
+async def fetch_rss_snapshot(rss_url: str) -> dict:
+    """Fetch and parse feed data without subscription or download state."""
     resp = await fetch_with_retry(rss_url, timeout=30.0, label="RSS")
-    return await asyncio.to_thread(_parse_rss, resp.text, filter_tags, bangumi_id,
-                                   extra_exclude_patterns)
+    return await asyncio.to_thread(_parse_rss, resp.text)
 
 
-def _parse_rss(
-    content: str,
-    filter_tags: list[str] | None,
-    bangumi_id: int | None,
-    extra_exclude_patterns: list[str] | None,
+def apply_rss_state(
+    feed: dict, filter_tags: list[str] | None = None,
+    bangumi_id: int | None = None,
+    extra_exclude_patterns: list[str] | None = None,
 ) -> dict:
+    """Build the legacy API view without mutating a reusable snapshot."""
+    patterns = list(dict.fromkeys([*config.RSS_EXCLUDE_PATTERNS,
+                                   *(extra_exclude_patterns or [])]))
+    items = []
+    for original in feed.get("items", []):
+        item = original.copy()
+        excluded = any(p in (item.get("guid") or item.get("title") or "") for p in patterns)
+        ep = item.get("episode_number") or 0
+        item.update(
+            excluded=excluded,
+            passed=_matches_filter(item.get("tags", []), filter_tags) and not excluded,
+            downloaded=is_downloaded(bangumi_id, ep) if bangumi_id and ep else False,
+        )
+        items.append(item)
+    return {"title": feed.get("title", ""), "items": items}
+
+
+def _parse_rss(content: str) -> dict:
 
     root = ET.fromstring(content)
     channel = root.find("channel")
@@ -153,12 +175,6 @@ def _parse_rss(
 
     ns = {"mikan": "https://mikanani.me/0.1/"}
     items: list[dict] = []
-    settings = {"exclude_patterns": config.RSS_EXCLUDE_PATTERNS}
-    exclude_patterns = list(settings.get("exclude_patterns", []))
-    if extra_exclude_patterns:
-        exclude_patterns.extend(extra_exclude_patterns)
-    # Deduplicate
-    exclude_patterns = list(dict.fromkeys(exclude_patterns))
 
     for item_elem in root.iter("item"):
         guid_elem = item_elem.find("guid")
@@ -190,18 +206,12 @@ def _parse_rss(
         parsed = anitopy_parse(text_to_parse) or {}
         item_tags = _derive_tags(parsed, text_to_parse)
         ep_num = _extract_ep_num(parsed)
-        excluded = any(p in text_to_parse for p in exclude_patterns)
-
-        # Episode-based dedup when bangumi_id available, else guid-based
-        downloaded = is_downloaded(bangumi_id, ep_num) if bangumi_id and ep_num else False
 
         items.append({
             "guid": text_to_parse, "title": title,
             "torrent_url": torrent_url, "pub_date": pub_date,
-            "size_bytes": size_bytes, "downloaded": downloaded,
+            "size_bytes": size_bytes,
             "tags": item_tags,
-            "passed": _matches_filter(item_tags, filter_tags) and not excluded,
-            "excluded": excluded,
             "episode_number": ep_num,
         })
 

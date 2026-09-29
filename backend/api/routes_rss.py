@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from .. import config, data
 from ..clients import bangumi as bgm_client
@@ -54,6 +54,15 @@ async def get_bangumi_poster(bangumi_id: int):
     return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
 
+@router.get("/api/rss/bangumi-search/{bangumi_id}/poster")
+async def get_bangumi_search_poster(bangumi_id: int):
+    poster = await rss_poster.get_search_poster(bangumi_id)
+    if poster is None:
+        raise HTTPException(404, "封面不存在")
+    image, content_type = poster
+    return Response(image, media_type=content_type, headers={"Cache-Control": "private, max-age=600"})
+
+
 # ── /api/rss/bangumi/{id} ──
 
 @router.get("/api/rss/search")
@@ -70,11 +79,18 @@ async def search_bangumi_online(q: str = ""):
         subjects = await bgm_client.search_subjects(q.strip())
     except Exception as e:
         raise HTTPException(502, f"Bangumi 搜索失败: {e}") from e
-    return [
-        {"bangumi_id": item["id"], "name": item.get("name_cn") or item.get("name") or str(item["id"]),
-         "name_original": item.get("name") or "", "date": item.get("date") or ""}
-        for item in subjects if item.get("id")
-    ]
+    results = []
+    for item in subjects:
+        if not item.get("id"):
+            continue
+        poster = (item.get("images") or {}).get("small") or ""
+        has_poster = rss_poster.remember_search_poster(item["id"], poster)
+        results.append({
+            "bangumi_id": item["id"], "name": item.get("name_cn") or item.get("name") or str(item["id"]),
+            "name_original": item.get("name") or "", "date": item.get("date") or "",
+            "poster_url": f"/api/rss/bangumi-search/{item['id']}/poster" if has_poster else "",
+        })
+    return results
 
 
 class BangumiSelection(BaseModel):
@@ -352,12 +368,18 @@ async def enrich_subscription_stream(bangumi_id: int):
             air_date = cached.get("bgm", {}).get("air_date", "")
             if bgm_sortrange and bgm_sortrange[0] > 0 and air_date:
                 first_sort = bgm_sortrange[0]
+                feeds = {}
+                for url in dict.fromkeys(url for url in (primary_rss, backup_rss) if url):
+                    try:
+                        feeds[url] = await rss_service.fetch_rss_snapshot(url)
+                    except Exception:
+                        feeds[url] = {"items": []}
                 if primary_rss:
-                    smallest = await _compute_rss_offset(primary_rss, air_date)
+                    smallest = _compute_rss_offset(feeds[primary_rss], air_date)
                     if smallest is not None:
                         primary_offset = first_sort - smallest
                 if backup_rss:
-                    smallest = await _compute_rss_offset(backup_rss, air_date)
+                    smallest = _compute_rss_offset(feeds[backup_rss], air_date)
                     if smallest is not None:
                         backup_offset = first_sort - smallest
 

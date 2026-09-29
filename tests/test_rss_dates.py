@@ -19,9 +19,7 @@ class RssDateTests(unittest.IsolatedAsyncioTestCase):
             {"episode_number": 1, "pub_date": "Thu, 24 Sep 2026 00:00:00 +0000"},
             {"episode_number": 2, "pub_date": "Fri, 25 Sep 2026 00:00:00 +0000"},
         ]}
-        with patch.object(enrich.rss_service, "fetch_and_parse_rss", new_callable=AsyncMock,
-                          return_value=feed):
-            self.assertEqual(await enrich._compute_rss_offset("https://feed", "2026-09-25"), 2)
+        self.assertEqual(enrich._compute_rss_offset(feed, "2026-09-25"), 2)
 
     async def test_second_episode_starts_bangumi_range(self):
         feed = {"items": [
@@ -32,7 +30,7 @@ class RssDateTests(unittest.IsolatedAsyncioTestCase):
             {"episode_number": 2, "pub_date": "Fri, 25 Sep 2026 00:00:00 +0000",
              "passed": True, "excluded": False},
         ]}
-        with patch.object(downloader.rss_service, "fetch_and_parse_rss", new_callable=AsyncMock,
+        with patch.object(downloader.rss_service, "fetch_rss_snapshot", new_callable=AsyncMock,
                           return_value=feed), \
              patch.object(downloader, "get_all_episodes", return_value={}), \
              patch.object(downloader, "get_fail_count", return_value=0), \
@@ -44,16 +42,16 @@ class RssDateTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_excluded_items_log_reasons(self):
         feed = {"items": [
-            {"title": "old", "episode_number": 1, "pub_date": "Thu, 24 Sep 2026 00:00:00 +0000",
+            {"title": "old", "tags": ["1080p"], "episode_number": 1, "pub_date": "Thu, 24 Sep 2026 00:00:00 +0000",
              "passed": True, "excluded": False},
-            {"title": "out of range", "episode_number": 13,
+            {"title": "out of range", "tags": ["1080p"], "episode_number": 13,
              "pub_date": "Sat, 26 Sep 2026 00:00:00 +0000",
              "passed": True, "excluded": False},
             {"title": "wrong tag", "episode_number": 2, "tags": ["720p"],
              "pub_date": "Fri, 25 Sep 2026 00:00:00 +0000",
              "passed": False, "excluded": False},
         ]}
-        with patch.object(downloader.rss_service, "fetch_and_parse_rss", new_callable=AsyncMock,
+        with patch.object(downloader.rss_service, "fetch_rss_snapshot", new_callable=AsyncMock,
                           return_value=feed), \
              patch.object(downloader, "get_all_episodes", return_value={}), \
              self.assertLogs(downloader.logger, level="INFO") as logs:

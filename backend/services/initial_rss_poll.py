@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 
 from .. import data
-from . import downloader
+from . import downloader, rss as rss_service
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +45,18 @@ async def _run(bangumi_id: int) -> None:
             raise ValueError("订阅已删除")
         primary = sub.get("primary", {}).get("rss_url", "")
         backup = sub.get("backup", {}).get("rss_url", "")
+        snapshots: dict[str, dict] = {}
+        for url in dict.fromkeys(url for url in (primary, backup) if url):
+            try:
+                snapshots[url] = await rss_service.fetch_rss_snapshot(url)
+            except Exception:
+                logger.warning("RSS 获取失败: %s", url, exc_info=True)
+                snapshots[url] = {"items": []}
+        primary_feed = snapshots.get(primary)
+        backup_feed = snapshots.get(backup)
         result = await downloader.enrich_subscription(
             bangumi_id, primary_rss_url=primary, backup_rss_url=backup,
+            primary_feed=primary_feed, backup_feed=backup_feed,
             on_progress=lambda message: job.update(message=message),
         )
         if not result:
@@ -71,7 +81,8 @@ async def _run(bangumi_id: int) -> None:
             return
 
         job.update(state="polling", message="正在轮询新订阅")
-        job.update(await downloader.poll_subscription(bangumi_id))
+        job.update(await downloader.poll_subscription(
+            bangumi_id, primary_feed=primary_feed, backup_feed=backup_feed))
     except asyncio.CancelledError:
         job.update(state="skipped", message="服务已停止，等待后续轮询")
         raise

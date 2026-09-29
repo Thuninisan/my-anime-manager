@@ -35,6 +35,7 @@ async def generate_metadata(
     series_name: str = "",
     rename_in_qbit: bool = True,
     overwrite: bool = False,
+    metadata_ctx=None,
 ) -> bool:
     """Generate NFO + images via :func:`batch_nfo_generator`, then rename in qBittorrent.
 
@@ -78,6 +79,7 @@ async def generate_metadata(
     # ── Delegate to shared NFO + image pipeline ─────────────────────
     summary = await batch_nfo_generator(
         pre_path, nfo_episodes, series_name=series_name, overwrite=overwrite,
+        metadata_ctx=metadata_ctx,
     )
     if summary.get("episodesProcessed", summary.get("nfoGenerated", 0)) == 0:
         logger.error("NFO generation produced no output")

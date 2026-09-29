@@ -39,22 +39,16 @@ async def _get_bangumi_episodes(subject_id: int) -> list[dict]:
     return eps
 
 
-async def _compute_rss_offset(rss_url: str, air_date: str) -> int | None:
+def _compute_rss_offset(feed: dict, air_date: str) -> int | None:
     """Compute the offset between RSS episode numbering and Bangumi sort.
 
-    Fetches the RSS feed, finds the smallest *episode_number* among items
+    Finds the smallest *episode_number* among items
     published on or after *air_date*, and returns that value.  The caller
     then uses ``sort = rss_ep + offset`` where *offset* is
     ``first_bangumi_sort - smallest_rss_ep``.
 
     Returns None when the feed is empty or has no items after *air_date*.
     """
-    try:
-        feed = await rss_service.fetch_and_parse_rss(rss_url)
-    except Exception:
-        logger.warning("RSS fetch failed for offset computation: %s", safe_url(rss_url))
-        return None
-
     items = feed.get("items", [])
     if not items:
         return None
@@ -71,7 +65,7 @@ async def _compute_rss_offset(rss_url: str, air_date: str) -> int | None:
             smallest = ep
 
     if smallest is not None:
-        logger.info("RSS offset: smallest_ep=%d from %s", smallest, safe_url(rss_url))
+        logger.info("RSS offset: smallest_ep=%d", smallest)
 
     return smallest
 
@@ -111,6 +105,7 @@ async def _auto_infer_tmdb(
     chain_ids: list[int],
     root_subject: dict | None,
     _emit: Callable[[str], None],
+    metadata_ctx=None,
 ) -> dict | None:
     """Try to infer a missing TMDB ID via name-based matching.
 
@@ -122,6 +117,9 @@ async def _auto_infer_tmdb(
     Returns:
         ``{"tmdb_id": int, "tmdb_season": int}`` or ``None``.
     """
+    from .nfo.metadata_context import MetadataContext
+    metadata_ctx = metadata_ctx or MetadataContext()
+
     from ..clients import tmdb as tmdb_client
     from ..services import tmdb as tmdb_service
     from ..utils.episode_name_match import fuzzy_match_episode
@@ -221,7 +219,7 @@ async def _auto_infer_tmdb(
     _emit(f"   📡 候选 TMDB ID: {unique_candidates}")
 
     try:
-        bgm_eps = await _get_bangumi_episodes(bangumi_id)
+        bgm_eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
     except Exception:
         _emit("   ⚠️ 获取 Bangumi 剧集列表失败")
         return None
@@ -243,8 +241,7 @@ async def _auto_infer_tmdb(
     for ctid in unique_candidates:
         # Determine request language from TMDB original_language
         try:
-            detail_res = await tmdb_client.get_tv_detail(ctid)
-            detail = detail_res.json()
+            detail = await metadata_ctx.get_tmdb_detail(ctid)
             orig_lang = (detail.get("original_language") or "ja").strip().lower()
         except Exception:
             orig_lang = "ja"
@@ -259,9 +256,7 @@ async def _auto_infer_tmdb(
         )
 
         try:
-            season_map = await tmdb_service.build_season_episode_map(
-                ctid, language=lang,
-            )
+            season_map = await metadata_ctx.get_tmdb_season_map(ctid, lang)
         except Exception:
             _emit(f"   ⚠️ TMDB {ctid} 获取季数据失败")
             continue
@@ -524,17 +519,21 @@ async def _compute_tvdb_ep_offset(
 async def _compute_tmdb_ep_offset(
     bangumi_id: int, tmdb_id: int, tmdb_season: int,
     _emit: Callable[[str], None],
+    metadata_ctx=None,
 ) -> int:
     """Compute TMDB episode offset via episode-name matching.
 
     Returns ``tmdb_ep_number - bgm_ep_val``, or 0 on failure.
     """
+    from .nfo.metadata_context import MetadataContext
+    metadata_ctx = metadata_ctx or MetadataContext()
+
     from ..clients import tmdb as tmdb_client
     from ..services import tmdb as tmdb_service
     from ..utils.episode_name_match import fuzzy_match_episode
 
     try:
-        eps = await _get_bangumi_episodes(bangumi_id)
+        eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
     except Exception:
         return 0
     if not eps:
@@ -546,17 +545,14 @@ async def _compute_tmdb_ep_offset(
         return 0
 
     try:
-        detail_res = await tmdb_client.get_tv_detail(tmdb_id)
-        detail = detail_res.json()
+        detail = await metadata_ctx.get_tmdb_detail(tmdb_id)
         orig_lang = (detail.get("original_language") or "ja").strip().lower()
     except Exception:
         orig_lang = "ja"
     lang = "ja" if orig_lang == "ja" else ("zh-CN" if orig_lang == "zh" else "ja")
 
     try:
-        season_map = await tmdb_service.build_season_episode_map(
-            tmdb_id, language=lang,
-        )
+        season_map = await metadata_ctx.get_tmdb_season_map(tmdb_id, lang)
     except Exception:
         _emit("   ⚠️ 获取 TMDB 季数据失败")
         return 0
@@ -591,6 +587,9 @@ async def enrich_subscription(
     on_progress: Callable[[str], Any] | None = None,
     primary_rss_url: str = "",
     backup_rss_url: str = "",
+    primary_feed: dict | None = None,
+    backup_feed: dict | None = None,
+    metadata_ctx=None,
 ) -> dict | None:
     """Enrich a subscription with Bangumi season info, sort range, rating.
 
@@ -612,6 +611,9 @@ async def enrich_subscription(
         dict with bgm_season, bgm_sortrange, tmdb_id, tmdb_season,
         bgm_rating, air_date, bgm_subject_name — or None on failure.
     """
+    from .nfo.metadata_context import MetadataContext
+    metadata_ctx = metadata_ctx or MetadataContext()
+
     def _emit(msg: str) -> None:
         if on_progress:
             on_progress(msg)
@@ -717,7 +719,7 @@ async def enrich_subscription(
             _emit("🔍 TVDB ID 缺失，启动自动推断...")
             try:
                 tvdb_result = await _auto_infer_tvdb(
-                    bangumi_id, chain_ids, root_subject, _emit,
+                    bangumi_id, chain_ids, root_subject, _emit, metadata_ctx=metadata_ctx,
                 )
                 if tvdb_result:
                     tvdb_id = tvdb_result["tvdb_id"]
@@ -763,20 +765,20 @@ async def enrich_subscription(
         tmdb_ep_offset = 0
         if tmdb_id and tmdb_season:
             if tmdb_auto_ep_number is not None:
-                eps = await _get_bangumi_episodes(bangumi_id)
+                eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
                 bgm_ep_v = eps[0].get("sort") or eps[0].get("ep", 0) if eps else 0
                 if bgm_ep_v:
                     tmdb_ep_offset = tmdb_auto_ep_number - bgm_ep_v
                     _emit(f"   📐 tmdb_ep_offset={tmdb_ep_offset} (from auto-infer: bgm_sort={bgm_ep_v} → tmdb_ep={tmdb_auto_ep_number})")
             else:
                 tmdb_ep_offset = await _compute_tmdb_ep_offset(
-                    bangumi_id, tmdb_id, tmdb_season, _emit,
+                    bangumi_id, tmdb_id, tmdb_season, _emit, metadata_ctx=metadata_ctx,
                 )
 
         tvdb_ep_offset = 0
         if tvdb_id and tvdb_season:
             if tvdb_auto_ep_number is not None:
-                eps = await _get_bangumi_episodes(bangumi_id)
+                eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
                 bgm_ep_v = eps[0].get("sort") or eps[0].get("ep", 0) if eps else 0
                 if bgm_ep_v:
                     tvdb_ep_offset = tvdb_auto_ep_number - bgm_ep_v
@@ -791,8 +793,8 @@ async def enrich_subscription(
         resolved = False  # tracks whether a higher-priority source succeeded
         if tmdb_id:
             try:
-                resp = await tmdb_client.get_tv_detail(tmdb_id, language="zh-CN")
-                tmdb_name = resp.json().get("name", "").strip()
+                detail_zh = await metadata_ctx.get_tmdb_detail(tmdb_id, "zh-CN")
+                tmdb_name = detail_zh.get("name", "").strip()
                 if tmdb_name:
                     series_name = tmdb_name
                     resolved = True
@@ -838,13 +840,25 @@ async def enrich_subscription(
         if bgm_sortrange and bgm_sortrange[0] > 0 and air_date:
             first_sort = bgm_sortrange[0]
             if primary_rss_url:
-                smallest = await _compute_rss_offset(primary_rss_url, air_date)
+                feed = primary_feed
+                if feed is None:
+                    try:
+                        feed = await rss_service.fetch_rss_snapshot(primary_rss_url)
+                    except Exception:
+                        logger.warning("RSS fetch failed for offset computation: %s", safe_url(primary_rss_url))
+                smallest = _compute_rss_offset(feed, air_date) if feed is not None else None
                 if smallest is not None:
                     primary_offset = first_sort - smallest
                     _emit(f"   📐 primary rss_offset={primary_offset} "
                           f"(first_sort={first_sort} - first_rss_ep={smallest})")
             if backup_rss_url:
-                smallest = await _compute_rss_offset(backup_rss_url, air_date)
+                feed = backup_feed
+                if feed is None:
+                    try:
+                        feed = await rss_service.fetch_rss_snapshot(backup_rss_url)
+                    except Exception:
+                        logger.warning("RSS fetch failed for offset computation: %s", safe_url(backup_rss_url))
+                smallest = _compute_rss_offset(feed, air_date) if feed is not None else None
                 if smallest is not None:
                     backup_offset = first_sort - smallest
                     _emit(f"   📐 backup rss_offset={backup_offset} "

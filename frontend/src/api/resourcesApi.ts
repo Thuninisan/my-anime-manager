@@ -25,7 +25,7 @@ export interface ResourceResult {
 export interface BangumiResource {
   bangumi_id: number;
   name: string;
-  torrents: { resource_id: number; name: string; video_codec: string; source: string }[];
+  torrents: { resource_id: number; name: string; video_codec: string | string[]; source: string; published_at: string }[];
 }
 
 export const listBangumiResources = () => apiFetch<BangumiResource[]>('/api/resources/bangumi');

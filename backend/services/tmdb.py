@@ -234,7 +234,7 @@ def find_best_episode_group(groups: list[dict]) -> dict | None:
 
 
 async def build_season_episode_map(
-    tv_id: int, language: str = "",
+    tv_id: int, language: str = "", *, tv_detail: dict | None = None,
 ) -> dict[int, dict]:
     """Build a TMDB season→episodes mapping using the default Season API.
 
@@ -259,8 +259,7 @@ async def build_season_episode_map(
     # trial-and-error approach (range(1,31) with consecutive_empty heuristic).
     logger.debug("   📡 获取节目基本信息 (season count)...")
     try:
-        detail_res = await tmdb_client.get_tv_detail(tv_id)
-        detail = detail_res.json()
+        detail = tv_detail if tv_detail is not None else (await tmdb_client.get_tv_detail(tv_id)).json()
         total_seasons = detail.get("number_of_seasons", 0)
     except Exception:
         total_seasons = 0

@@ -25,10 +25,15 @@ export default function BangumiSearchDialog({ query, results, loading, error, on
           <div className="space-y-2">
             {results.map(item => (
               <button key={item.bangumi_id} type="button" onClick={() => onSelect(item)}
-                className="w-full rounded-lg border border-border p-3 text-left hover:bg-muted cursor-pointer">
-                <span className="block text-sm font-medium">{item.name}</span>
-                {item.name_original && item.name_original !== item.name && <span className="block text-xs text-muted-foreground">{item.name_original}</span>}
-                <span className="block text-xs text-muted-foreground">ID: {item.bangumi_id}{item.date ? ` · ${item.date}` : ''}</span>
+                className="flex w-full items-center gap-3 rounded-lg border border-border p-3 text-left hover:bg-muted cursor-pointer">
+                <span className="flex h-16 w-11 shrink-0 items-center justify-center overflow-hidden rounded bg-muted text-[10px] text-muted-foreground">
+                  {item.poster_url ? <img src={item.poster_url} alt="" loading="lazy" className="h-full w-full object-cover" /> : '无封面'}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{item.name}</span>
+                  {item.name_original && item.name_original !== item.name && <span className="block text-xs text-muted-foreground">{item.name_original}</span>}
+                  <span className="block text-xs text-muted-foreground">ID: {item.bangumi_id}{item.date ? ` · ${item.date}` : ''}</span>
+                </span>
               </button>
             ))}
           </div>

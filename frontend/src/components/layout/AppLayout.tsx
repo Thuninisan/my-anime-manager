@@ -2,7 +2,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useTheme } from '@/hooks/useTheme';
 import {
-  IconSpa, IconTorrent, IconRss, IconResources, IconSettings,
+  IconSpa, IconTorrent, IconRss, IconResources, IconExplore, IconSettings,
   IconAddCircle, IconSearch, IconNotifications, IconSun, IconMoon, IconUser,
 } from '@/components/icons';
 
@@ -12,6 +12,7 @@ const PAGE_META: Record<string, { title: string; Icon: typeof IconTorrent }> = {
   '/rss': { title: 'RSS Management', Icon: IconRss },
   '/settings': { title: 'Settings', Icon: IconSettings },
   '/resources': { title: 'Resources', Icon: IconResources },
+  '/explore': { title: 'Explore', Icon: IconExplore },
 };
 
 export default function AppLayout() {
@@ -65,6 +66,18 @@ export default function AppLayout() {
           >
             <span className="group-hover:scale-110 transition-transform"><IconResources /></span>
             <span className="text-xs font-semibold tracking-wide">Resource</span>
+          </button>
+
+          <button
+            onClick={() => navigate('/explore')}
+            className={`flex items-center gap-3 p-3 rounded-lg group cursor-pointer text-left transition-all ${
+              location.pathname === '/explore'
+                ? 'text-primary font-bold bg-accent/20 border-l-2 border-primary'
+                : 'text-muted-foreground hover:bg-muted border-l-2 border-transparent'
+            }`}
+          >
+            <span className="group-hover:scale-110 transition-transform"><IconExplore /></span>
+            <span className="text-xs font-semibold tracking-wide">Explore</span>
           </button>
 
           <button

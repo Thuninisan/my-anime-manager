@@ -174,6 +174,7 @@ async def batch_nfo_generator(
     episodes: list[dict],
     series_name: str = "",
     overwrite: bool = False,
+    metadata_ctx=None,
 ) -> dict:
     """Generate NFO files + images for a batch of episodes.
 
@@ -209,6 +210,8 @@ async def batch_nfo_generator(
 
     if not episodes:
         return {"nfoGenerated": 0, "imagesDownloaded": 0}
+    from .metadata_context import MetadataContext
+    metadata_ctx = metadata_ctx or MetadataContext()
 
     template = config.RSS_PATH_TEMPLATE
 
@@ -216,13 +219,12 @@ async def batch_nfo_generator(
     unique_bgm_ids = {ep["bangumi_subject_id"] for ep in episodes}
     unique_tvdb_ids = {ep["tvdb_id"] for ep in episodes if ep.get("tvdb_id")}
     unique_tmdb_ids = {ep["tmdb_id"] for ep in episodes}
-    unique_tmdb_seasons = {(ep["tmdb_id"], ep["tmdb_season"]) for ep in episodes}
+    unique_tmdb_seasons = {ep["tmdb_id"] for ep in episodes}
 
     # ── Phase 2: Pre-fetch all data (parallel where possible) ─────────
     bgm_cache: dict[int, list[dict]] = {}
     tvdb_cache: dict[int, dict] = {}
     tmdb_show_cache: dict[int, dict] = {}
-    tmdb_season_cache: dict[tuple, dict] = {}
 
     # BGM subject names and full subject data
     bgm_subject_cache: dict[int, str] = {}
@@ -231,7 +233,7 @@ async def batch_nfo_generator(
     # BGM episodes
     async def _fetch_bgm(bgm_id: int):
         try:
-            eps = await _get_bangumi_episodes(bgm_id)
+            eps = await metadata_ctx.get_bgm_episodes(bgm_id)
             bgm_cache[bgm_id] = eps or []
         except Exception:
             logger.exception("BGM episodes fetch failed: %d", bgm_id)
@@ -239,7 +241,7 @@ async def batch_nfo_generator(
         # Also fetch subject name + full data
         try:
             from ...clients import bangumi as bgm_client
-            subject = await bgm_client.get_subject(bgm_id)
+            subject = await metadata_ctx.get_bgm_subject(bgm_id)
             bgm_subject_cache[bgm_id] = subject.get("name_cn") or subject.get("name", str(bgm_id))
             bgm_subject_data_cache[bgm_id] = subject
         except Exception:
@@ -248,7 +250,7 @@ async def batch_nfo_generator(
     # TVDB series
     async def _fetch_tvdb(tid: int):
         try:
-            data = await fetch_tvdb_series_episodes(tid)
+            data = await metadata_ctx.get_tvdb_series(tid)
             if data:
                 tvdb_cache[tid] = data
         except Exception:
@@ -257,8 +259,7 @@ async def batch_nfo_generator(
     # TMDB show detail
     async def _fetch_tmdb_show(tid: int):
         try:
-            resp = await tmdb_client.get_tv_detail(tid, language="zh-CN")
-            detail = resp.json()
+            detail = await metadata_ctx.get_tmdb_detail(tid, "zh-CN")
             tmdb_show_cache[tid] = {
                 "title": detail.get("name", ""),
                 "original_title": detail.get("original_name", ""),
@@ -276,12 +277,11 @@ async def batch_nfo_generator(
             logger.exception("TMDB show fetch failed: %d", tid)
 
     # TMDB season episodes (zh-CN for Chinese plot/names)
-    async def _fetch_tmdb_season(tid: int, sn: int):
+    async def _fetch_tmdb_season(tid: int):
         try:
-            season_map = await tmdb_service.build_season_episode_map(tid, language="zh-CN")
-            tmdb_season_cache[(tid, sn)] = season_map
+            season_map = await metadata_ctx.get_tmdb_season_map(tid, "zh-CN")
         except Exception:
-            logger.exception("TMDB season fetch failed: %d S%d", tid, sn)
+            logger.exception("TMDB season fetch failed: %d", tid)
 
     # Run all pre-fetches concurrently
     tasks = []
@@ -291,16 +291,16 @@ async def batch_nfo_generator(
         tasks.append(_fetch_tvdb(tid))
     for tid in unique_tmdb_ids:
         tasks.append(_fetch_tmdb_show(tid))
-    for (tid, sn) in unique_tmdb_seasons:
-        tasks.append(_fetch_tmdb_season(tid, sn))
+    for tid in unique_tmdb_seasons:
+        tasks.append(_fetch_tmdb_season(tid))
 
     await asyncio.gather(*tasks, return_exceptions=True)
 
     # ── Phase 3: Generate NFO per episode ─────────────────────────────
     nfo_count = 0
     img_count = 0
-    seen_show: set[str] = set()
-    seen_season: set[str] = set()
+    seen_show = metadata_ctx.show_assets_done
+    seen_season = metadata_ctx.season_assets_done
 
     # Collect per-episode data for deferred thumbnail + NFO generation
     pending_eps: list[dict] = []
@@ -353,7 +353,7 @@ async def batch_nfo_generator(
 
         # TMDB episode data
         tmdb_ep_data: dict = {}
-        season_map = tmdb_season_cache.get((tmdb_id, tmdb_season), {})
+        season_map = await metadata_ctx.get_tmdb_season_map(tmdb_id, "zh-CN")
         season_eps = season_map.get(str(tmdb_season), season_map.get(tmdb_season, {}))
         for tm_ep in season_eps.get("episodes", []):
             if tm_ep.get("epNum") == tmdb_ep_num:
@@ -412,6 +412,7 @@ async def batch_nfo_generator(
                     bangumi_sort=bgm_sort,
                     context=ep_context,
                     selected_source=plot_source,
+                    metadata_ctx=metadata_ctx,
                 )
                 if not zh_plot and original_plot:
                     logger.info("NFO [%s 简介] 原始简介：尝试 DeepSeek 翻译", ep_context)

@@ -6,6 +6,7 @@ import TorrentPage from '@/pages/TorrentPage';
 import RssPage from '@/pages/RssPage';
 import SettingsPage from '@/pages/SettingsPage';
 import ResourcesPage from '@/pages/ResourcesPage';
+import ExplorePage from '@/pages/ExplorePage';
 import './App.css';
 
 const router = createBrowserRouter([
@@ -18,6 +19,7 @@ const router = createBrowserRouter([
       { path: 'rss', element: <RssPage /> },
       { path: 'settings', element: <SettingsPage /> },
       { path: 'resources', element: <ResourcesPage /> },
+      { path: 'explore', element: <ExplorePage /> },
       { path: 'resource', element: <Navigate to="/resources" replace /> },
     ],
   },

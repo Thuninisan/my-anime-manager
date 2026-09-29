@@ -121,6 +121,15 @@ async def get_subject(subject_id: int) -> dict:
             ) from e
 
 
+async def get_calendar() -> list[dict]:
+    """Get Bangumi's public weekly anime broadcast calendar."""
+    await _delay()
+    async with _get_client() as client:
+        response = await _retry(client.get, "/calendar")
+        response.raise_for_status()
+        return response.json()
+
+
 async def get_relations(subject_id: int) -> list[dict]:
     """Get subject relations (prequel/sequel etc.).
 

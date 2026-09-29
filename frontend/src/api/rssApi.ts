@@ -7,6 +7,7 @@ export interface BangumiOnlineResult {
   name: string;
   name_original: string;
   date: string;
+  poster_url: string;
 }
 
 export async function searchBangumiOnline(query: string): Promise<BangumiOnlineResult[]> {

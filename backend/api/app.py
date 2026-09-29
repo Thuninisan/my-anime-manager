@@ -26,6 +26,7 @@ from ..services import downloader, initial_rss_poll
 from ..services.resource_monitor import worker as resource_worker
 from . import state
 from .routes_downloader import router as downloader_router
+from .routes_explore import router as explore_router
 from .routes_history import router as history_router
 from .routes_rss import router as rss_router
 from .routes_resources import router as resources_router
@@ -141,6 +142,7 @@ async def log_request_context(request, call_next):
         return response
 
 app.include_router(settings_router)
+app.include_router(explore_router)
 app.include_router(downloader_router)
 app.include_router(torrent_router)
 app.include_router(rss_router)

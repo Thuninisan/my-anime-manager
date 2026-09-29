@@ -34,6 +34,7 @@ async def resolve_episode_plot(
     bangumi_sort: int = 0,
     context: str = "episode.nfo",
     selected_source: list[str] | None = None,
+    metadata_ctx=None,
 ) -> str:
     """Return the best available Chinese episode plot.
 
@@ -49,7 +50,19 @@ async def resolve_episode_plot(
 
     # ── Tier 1: TMDB zh-CN ─────────────────────────────────────────
     if tmdb_id and tmdb_season is not None and tmdb_ep_num:
-        plot = await _try_tmdb_zh(tmdb_id, tmdb_season, tmdb_ep_num)
+        if metadata_ctx is None:
+            plot = await _try_tmdb_zh(tmdb_id, tmdb_season, tmdb_ep_num)
+        else:
+            plot = ""
+            try:
+                season_map = await metadata_ctx.get_tmdb_season_map(tmdb_id, "zh-CN")
+                season_data = season_map.get(tmdb_season, season_map.get(str(tmdb_season), {}))
+                for episode in season_data.get("episodes", []):
+                    if episode.get("epNum") == tmdb_ep_num:
+                        plot = (episode.get("overview") or "").strip()
+                        break
+            except Exception:
+                logger.warning("TMDB cached plot lookup failed", exc_info=True)
         if is_chinese_plot(plot):
             if selected_source is not None:
                 selected_source.append("TMDB zh-CN")
@@ -63,7 +76,18 @@ async def resolve_episode_plot(
 
     # ── Tier 2: TVDB Chinese ───────────────────────────────────────
     if tvdb_id and tvdb_season is not None and tvdb_ep:
-        plot = await _try_tvdb_zh(tvdb_id, tvdb_season, tvdb_ep)
+        if metadata_ctx is None:
+            plot = await _try_tvdb_zh(tvdb_id, tvdb_season, tvdb_ep)
+        else:
+            plot = ""
+            try:
+                data = await metadata_ctx.get_tvdb_series(tvdb_id, "zho")
+                for episode in data.get("episodes", []):
+                    if episode.get("seasonNumber") == tvdb_season and episode.get("number") == tvdb_ep:
+                        plot = (episode.get("overview") or "").strip()
+                        break
+            except Exception:
+                logger.warning("TVDB cached plot lookup failed", exc_info=True)
         if is_chinese_plot(plot):
             if selected_source is not None:
                 selected_source.append("TVDB zho")
@@ -77,7 +101,7 @@ async def resolve_episode_plot(
 
     # ── Tier 3: Bangumi → DeepSeek translate ───────────────────────
     if bangumi_id and bangumi_sort:
-        plot = await _try_bangumi_translate(bangumi_id, bangumi_sort)
+        plot = await _try_bangumi_translate(bangumi_id, bangumi_sort, metadata_ctx=metadata_ctx)
         if plot:
             if selected_source is not None:
                 selected_source.append("Bangumi → DeepSeek")
@@ -188,11 +212,11 @@ async def _try_tvdb_zh(series_id: int, season: int, ep_num: int) -> str:
     return ""
 
 
-async def _try_bangumi_translate(bangumi_id: int, sort: int) -> str:
+async def _try_bangumi_translate(bangumi_id: int, sort: int, metadata_ctx=None) -> str:
     """Extract the Japanese ``desc`` from a cached Bangumi episode and
     translate it to Chinese via DeepSeek."""
     try:
-        eps = await _get_bangumi_episodes(bangumi_id)
+        eps = await (metadata_ctx.get_bgm_episodes(bangumi_id) if metadata_ctx else _get_bangumi_episodes(bangumi_id))
     except Exception:
         logger.warning(
             "Bangumi episode list fetch failed (id=%d)", bangumi_id,

@@ -22,6 +22,53 @@ IMAGE_TYPES = {
     "image/gif": ".gif",
 }
 _locks: dict[int, asyncio.Lock] = {}
+_search_posters: dict[int, list] = {}
+SEARCH_POSTER_TTL = 600
+
+
+def remember_search_poster(bangumi_id: int, url: str) -> bool:
+    """Keep a search thumbnail in memory for ten minutes, without touching disk."""
+    if not url or not _trusted_image_url(url):
+        return False
+    previous = _search_posters.get(bangumi_id)
+    _search_posters[bangumi_id] = [url, previous[1], previous[2]] if previous and previous[0] == url else [url, None, ""]
+    loop = asyncio.get_running_loop()
+    entry = _search_posters[bangumi_id]
+    loop.call_later(SEARCH_POSTER_TTL, lambda: _search_posters.pop(bangumi_id, None) if _search_posters.get(bangumi_id) is entry else None)
+    return True
+
+
+async def get_search_poster(bangumi_id: int) -> tuple[bytes, str] | None:
+    entry = _search_posters.get(bangumi_id)
+    if not entry:
+        return None
+    if entry[1] is not None:
+        return entry[1], entry[2]
+    try:
+        proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}" if config.PROXY_HOST else None
+        async with httpx.AsyncClient(proxy=proxy, timeout=15.0, headers={"User-Agent": USER_AGENT}) as client:
+            async with client.stream("GET", entry[0]) as response:
+                response.raise_for_status()
+                content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                if content_type not in IMAGE_TYPES:
+                    return None
+                chunks = []
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > MAX_POSTER_BYTES:
+                        return None
+                    chunks.append(chunk)
+                if not size:
+                    return None
+                image = b"".join(chunks)
+                if _search_posters.get(bangumi_id) is entry:
+                    entry[1] = image
+                    entry[2] = content_type
+                return image, content_type
+    except Exception as exc:
+        logger.warning("Bangumi 搜索封面获取失败: id=%s error=%s", bangumi_id, type(exc).__name__)
+        return None
 
 
 def poster_url(bangumi_id: int) -> str:

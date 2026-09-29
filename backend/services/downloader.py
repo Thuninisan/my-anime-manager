@@ -28,6 +28,7 @@ from .enrich import (
     enrich_subscription,
 )
 from .nfo import generate_metadata, format_download_path
+from .nfo.metadata_context import MetadataContext
 from ..utils.torrent_hash import compute_info_hash
 from ..logging.logging_config import new_operation_id, operation_context, safe_url
 
@@ -100,7 +101,10 @@ async def run_once():
     await _poll_subscriptions()
 
 
-async def poll_subscription(bangumi_id: int) -> dict:
+async def poll_subscription(
+    bangumi_id: int, *, primary_feed: dict | None = None,
+    backup_feed: dict | None = None,
+) -> dict:
     """Poll one saved subscription without changing the full worker status."""
     async with _worker_lock:
         with operation_context(new_operation_id("rss")):
@@ -110,7 +114,8 @@ async def poll_subscription(bangumi_id: int) -> dict:
                 raise ValueError(f"订阅不存在: {bangumi_id}")
             if sub.get("active") == 0:
                 return {"state": "skipped", "downloaded": 0, "message": "订阅已停用"}
-            downloaded = await _process_subscription(sub, strict=True)
+            downloaded = await _process_subscription(
+                sub, strict=True, primary_feed=primary_feed, backup_feed=backup_feed)
             return {"state": "completed", "downloaded": downloaded, "message": "首次轮询完成"}
 
 
@@ -197,8 +202,12 @@ async def _poll_subscriptions_with_context():
         _worker_status["running"] = False
 
 
-async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
+async def _process_subscription(
+    sub: dict, *, strict: bool = False,
+    primary_feed: dict | None = None, backup_feed: dict | None = None,
+) -> int:
     bangumi_id = sub["bangumi_id"]
+    metadata_ctx = MetadataContext()
 
     # A full poll may have loaded its subscription list while enrichment was
     # still running. Read the latest record before using its nested offsets.
@@ -219,6 +228,24 @@ async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
     bgm_sortrange = bgm.get("sortrange")
     air_date = bgm.get("air_date", "")
 
+    snapshots: dict[str, dict] = {}
+    fetch_errors: dict[str, Exception] = {}
+    for url, supplied in ((primary.get("rss_url", ""), primary_feed),
+                          (backup.get("rss_url", ""), backup_feed)):
+        if url and supplied is not None:
+            snapshots[url] = supplied
+
+    async def get_snapshot(url: str) -> dict:
+        if url in fetch_errors:
+            raise fetch_errors[url]
+        if url not in snapshots:
+            try:
+                snapshots[url] = await rss_service.fetch_rss_snapshot(url)
+            except Exception as exc:
+                fetch_errors[url] = exc
+                raise
+        return snapshots[url]
+
     async def resolve_offset(feed: dict, key: str) -> int | None:
         offset = feed.get("offset")
         if offset is not None:
@@ -226,7 +253,12 @@ async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
         rss_url = feed.get("rss_url", "")
         if not rss_url or not bgm_sortrange or bgm_sortrange[0] <= 0 or not air_date:
             return None
-        smallest = await _compute_rss_offset(rss_url, air_date)
+        try:
+            snapshot = await get_snapshot(rss_url)
+        except Exception:
+            logger.warning("RSS 获取失败: %s", safe_url(rss_url), exc_info=True)
+            return None
+        smallest = _compute_rss_offset(snapshot, air_date)
         if smallest is None:
             logger.warning("RSS 集数偏移量仍未确定: bangumi_id=%s source=%s", bangumi_id, key)
             return None
@@ -243,16 +275,24 @@ async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
     primary_rss = primary.get("rss_url", "")
     primary_offset = await resolve_offset(primary, "primary")
     if primary_rss:
+        try:
+            primary_snapshot = await get_snapshot(primary_rss)
+        except Exception:
+            if strict:
+                raise
+            logger.warning("RSS 获取失败: %s", safe_url(primary_rss))
+            primary_snapshot = {"items": []}
         primary_items = await _fetch_passed_items(
             primary_rss, filter_tags, bangumi_id,
             extra_exclude_patterns=primary_exclude, source="primary",
             bgm_sortrange=bgm_sortrange, air_date=air_date,
             rss_offset=primary_offset,
             strict=strict,
+            feed=primary_snapshot,
         )
         new_downloads = 0
         for item in primary_items:
-            if await _download_item(item, bangumi_id, "primary", sub):
+            if await _download_item(item, bangumi_id, "primary", sub, metadata_ctx=metadata_ctx):
                 new_downloads += 1
             elif strict:
                 raise RuntimeError(f"主订阅资源处理失败: {item.get('title', '?')}")
@@ -263,6 +303,13 @@ async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
     backup_url = backup.get("rss_url", "")
     backup_offset = await resolve_offset(backup, "backup")
     if backup_url:
+        try:
+            backup_snapshot = await get_snapshot(backup_url)
+        except Exception:
+            if strict:
+                raise
+            logger.warning("RSS 获取失败: %s", safe_url(backup_url))
+            backup_snapshot = {"items": []}
         backup_tags = backup.get("filter_tags")
         if backup_tags is None:
             backup_tags = filter_tags
@@ -273,14 +320,17 @@ async def _process_subscription(sub: dict, *, strict: bool = False) -> int:
             bgm_sortrange=bgm_sortrange, air_date=air_date,
             rss_offset=backup_offset,
             strict=strict,
+            feed=backup_snapshot,
         )
         for item in backup_items:
-            if await _download_item(item, bangumi_id, "backup", sub):
+            if await _download_item(item, bangumi_id, "backup", sub, metadata_ctx=metadata_ctx):
                 new_downloads += 1
             elif strict:
                 raise RuntimeError(f"副订阅资源处理失败: {item.get('title', '?')}")
 
     if new_downloads > 0:
+        await _refresh_sortrange(bangumi_id, sub)
+        await _check_completion(bangumi_id, sub)
         logger.info("RSS 下载新集: bangumi_id=%s name=%s count=%d", bangumi_id, name, new_downloads)
         if not strict:
             _worker_status["downloaded"] += new_downloads
@@ -350,6 +400,7 @@ async def _fetch_passed_items(
     air_date: str = "",
     rss_offset: int | None = None,
     strict: bool = False,
+    feed: dict | None = None,
 ) -> list[dict]:
     """Fetch RSS and return items that pass filter AND aren't downloaded yet.
 
@@ -369,10 +420,10 @@ async def _fetch_passed_items(
     add < backup < primary < edit — higher priority replaces lower.
     """
     try:
-        feed = await rss_service.fetch_and_parse_rss(
-            rss_url, filter_tags, bangumi_id,
-            extra_exclude_patterns=extra_exclude_patterns,
-        )
+        if feed is None:
+            feed = await rss_service.fetch_rss_snapshot(rss_url)
+        feed = rss_service.apply_rss_state(
+            feed, filter_tags, bangumi_id, extra_exclude_patterns)
     except Exception as e:
         logger.warning(f"   ⚠️ RSS 获取失败: {e}")
         if strict:
@@ -500,7 +551,8 @@ async def _fetch_passed_items(
     return candidates
 
 
-async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) -> bool:
+async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict, metadata_ctx: MetadataContext | None = None) -> bool:
+    metadata_ctx = metadata_ctx or MetadataContext()
     torrent_url = item["torrent_url"]
     guid = item["guid"]
     rss_ep_num = item.get("episode_number") or 0
@@ -523,6 +575,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
             bangumi_id,
             primary_rss_url=primary_rss,
             backup_rss_url=backup_rss,
+            metadata_ctx=metadata_ctx,
         )
         if enriched:
             # Pop offsets before top-level update; write to nested keys
@@ -678,6 +731,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
                 show_dir=show_dir,
                 bgm_subject_name=bgm_subject_name,
                 series_name=series_name,
+                metadata_ctx=metadata_ctx,
             )
             if not success:
                 logger.error(f"      ❌ NFO 生成失败：TVDB 未找到对应剧集，种子已删除")
@@ -701,13 +755,6 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict) ->
 
     # Clear any previous failure count after a successful download
     reset_fail_count(bangumi_id, sort)
-
-    # Refresh sortrange from Bangumi (newly-airing shows often grow their
-    # episode list over time, so the initial range may be too small)
-    await _refresh_sortrange(bangumi_id, sub)
-
-    # Check if all episodes in the sort range are now downloaded
-    await _check_completion(bangumi_id, sub)
 
     return True
 
