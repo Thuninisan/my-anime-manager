@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.venv/
+venv/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# User data (runtime, per-installation)
+backend/data/settings.json
+backend/data/subscriptions.json
+backend/data/download_history.json
+backend/data/rss_settings.json
+backend/data/subtitles/
+backend/data/logs/
+backend/data/rss_posters/
+backend/data/torrents.json
+backend/data/resource_monitor/
+backend/data/mam.sqlite3*
+
+# Docs (reference / migration data, not runtime)
+docs/
+
+# Local agent instructions
+CLAUDE.md

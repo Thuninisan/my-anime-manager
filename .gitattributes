@@ -1,0 +1,15 @@
+# Auto-detect text files, enforce LF
+* text=auto
+
+# Source code — always LF
+*.py text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf

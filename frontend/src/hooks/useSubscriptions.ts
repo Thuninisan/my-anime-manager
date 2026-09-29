@@ -1,0 +1,92 @@
+import { useState, useEffect, useCallback } from 'react';
+import type { SubscriptionIn, SubscriptionOut } from '@/types/preview';
+import * as rssApi from '@/api/rssApi';
+
+interface UseSubscriptionsReturn {
+  subscriptions: SubscriptionOut[];
+  loading: boolean;
+  refresh: () => Promise<void>;
+  subscribe: (result: { bangumi_id: number; name: string }, group: { name: string; subgroup_id: number; rss_url: string }, role: 'primary' | 'backup', filterTags: Record<number, string[]>, excludePatterns?: Record<number, string[]>, onProgress?: (msg: string) => void) => Promise<void>;
+  unsubscribe: (bangumiId: number, deleteFiles?: boolean) => Promise<void>;
+  activate: (bangumiId: number) => Promise<void>;
+}
+
+export function useSubscriptions(): UseSubscriptionsReturn {
+  const [subscriptions, setSubscriptions] = useState<SubscriptionOut[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try { setSubscriptions(await rssApi.listSubscriptions()); } catch { /* */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const subscribe = useCallback(async (
+    result: { bangumi_id: number; name: string },
+    group: { name: string; subgroup_id: number; rss_url: string },
+    role: 'primary' | 'backup',
+    filterTags: Record<number, string[]>,
+    excludePatterns?: Record<number, string[]>,
+    onProgress?: (msg: string) => void,
+  ) => {
+    const tags = filterTags[group.subgroup_id] || [];
+    const excludes = excludePatterns?.[group.subgroup_id] || [];
+    const existing = subscriptions.find(s => s.bangumi_id === result.bangumi_id);
+
+    let body: SubscriptionIn;
+    if (role === 'primary') {
+      // Preserve existing backup info: check backup fields first,
+      // then fall back to primary fields (existing may have only backup).
+      body = {
+        name: result.name, rss_url: group.rss_url, bangumi_id: result.bangumi_id,
+        subgroup_id: group.subgroup_id, subgroup_name: group.name, filter_tags: tags,
+        backup_rss_url: existing?.backup?.rss_url || existing?.primary?.rss_url || '',
+        backup_subgroup_id: existing?.backup?.subgroup_id || existing?.primary?.subgroup_id || 0,
+        backup_subgroup_name: existing?.backup?.subgroup_name || existing?.primary?.subgroup_name || '',
+        backup_filter_tags: existing?.backup?.filter_tags ?? existing?.primary?.filter_tags ?? [],
+        download_path: existing?.download_path || '',
+        exclude_patterns: excludes,
+        backup_exclude_patterns: existing?.backup?.exclude_patterns ?? existing?.primary?.exclude_patterns ?? [],
+      };
+    } else {
+      // Preserve existing primary info: check primary fields first,
+      // then fall back to backup fields (existing may have only backup).
+      body = {
+        name: result.name, rss_url: existing?.primary?.rss_url || existing?.backup?.rss_url || '',
+        bangumi_id: result.bangumi_id,
+        subgroup_id: existing?.primary?.subgroup_id || existing?.backup?.subgroup_id || 0,
+        subgroup_name: existing?.primary?.subgroup_name || existing?.backup?.subgroup_name || '',
+        filter_tags: existing?.primary?.filter_tags ?? existing?.backup?.filter_tags ?? [],
+        backup_rss_url: group.rss_url, backup_subgroup_id: group.subgroup_id,
+        backup_subgroup_name: group.name, backup_filter_tags: tags,
+        download_path: existing?.download_path || '',
+        exclude_patterns: existing?.primary?.exclude_patterns ?? existing?.backup?.exclude_patterns ?? [],
+        backup_exclude_patterns: excludes,
+      };
+    }
+
+    const sub = onProgress
+      ? await rssApi.createSubscriptionWithProgress(body, onProgress)
+      : await rssApi.createSubscription(body);
+
+    setSubscriptions(prev => {
+      const idx = prev.findIndex(s => s.bangumi_id === result.bangumi_id);
+      if (idx >= 0) { const next = [...prev]; next[idx] = sub; return next; }
+      return [...prev, sub];
+    });
+  }, [subscriptions]);
+
+  const unsubscribe = useCallback(async (bangumiId: number, deleteFiles?: boolean) => {
+    await rssApi.deleteSubscription(bangumiId, deleteFiles);
+    setSubscriptions(prev => prev.filter(s => s.bangumi_id !== bangumiId));
+  }, []);
+
+  const activate = useCallback(async (bangumiId: number) => {
+    await rssApi.activateSubscription(bangumiId);
+    await refresh();
+  }, [refresh]);
+
+  return { subscriptions, loading, refresh, subscribe, unsubscribe, activate };
+}

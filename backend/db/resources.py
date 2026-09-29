@@ -1,0 +1,90 @@
+"""Resource repository backed by SQLAlchemy ORM sessions."""
+
+import hashlib
+from datetime import datetime, timezone
+from pathlib import Path
+
+from sqlalchemy import case, func, or_, select
+from sqlalchemy.dialects.sqlite import insert
+
+from ..utils.paths import USER_DATA_DIR
+from .connection import new_session
+from .models import Resource
+
+TORRENT_ROOT = USER_DATA_DIR / "resource_monitor" / "torrents"
+FEED_FIELDS = ("source", "source_id", "index_type", "title", "published_at", "detail_url", "torrent_url",
+               "rss_description", "info_hash", "size_label")
+UPDATE_FIELDS = {"detail_description", "detail_fetched", "info_hash", "torrent_path",
+                 "torrent_name", "torrent_files", "status", "error"}
+
+
+def _as_dict(record: Resource) -> dict:
+    return {column.key: getattr(record, column.key) for column in Resource.__table__.columns}
+
+
+def upsert_feed_item(item: dict) -> dict:
+    values = {field: item.get(field, "tmdb") if field == "index_type" else item[field]
+              for field in FEED_FIELDS}
+    with new_session() as session, session.begin():
+        statement = insert(Resource).values(**values)
+        statement = statement.on_conflict_do_update(
+            index_elements=[Resource.source, Resource.source_id],
+            set_={
+                "title": statement.excluded.title,
+                "published_at": statement.excluded.published_at,
+                "detail_url": statement.excluded.detail_url,
+                "torrent_url": statement.excluded.torrent_url,
+                "rss_description": statement.excluded.rss_description,
+                "size_label": statement.excluded.size_label,
+                "info_hash": case((Resource.info_hash == "", statement.excluded.info_hash),
+                                  else_=Resource.info_hash),
+                "updated_at": func.current_timestamp(),
+            },
+        )
+        session.execute(statement)
+        record = session.scalar(select(Resource).where(
+            Resource.source == item["source"], Resource.source_id == item["source_id"]
+        ))
+        assert record is not None
+        return _as_dict(record)
+
+
+def update_resource(resource_id: int, **changes) -> None:
+    if not changes or not set(changes) <= UPDATE_FIELDS:
+        raise ValueError("Invalid resource update")
+    with new_session() as session, session.begin():
+        record = session.get(Resource, resource_id)
+        if record is None:
+            return
+        for key, value in changes.items():
+            setattr(record, key, value)
+        record.updated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def get_resource(resource_id: int) -> dict | None:
+    with new_session() as session:
+        record = session.get(Resource, resource_id)
+        return _as_dict(record) if record else None
+
+
+def list_resources(q: str = "", source: str = "", status: str = "",
+                   limit: int = 50, offset: int = 0) -> dict:
+    filters = []
+    if q:
+        filters.append(or_(Resource.title.contains(q, autoescape=True),
+                           Resource.detail_description.contains(q, autoescape=True)))
+    if source:
+        filters.append(Resource.source == source)
+    if status:
+        filters.append(Resource.status == status)
+    with new_session() as session:
+        total = session.scalar(select(func.count()).select_from(Resource).where(*filters)) or 0
+        records = session.scalars(select(Resource).where(*filters).order_by(
+            Resource.published_at.desc(), Resource.id.desc()
+        ).limit(limit).offset(offset)).all()
+        return {"total": total, "items": [_as_dict(record) for record in records]}
+
+
+def torrent_file_path(source: str, source_id: str) -> Path:
+    digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()
+    return TORRENT_ROOT / source / f"{digest}.torrent"
