@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import FileResponse, StreamingResponse
 
 from .. import config, data
@@ -59,6 +60,36 @@ async def get_bangumi_poster(bangumi_id: int):
 async def search_bangumi(q: str):
     """Search bangumi_mikan_map by name. Returns up to 20 matches."""
     return data.search_by_name(q)
+
+
+@router.get("/api/rss/bangumi-search")
+async def search_bangumi_online(q: str = ""):
+    if not q.strip():
+        return []
+    try:
+        subjects = await bgm_client.search_subjects(q.strip())
+    except Exception as e:
+        raise HTTPException(502, f"Bangumi 搜索失败: {e}") from e
+    return [
+        {"bangumi_id": item["id"], "name": item.get("name_cn") or item.get("name") or str(item["id"]),
+         "name_original": item.get("name") or "", "date": item.get("date") or ""}
+        for item in subjects if item.get("id")
+    ]
+
+
+class BangumiSelection(BaseModel):
+    bangumi_id: int
+    name: str
+    name_original: str = ""
+
+
+@router.post("/api/rss/bangumi-selection")
+async def save_bangumi_selection(body: BangumiSelection):
+    if body.bangumi_id <= 0 or not body.name.strip():
+        raise HTTPException(422, "无效的 Bangumi 条目")
+    data.add_mapping(body.bangumi_id, body.name.strip(), body.name_original.strip())
+    return {"name": data.get_bangumi_name(body.bangumi_id),
+            "has_mikan_id": data.get_mikan_id(body.bangumi_id) is not None}
 
 
 @router.get("/api/rss/mikan-search")

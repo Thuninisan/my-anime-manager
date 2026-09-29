@@ -145,6 +145,16 @@ def set_mapping_fields(path: Path, bangumi_id: int, fields: dict) -> bool:
         return True
 
 
+def add_mapping(path: Path, bangumi_id: int, name: str, name_original: str = "") -> None:
+    """Persist a Bangumi search selection so the normal Mikan flow can use it."""
+    ensure_mappings(path)
+    fields = {"name": name, "name_original": name_original}
+    with new_session() as session, session.begin():
+        session.execute(insert(BangumiMapping).values(
+            bangumi_id=bangumi_id, data=fields, overrides=fields,
+        ).on_conflict_do_nothing(index_elements=[BangumiMapping.bangumi_id]))
+
+
 def replace_mappings(path: Path, records: dict):
     """Replace upstream dataset atomically, preserving manual field overrides."""
     if not isinstance(records, dict) or not records:

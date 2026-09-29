@@ -2,6 +2,27 @@ import type { BangumiRssResponse, ManualSubscribeIn, MikanSearchResult, RssDataS
 
 const API_BASE = '/api/rss';
 
+export interface BangumiOnlineResult {
+  bangumi_id: number;
+  name: string;
+  name_original: string;
+  date: string;
+}
+
+export async function searchBangumiOnline(query: string): Promise<BangumiOnlineResult[]> {
+  const res = await fetch(`${API_BASE}/bangumi-search?q=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error(`Bangumi 搜索失败 (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function saveBangumiSelection(item: BangumiOnlineResult): Promise<{ name: string; has_mikan_id: boolean }> {
+  const res = await fetch(`${API_BASE}/bangumi-selection`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item),
+  });
+  if (!res.ok) throw new Error(`保存 Bangumi 条目失败 (HTTP ${res.status})`);
+  return res.json();
+}
+
 export async function searchBangumi(query: string): Promise<{ bangumi_id: number; name: string; has_mikan_id: boolean }[]> {
   // Search results must always come from the API. In the VS Code/Electron
   // WebView, a stale cached SPA HTML response can otherwise be returned for

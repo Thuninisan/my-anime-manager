@@ -8,6 +8,7 @@ interface Props {
   searchError: string;
   onBangumiIdChange: (v: string) => void;
   onSearch: (id: number, candidate?: Candidate) => void;
+  onOnlineSearch: (query: string) => Promise<void>;
 }
 
 interface Candidate {
@@ -16,7 +17,7 @@ interface Candidate {
   has_mikan_id: boolean;
 }
 
-export default function RssSearchBar({ bangumiId, searching, searchError, onBangumiIdChange, onSearch }: Props) {
+export default function RssSearchBar({ bangumiId, searching, searchError, onBangumiIdChange, onSearch, onOnlineSearch }: Props) {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const [highlightIdx, setHighlightIdx] = useState(-1);
@@ -88,6 +89,14 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
     onSearch(candidate.bangumi_id, candidate);
   };
 
+  const submit = async () => {
+    const query = bangumiId.trim();
+    if (!query) return;
+    setShowDropdown(false);
+    setHighlightIdx(-1);
+    await onOnlineSearch(query);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (showDropdown && candidates.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -101,7 +110,7 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
         if (highlightIdx >= 0 && highlightIdx < candidates.length) {
           handleSelectCandidate(candidates[highlightIdx]);
         } else {
-          onSearch(parseInt(bangumiId.trim(), 10) || 0);
+          void submit();
         }
       } else if (e.key === 'Escape') {
         setShowDropdown(false);
@@ -110,8 +119,7 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
       return;
     }
     if (e.key === 'Enter') {
-      const id = parseInt(bangumiId.trim(), 10);
-      if (id && id > 0) onSearch(id);
+      void submit();
     }
   };
 
@@ -138,13 +146,10 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
         />
         <button
           className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-xs font-semibold hover:brightness-110 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
-          onClick={() => {
-            const id = parseInt(bangumiId.trim(), 10);
-            if (id && id > 0) onSearch(id);
-          }}
+          onClick={() => { void submit(); }}
           disabled={searching}
         >
-          {searching ? 'Searching...' : 'Subscribe'}
+          {searching ? '搜索中...' : '搜索'}
         </button>
 
         {/* Dropdown candidates */}
@@ -156,7 +161,6 @@ export default function RssSearchBar({ bangumiId, searching, searchError, onBang
                 className={`px-3 py-2 cursor-pointer text-sm flex justify-between items-center ${
                   idx === highlightIdx ? 'bg-primary/10 text-primary' : 'hover:bg-muted'
                 }`}
-                onMouseEnter={() => setHighlightIdx(idx)}
                 onClick={() => handleSelectCandidate(c)}
               >
                 <span className="truncate flex items-center gap-2">

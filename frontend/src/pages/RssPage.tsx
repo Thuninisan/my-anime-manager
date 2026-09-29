@@ -3,6 +3,7 @@ import type { RssFeedResponse } from '@/types/preview';
 import * as rssApi from '@/api/rssApi';
 import { showLoadingToast, updateToast } from '@/lib/toast';
 import RssSearchBar from '@/components/rss/RssSearchBar';
+import BangumiSearchDialog from '@/components/rss/BangumiSearchDialog';
 import SubtitleGroupDialog from '@/components/rss/SubtitleGroupDialog';
 import MikanSearchDialog from '@/components/rss/MikanSearchDialog';
 import SubscriptionList from '@/components/rss/SubscriptionList';
@@ -15,6 +16,7 @@ import { useDownloadHistory } from '@/hooks/useDownloadHistory';
 
 export default function RssPage() {
   const [bangumiId, setBangumiId] = useState('');
+  const [onlineSearch, setOnlineSearch] = useState<{ query: string; results: rssApi.BangumiOnlineResult[]; loading: boolean; error: string } | null>(null);
   const { result, meta, searching, error: searchError, search, clear: clearSearch, setExternalResult } = useRssSearch();
   const { subscriptions, loading: subLoading, subscribe, unsubscribe, activate, refresh: refreshSubs } = useSubscriptions();
   const { open: historyOpen, data: historyData, loading: historyLoading, subscription: historySub, openHistory, closeHistory, refreshHistory } = useDownloadHistory();
@@ -43,6 +45,27 @@ export default function RssPage() {
       return;
     }
     search(String(id));
+  };
+
+  const handleOnlineSearch = async (query: string) => {
+    setOnlineSearch({ query, results: [], loading: true, error: '' });
+    try {
+      const results = await rssApi.searchBangumiOnline(query);
+      setOnlineSearch(current => current?.query === query ? { query, results, loading: false, error: '' } : current);
+    } catch (e) {
+      setOnlineSearch(current => current?.query === query ? { query, results: [], loading: false, error: e instanceof Error ? e.message : 'Bangumi 搜索失败' } : current);
+    }
+  };
+
+  const handleOnlineSelect = async (item: rssApi.BangumiOnlineResult) => {
+    try {
+      const candidate = await rssApi.saveBangumiSelection(item);
+      setOnlineSearch(null);
+      setBangumiId(String(item.bangumi_id));
+      handleSearch(item.bangumi_id, candidate);
+    } catch (e) {
+      setOnlineSearch(current => current ? { ...current, error: e instanceof Error ? e.message : '保存条目失败' } : current);
+    }
   };
 
   const handleMikanAssigned = (rssResult: import('@/types/preview').BangumiRssResponse) => {
@@ -149,8 +172,11 @@ export default function RssPage() {
           searchError={searchError}
           onBangumiIdChange={setBangumiId}
           onSearch={handleSearch}
+          onOnlineSearch={handleOnlineSearch}
         />
       </div>
+
+      {onlineSearch && <BangumiSearchDialog {...onlineSearch} onClose={() => setOnlineSearch(null)} onSelect={item => { void handleOnlineSelect(item); }} />}
 
       {result && (
         <SubtitleGroupDialog

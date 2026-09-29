@@ -66,6 +66,16 @@ class LegacyDataStoreTests(unittest.TestCase):
         data._bangumi_mikan_map = None
         self.assertEqual(data.get_mikan_id(12), 9)
 
+    def test_online_bangumi_selection_persists_and_can_be_assigned_mikan(self):
+        data._MAP_FILE.write_text('{}')
+        data.add_mapping(42, '中文标题', 'Original Title')
+        self.assertEqual(data.get_bangumi_name(42), '中文标题')
+        self.assertEqual(data.search_by_name('中文')[0]['bangumi_id'], 42)
+        self.assertTrue(data.set_mikan_id(42, 17))
+        data.replace_mappings({'12': {'name': 'Upstream'}})
+        self.assertEqual(data.get_bangumi_name(42), '中文标题')
+        self.assertEqual(data.get_mikan_id(42), 17)
+
     def test_invalid_legacy_file_can_be_retried(self):
         data._SUBS_FILE.write_text('{"bad": true}')
         with self.assertRaises(ValueError):

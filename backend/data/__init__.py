@@ -111,6 +111,12 @@ def set_mikan_id(bangumi_id: int, mikan_id: int) -> bool:
     return _set_mapping_fields(bangumi_id, {"mikan_id": mikan_id})
 
 
+def add_mapping(bangumi_id: int, name: str, name_original: str = "") -> None:
+    global _bangumi_mikan_map
+    _store.add_mapping(_MAP_FILE, bangumi_id, name, name_original)
+    _bangumi_mikan_map = None
+
+
 def set_tmdb_id(bangumi_id: int, tmdb_id: int, tmdb_season: int | None = None) -> bool:
     fields = {"tmdb_id": tmdb_id}
     if tmdb_season is not None:
