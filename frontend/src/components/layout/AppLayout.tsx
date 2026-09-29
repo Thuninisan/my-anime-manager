@@ -2,7 +2,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { useTheme } from '@/hooks/useTheme';
 import {
-  IconSpa, IconDashboard, IconTorrent, IconRss, IconResources, IconSettings,
+  IconSpa, IconTorrent, IconRss, IconResources, IconSettings,
   IconAddCircle, IconSearch, IconNotifications, IconSun, IconMoon, IconUser,
 } from '@/components/icons';
 
@@ -43,23 +43,6 @@ export default function AppLayout() {
 
         {/* Nav */}
         <nav className="flex-1 flex flex-col gap-1">
-          <button className="flex items-center gap-3 p-3 text-muted-foreground hover:bg-muted transition-all rounded-lg group cursor-pointer text-left">
-            <span className="group-hover:scale-110 transition-transform"><IconDashboard /></span>
-            <span className="text-xs font-semibold tracking-wide">Dashboard</span>
-          </button>
-
-          <button
-            onClick={() => navigate('/torrent')}
-            className={`flex items-center gap-3 p-3 rounded-lg group cursor-pointer text-left transition-all ${
-              location.pathname === '/torrent'
-                ? 'text-primary font-bold bg-accent/20 border-l-2 border-primary'
-                : 'text-muted-foreground hover:bg-muted border-l-2 border-transparent'
-            }`}
-          >
-            <span className="group-hover:scale-110 transition-transform"><IconTorrent /></span>
-            <span className="text-xs font-semibold tracking-wide">Torrent Processing</span>
-          </button>
-
           <button
             onClick={() => navigate('/rss')}
             className={`flex items-center gap-3 p-3 rounded-lg group cursor-pointer text-left transition-all ${
@@ -82,6 +65,18 @@ export default function AppLayout() {
           >
             <span className="group-hover:scale-110 transition-transform"><IconResources /></span>
             <span className="text-xs font-semibold tracking-wide">Resource</span>
+          </button>
+
+          <button
+            onClick={() => navigate('/torrent')}
+            className={`flex items-center gap-3 p-3 rounded-lg group cursor-pointer text-left transition-all ${
+              location.pathname === '/torrent'
+                ? 'text-primary font-bold bg-accent/20 border-l-2 border-primary'
+                : 'text-muted-foreground hover:bg-muted border-l-2 border-transparent'
+            }`}
+          >
+            <span className="group-hover:scale-110 transition-transform"><IconTorrent /></span>
+            <span className="text-xs font-semibold tracking-wide">Torrent Processing</span>
           </button>
 
           <button
