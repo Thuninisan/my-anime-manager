@@ -1,7 +1,9 @@
-"""API routes: /scan, /watch, SPA fallback."""
+"""API routes: /scan, /watch, /api/update, SPA fallback."""
 
 import asyncio
 import logging
+import os
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Form, HTTPException
@@ -10,6 +12,7 @@ from fastapi.responses import FileResponse
 from .. import __version__
 from .. import config
 from ..services.torrent.batch_service import process_torrent
+from ..services.update_check import inspect_remote
 from ..logging.logging_config import new_operation_id, operation_context
 from .models import ScanStatus
 from . import state
@@ -41,6 +44,44 @@ async def scan_status():
 async def watch_status():
     """Get the current watch loop status."""
     return state._watch_status
+
+
+# ── /api/update ──
+
+@router.get("/api/update/check")
+def check_update(force: bool = False):
+    """Compare HEAD with the configured remote branch; force bypasses the cache."""
+    source_dir = os.environ.get("MAM_SOURCE_DIR", "/app/source")
+    branch = os.environ.get("MAM_BRANCH", "main")
+    now = time.time()
+    cache_key = (source_dir, branch)
+
+    if (not force
+            and state._update_cache.get("key") == cache_key
+            and state._update_cache["checked_at"]
+            and (now - state._update_cache["checked_at"]) < 3600
+            and state._update_cache["result"]):
+        return state._update_cache["result"]
+
+    result = {**inspect_remote(source_dir, branch), "current_version": __version__}
+    if "error" in result:
+        state._update_cache.update(checked_at=None, result=None)
+    else:
+        state._update_cache.update(key=cache_key, checked_at=time.time(), result=result)
+    return result
+
+
+@router.post("/api/update/apply")
+async def apply_update():
+    """Exit with code 42 so the Docker entrypoint pulls and restarts."""
+    logger.info("Update triggered — shutting down in 1s...")
+    asyncio.create_task(_do_restart())
+    return {"ok": True, "message": "正在关闭并更新..."}
+
+
+async def _do_restart():
+    await asyncio.sleep(1)
+    os._exit(42)
 
 
 # ── SPA Fallback (must be last route) ──

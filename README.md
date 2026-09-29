@@ -27,19 +27,19 @@ docker-compose.yml       本地构建及持久化挂载
 
 需要 Docker Compose、可访问的 qBittorrent Web UI，以及自己的 [TMDB API Key](https://www.themoviedb.org/settings/api)。若使用 TVDB 或 DeepSeek，请另行准备对应的密钥。RSS 功能还需访问 Bangumi 与蜜柑计划。
 
-此仓库是私有仓库，先用有权限的 GitHub 账号克隆，再在本地构建镜像：
+公开仓库可直接克隆。首次启动会在本地构建基础镜像，容器随后从本仓库拉取源码、安装后端依赖并构建前端：
 
 ```bash
-git clone git@github.com:Thuninisan/my-anime-manager.git
+git clone https://github.com/Thuninisan/my-anime-manager.git
 cd my-anime-manager
 docker compose up -d --build
 ```
 
-启动前编辑 `docker-compose.yml`：填入 qBittorrent 地址与密码、TMDB 密钥，并将种子目录和下载目录的宿主机占位路径改为实际路径。不使用代理时保持 `PROXY_HOST` 为空。`./mam-data:/app/data` 用于持久化设置、订阅、历史、数据库和日志。
+启动前编辑 `docker-compose.yml`：填入 qBittorrent 地址与密码、TMDB 密钥，并将种子目录和下载目录的宿主机占位路径改为实际路径。不使用代理时保持 `PROXY_HOST` 为空。`./mam-data:/app/data` 用于持久化设置、订阅、历史、数据库和日志；`mam-source` 卷保留容器拉取的源码。
 
 应用与 qBittorrent 必须能访问同一份下载文件；跨容器时，建议两边使用相同的容器内路径，例如 `/downloads`。硬链接要求下载目录和目标媒体目录处于同一文件系统。启动后访问 `http://你的服务器地址:8000`，排查启动问题可运行 `docker compose logs -f my-anime-manager`。
 
-Docker 镜像在构建时包含后端和已编译前端，运行中的容器无需连接 GitHub。更新时在宿主机运行：
+容器启动时需要访问 GitHub、Python 包仓库和 npm。网页“设置 → Updates”可以检查远端提交并触发拉取、前端重建和应用重启。更新基础镜像时，在宿主机运行：
 
 ```bash
 git pull
@@ -66,6 +66,6 @@ RSS 排除词、RSS 下载轮询间隔和资源采集轮询间隔也保存在同
 
 ## 日志与版本
 
-日志输出到终端和 `MAM_DATA_DIR/logs/YYYY-MM-DD.log`。`TZ` 控制日期时区；`MAM_LOG_RETENTION_DAYS`、`MAM_LOG_DIR`、`MAM_LOG_LEVEL` 可调整保留期、位置与级别。网页的 Updates 页显示已安装版本；Docker 更新通过重建镜像完成。
+日志输出到终端和 `MAM_DATA_DIR/logs/YYYY-MM-DD.log`。`TZ` 控制日期时区；`MAM_LOG_RETENTION_DAYS`、`MAM_LOG_DIR`、`MAM_LOG_LEVEL` 可调整保留期、位置与级别。网页的 Updates 页可在 Docker 部署中检查并应用源码更新。
 
 版本由 `python scripts/bump_version.py X.Y.Z` 同步到后端、Python 包、前端和 Docker 镜像标签。项目在 `pyproject.toml` 中声明 ISC 许可。

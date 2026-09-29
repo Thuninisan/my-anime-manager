@@ -14,7 +14,12 @@ services:
       - PROXY_PORT=7890
       - WATCH_DIR=/torrents
       - TZ=Asia/Shanghai
+      - MAM_REPO_URL=https://github.com/Thuninisan/my-anime-manager.git
+      - MAM_BRANCH=main
     volumes:
+      - mam-source:/app/source
       - ./mam-data:/app/data
       - /改成你的种子目录路径:/torrents
       - /改成你的下载目录路径:/downloads
+volumes:
+  mam-source:
