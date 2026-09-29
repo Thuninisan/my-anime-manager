@@ -15,6 +15,7 @@ from ..data import (
 from . import rss as rss_service
 from ..utils.episode_name_match import fuzzy_match_episode
 from ..logging.logging_config import safe_url
+from ..utils.rss_dates import published_before_air_date
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ async def _compute_rss_offset(rss_url: str, air_date: str) -> int | None:
         if not ep:
             continue
         pub = item.get("pub_date", "")
-        if air_date and pub and pub < air_date:
+        if published_before_air_date(pub, air_date):
             continue
         if smallest is None or ep < smallest:
             smallest = ep

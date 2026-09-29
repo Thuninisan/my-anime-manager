@@ -4,6 +4,7 @@ import asyncio
 import logging
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 import httpx
 
@@ -19,6 +20,7 @@ from ..data import (
     get_fail_count, increment_fail_count, reset_fail_count, MAX_FAIL_COUNT,
 )
 from . import rss as rss_service
+from ..utils.rss_dates import publication_datetime, published_before_air_date
 from .enrich import (
     _bgm_ep_cache,
     _get_bangumi_episodes,
@@ -330,7 +332,7 @@ async def _fetch_passed_items(
     - Items are sorted by pub_date (earliest first) so older episodes
       are processed before newer ones.
     - Items with pub_date earlier than *air_date* (show premiere date)
-      are silently skipped.
+      are skipped with a reason in the log.
     - Once all sorts in *bgm_sortrange* are covered (already downloaded
       + current candidates), remaining items are skipped.
 
@@ -353,7 +355,8 @@ async def _fetch_passed_items(
         return []
 
     # Sort RSS items by pub_date (earliest first)
-    feed["items"].sort(key=lambda item: item.get("pub_date") or "9999")
+    feed["items"].sort(key=lambda item: publication_datetime(item.get("pub_date", ""))
+                       or datetime.max.replace(tzinfo=timezone.utc))
 
     # ── Track covered sorts (already downloaded) for sortrange limit ──
     downloaded_sorts: set[int] = set()
@@ -373,16 +376,38 @@ async def _fetch_passed_items(
                      bgm_sortrange, len(covered & needed), len(missing))
 
     candidates = []
+    skipped = 0
+    examined = 0
+
+    def log_skip(item: dict, reason: str) -> None:
+        nonlocal skipped
+        skipped += 1
+        logger.info("RSS 资源排除: bangumi_id=%s source=%s episode=%s title=%r reason=%s",
+                    bangumi_id, source, item.get("episode_number") or "?",
+                    (item.get("title") or item.get("guid") or "")[:160], reason)
+
     for item in feed["items"]:
-        if not item["passed"] or item["excluded"]:
+        examined += 1
+        if item["excluded"]:
+            patterns = list(dict.fromkeys([*config.RSS_EXCLUDE_PATTERNS,
+                                           *(extra_exclude_patterns or [])]))
+            matched = [pattern for pattern in patterns
+                       if pattern in (item.get("guid") or item.get("title") or "")]
+            log_skip(item, f"命中排除词: {matched or '(未找到匹配词)'}")
+            continue
+        if not item["passed"]:
+            missing_tags = [tag for tag in filter_tags if tag not in item.get("tags", [])]
+            log_skip(item, f"标签不匹配: 缺少 {missing_tags}; 资源标签 {item.get('tags', [])}")
             continue
         rss_ep = item.get("episode_number") or 0
         if not rss_ep:
+            log_skip(item, "无法从标题识别集数")
             continue
 
         # ── Time filter: skip items published before show premiere ──
         item_pub_date = item.get("pub_date", "")
-        if air_date and item_pub_date and item_pub_date < air_date:
+        if published_before_air_date(item_pub_date, air_date):
+            log_skip(item, f"发布时间 {item_pub_date} 早于首播日期 {air_date}")
             continue
 
         # ── Assign sort: rss_ep + rss_offset ──
@@ -390,10 +415,12 @@ async def _fetch_passed_items(
         # enrichment.  This gives a direct linear mapping from RSS episode
         # numbers to Bangumi sort values.
         if rss_offset is None:
+            log_skip(item, "RSS 集数偏移量未确定")
             continue  # can't determine sort without offset — skip
         sort = rss_ep + rss_offset
         if bgm_sortrange and bgm_sortrange[0] > 0:
             if sort < bgm_sortrange[0] or sort > bgm_sortrange[1]:
+                log_skip(item, f"映射集数 {sort} 不在 Bangumi 范围 {bgm_sortrange} 内 (offset={rss_offset})")
                 continue  # outside expected range, skip
         item["sort"] = sort
 
@@ -402,17 +429,13 @@ async def _fetch_passed_items(
         # downloaded sorts are NOT skipped here — they go through the
         # source-priority check below so primary can replace backup.
         if sort in seen_in_batch:
+            log_skip(item, f"本次轮询已有集数 {sort} 的候选资源")
             continue
 
         # Skip episodes that have already failed too many times
         fc = get_fail_count(bangumi_id, sort)
         if fc >= MAX_FAIL_COUNT:
-            if not hasattr(_fetch_passed_items, "_skip_logged"):
-                _fetch_passed_items._skip_logged = set()  # type: ignore[attr-defined]
-            skip_key = (bangumi_id, sort)
-            if skip_key not in _fetch_passed_items._skip_logged:  # type: ignore[attr-defined]
-                _fetch_passed_items._skip_logged.add(skip_key)  # type: ignore[attr-defined]
-                logger.warning(f"      ⏭️ EP{rss_ep:02d} (sort={sort}) 已连续失败 {fc} 次，跳过")
+            log_skip(item, f"集数 {sort} 已连续失败 {fc} 次，达到重试上限")
             continue
 
         existing_source = get_episode_source(bangumi_id, sort)
@@ -423,6 +446,7 @@ async def _fetch_passed_items(
             exist_prio = PRIORITY.get(existing_source, -1)
 
             if feed_prio < exist_prio:
+                log_skip(item, f"集数 {sort} 已由更高优先级来源 {existing_source} 下载")
                 continue
             elif feed_prio == exist_prio:
                 existing_pub = get_episode_pub_date(bangumi_id, sort)
@@ -430,6 +454,7 @@ async def _fetch_passed_items(
                     logger.info("EP%02d v2 detected [%s]: %s > %s",
                                 rss_ep, source, item_pub_date, existing_pub)
                 else:
+                    log_skip(item, f"集数 {sort} 已由相同来源 {existing_source} 下载，发布时间未更新")
                     continue
 
         candidates.append(item)
@@ -442,6 +467,11 @@ async def _fetch_passed_items(
             if needed.issubset(covered):
                 break
 
+    if examined < len(feed["items"]):
+        logger.info("RSS 剩余资源未检查: bangumi_id=%s source=%s count=%d reason=Bangumi 集数范围已覆盖",
+                    bangumi_id, source, len(feed["items"]) - examined)
+    logger.info("RSS 资源筛选完成: bangumi_id=%s source=%s total=%d candidates=%d excluded=%d",
+                bangumi_id, source, len(feed["items"]), len(candidates), skipped)
     return candidates
 
 
