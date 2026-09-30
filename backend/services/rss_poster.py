@@ -12,6 +12,7 @@ import httpx
 from .. import config, data
 from ..clients.bangumi import get_subject
 from ..utils.http_retry import USER_AGENT
+from ..utils.http_client import http_client_manager
 
 logger = logging.getLogger(__name__)
 MAX_POSTER_BYTES = 5 * 1024 * 1024
@@ -45,27 +46,26 @@ async def get_search_poster(bangumi_id: int) -> tuple[bytes, str] | None:
     if entry[1] is not None:
         return entry[1], entry[2]
     try:
-        proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}" if config.PROXY_HOST else None
-        async with httpx.AsyncClient(proxy=proxy, timeout=15.0, headers={"User-Agent": USER_AGENT}) as client:
-            async with client.stream("GET", entry[0]) as response:
-                response.raise_for_status()
-                content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-                if content_type not in IMAGE_TYPES:
+        client = http_client_manager.get_client()
+        async with client.stream("GET", entry[0], timeout=15.0, headers={"User-Agent": USER_AGENT}, follow_redirects=False) as response:
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+            if content_type not in IMAGE_TYPES:
+                return None
+            chunks = []
+            size = 0
+            async for chunk in response.aiter_bytes():
+                size += len(chunk)
+                if size > MAX_POSTER_BYTES:
                     return None
-                chunks = []
-                size = 0
-                async for chunk in response.aiter_bytes():
-                    size += len(chunk)
-                    if size > MAX_POSTER_BYTES:
-                        return None
-                    chunks.append(chunk)
-                if not size:
-                    return None
-                image = b"".join(chunks)
-                if _search_posters.get(bangumi_id) is entry:
-                    entry[1] = image
-                    entry[2] = content_type
-                return image, content_type
+                chunks.append(chunk)
+            if not size:
+                return None
+            image = b"".join(chunks)
+            if _search_posters.get(bangumi_id) is entry:
+                entry[1] = image
+                entry[2] = content_type
+            return image, content_type
     except Exception as exc:
         logger.warning("Bangumi 搜索封面获取失败: id=%s error=%s", bangumi_id, type(exc).__name__)
         return None
@@ -115,32 +115,31 @@ async def get_poster(bangumi_id: int) -> Path | None:
             if not url or not _trusted_image_url(url):
                 return None
 
-            proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}" if config.PROXY_HOST else None
-            async with httpx.AsyncClient(proxy=proxy, timeout=15.0, headers={"User-Agent": USER_AGENT}) as client:
-                async with client.stream("GET", url) as response:
-                    response.raise_for_status()
-                    content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-                    ext = IMAGE_TYPES.get(content_type)
-                    if not ext:
+            client = http_client_manager.get_client()
+            async with client.stream("GET", url, timeout=15.0, headers={"User-Agent": USER_AGENT}, follow_redirects=False) as response:
+                response.raise_for_status()
+                content_type = response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                ext = IMAGE_TYPES.get(content_type)
+                if not ext:
+                    return None
+                directory = _cache_dir()
+                directory.mkdir(parents=True, exist_ok=True)
+                target = directory / f"{bangumi_id}{ext}"
+                temporary = directory / f".{bangumi_id}.{uuid4().hex}.tmp"
+                try:
+                    size = 0
+                    with temporary.open("wb") as output:
+                        async for chunk in response.aiter_bytes():
+                            size += len(chunk)
+                            if size > MAX_POSTER_BYTES:
+                                return None
+                            output.write(chunk)
+                    if not size:
                         return None
-                    directory = _cache_dir()
-                    directory.mkdir(parents=True, exist_ok=True)
-                    target = directory / f"{bangumi_id}{ext}"
-                    temporary = directory / f".{bangumi_id}.{uuid4().hex}.tmp"
-                    try:
-                        size = 0
-                        with temporary.open("wb") as output:
-                            async for chunk in response.aiter_bytes():
-                                size += len(chunk)
-                                if size > MAX_POSTER_BYTES:
-                                    return None
-                                output.write(chunk)
-                        if not size:
-                            return None
-                        os.replace(temporary, target)
-                        return target
-                    finally:
-                        temporary.unlink(missing_ok=True)
+                    os.replace(temporary, target)
+                    return target
+                finally:
+                    temporary.unlink(missing_ok=True)
         except Exception as exc:
             logger.warning("Bangumi RSS 封面获取失败: id=%s error=%s", bangumi_id, type(exc).__name__)
             return None

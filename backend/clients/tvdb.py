@@ -11,6 +11,7 @@ import httpx
 
 from .. import config
 from ..utils.http_retry import fetch_with_retry
+from ..utils.http_client import http_client_manager
 from .errors import MissingAPIKeyError
 
 logger = logging.getLogger(__name__)
@@ -38,19 +39,9 @@ async def login() -> str:
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     body = json.dumps({"apikey": apikey})
 
-    proxy_url = None
-    if config.PROXY_HOST:
-        proxy_url = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
-
-    async with httpx.AsyncClient(
-        timeout=30.0,
-        proxy=proxy_url,
-    ) as client:
-        resp = await client.post(url, content=body, headers=headers)
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"TVDB login failed ({resp.status_code}): {resp.text[:500]}"
-            )
+    resp = await http_client_manager.get_client().post(url, content=body, headers=headers, timeout=30.0, follow_redirects=False)
+    if resp.status_code != 200:
+        raise RuntimeError(f"TVDB login failed ({resp.status_code}): {resp.text[:500]}")
 
     data = resp.json()
     _token = data.get("data", {}).get("token")

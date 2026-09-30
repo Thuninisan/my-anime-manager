@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__, data
 from ..clients.errors import MissingAPIKeyError
+from ..utils.http_client import http_client_manager
 from ..db import torrents as torrent_store
 from ..db import download_history
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
@@ -109,6 +110,7 @@ async def lifespan(_app: FastAPI):
             logger.info("Download monitor cancelled: %s", info_hash[:8])
     state._download_tasks.clear()
 
+    await http_client_manager.aclose()
     logger.info("All workers stopped — safe to restart.")
 
 

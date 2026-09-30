@@ -7,24 +7,20 @@ from urllib.parse import quote
 import httpx
 
 from .. import config
+from ..utils.http_client import http_client_manager
 
 logger = logging.getLogger(__name__)
 
 
-def _get_client() -> httpx.AsyncClient:
-    """Create a configured Bangumi httpx client."""
-    proxy = None
-    if config.PROXY_HOST:
-        proxy = f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
+def _get(path: str, **kwargs):
+    return http_client_manager.get_client().get(
+        f"https://api.bgm.tv{path}", headers={"User-Agent": config.BANGUMI_UA, "Accept": "application/json"}, timeout=30.0, follow_redirects=False, **kwargs,
+    )
 
-    return httpx.AsyncClient(
-        base_url="https://api.bgm.tv",
-        headers={
-            "User-Agent": config.BANGUMI_UA,
-            "Accept": "application/json",
-        },
-        proxy=proxy,
-        timeout=30.0,
+
+def _post(path: str, **kwargs):
+    return http_client_manager.get_client().post(
+        f"https://api.bgm.tv{path}", headers={"User-Agent": config.BANGUMI_UA, "Accept": "application/json"}, timeout=30.0, follow_redirects=False, **kwargs,
     )
 
 
@@ -57,40 +53,39 @@ async def search_subjects(keyword: str) -> list[dict]:
         List of subject dicts
     """
     await _delay()
-    async with _get_client() as client:
+    try:
+        res = await _retry(
+            _post,
+            "/v0/search/subjects",
+            json={"keyword": keyword, "filter": {"type": [2]}},
+            params={"limit": 20},
+        )
+        data = res.json()
+        return data.get("data", [])
+    except Exception:
+        # v0 search failed, try legacy API
         try:
             res = await _retry(
-                client.post,
-                "/v0/search/subjects",
-                json={"keyword": keyword, "filter": {"type": [2]}},
-                params={"limit": 20},
+                _get,
+                f"/search/subject/{quote(keyword)}?type=2",
             )
             data = res.json()
-            return data.get("data", [])
-        except Exception:
-            # v0 search failed, try legacy API
-            try:
-                res = await _retry(
-                    client.get,
-                    f"/search/subject/{quote(keyword)}?type=2",
-                )
-                data = res.json()
-                raw_list = data.get("list", [])
-                return [
-                    {
-                        "id": item["id"],
-                        "name": item["name"],
-                        "name_cn": item.get("name_cn", ""),
-                        "date": item.get("air_date", ""),
-                        "eps": item.get("eps_count", 0),
-                        "type": item.get("type", 2),
-                        "images": item.get("images"),
-                    }
-                    for item in raw_list
-                ]
-            except Exception as e2:
-                logger.error(f"   ❌ Bangumi 搜索完全失败: {e2}")
-                return []
+            raw_list = data.get("list", [])
+            return [
+                {
+                    "id": item["id"],
+                    "name": item["name"],
+                    "name_cn": item.get("name_cn", ""),
+                    "date": item.get("air_date", ""),
+                    "eps": item.get("eps_count", 0),
+                    "type": item.get("type", 2),
+                    "images": item.get("images"),
+                }
+                for item in raw_list
+            ]
+        except Exception as e2:
+            logger.error(f"   ❌ Bangumi 搜索完全失败: {e2}")
+            return []
 
 
 async def get_subject(subject_id: int) -> dict:
@@ -106,28 +101,26 @@ async def get_subject(subject_id: int) -> dict:
         RuntimeError: If the API request fails
     """
     await _delay()
-    async with _get_client() as client:
-        try:
-            res = await _retry(client.get, f"/v0/subjects/{subject_id}")
-            res.raise_for_status()
-            return res.json()
-        except httpx.HTTPStatusError as e:
-            raise RuntimeError(
-                f"Bangumi API 返回 {e.response.status_code} (id={subject_id})"
-            ) from e
-        except Exception as e:
-            raise RuntimeError(
-                f"获取 Bangumi 条目失败 (id={subject_id}): {e}"
-            ) from e
+    try:
+        res = await _retry(_get, f"/v0/subjects/{subject_id}")
+        res.raise_for_status()
+        return res.json()
+    except httpx.HTTPStatusError as e:
+        raise RuntimeError(
+            f"Bangumi API 返回 {e.response.status_code} (id={subject_id})"
+        ) from e
+    except Exception as e:
+        raise RuntimeError(
+            f"获取 Bangumi 条目失败 (id={subject_id}): {e}"
+        ) from e
 
 
 async def get_calendar() -> list[dict]:
     """Get Bangumi's public weekly anime broadcast calendar."""
     await _delay()
-    async with _get_client() as client:
-        response = await _retry(client.get, "/calendar")
-        response.raise_for_status()
-        return response.json()
+    response = await _retry(_get, "/calendar")
+    response.raise_for_status()
+    return response.json()
 
 
 async def get_relations(subject_id: int) -> list[dict]:
@@ -140,13 +133,12 @@ async def get_relations(subject_id: int) -> list[dict]:
         List of relation dicts
     """
     await _delay()
-    async with _get_client() as client:
-        try:
-            res = await _retry(client.get, f"/v0/subjects/{subject_id}/subjects")
-            return res.json()
-        except Exception as e:
-            logger.warning(f"   ⚠️ 获取关系失败 (id={subject_id}): {e}")
-            return []
+    try:
+        res = await _retry(_get, f"/v0/subjects/{subject_id}/subjects")
+        return res.json()
+    except Exception as e:
+        logger.warning(f"   ⚠️ 获取关系失败 (id={subject_id}): {e}")
+        return []
 
 
 async def get_episode_total(subject_id: int) -> int:
@@ -159,17 +151,16 @@ async def get_episode_total(subject_id: int) -> int:
         Total episode count, or 0 on failure
     """
     await _delay()
-    async with _get_client() as client:
-        try:
-            res = await _retry(
-                client.get,
-                "/v0/episodes",
-                params={"subject_id": subject_id, "type": 0, "limit": 1},
-            )
-            data = res.json()
-            return data.get("total", 0)
-        except Exception:
-            return 0
+    try:
+        res = await _retry(
+            _get,
+            "/v0/episodes",
+            params={"subject_id": subject_id, "type": 0, "limit": 1},
+        )
+        data = res.json()
+        return data.get("total", 0)
+    except Exception:
+        return 0
 
 
 async def get_episodes(subject_id: int, ep_type: int | None = 0) -> list[dict]:
@@ -188,30 +179,29 @@ async def get_episodes(subject_id: int, ep_type: int | None = 0) -> list[dict]:
     offset = 0
     limit = 100
 
-    async with _get_client() as client:
-        while True:
-            params: dict = {
-                "subject_id": subject_id,
-                "limit": limit,
-                "offset": offset,
-            }
-            if ep_type is not None:
-                params["type"] = ep_type
-            res = await _retry(
-                client.get,
-                "/v0/episodes",
-                params=params,
-            )
-            data = res.json()
-            eps = data.get("data", [])
-            all_eps.extend(eps)
+    while True:
+        params: dict = {
+            "subject_id": subject_id,
+            "limit": limit,
+            "offset": offset,
+        }
+        if ep_type is not None:
+            params["type"] = ep_type
+        res = await _retry(
+            _get,
+            "/v0/episodes",
+            params=params,
+        )
+        data = res.json()
+        eps = data.get("data", [])
+        all_eps.extend(eps)
 
-            if len(all_eps) >= (data.get("total") or 0):
-                break
-            if len(eps) < limit:
-                break
-            offset += limit
-            await _delay()
+        if len(all_eps) >= (data.get("total") or 0):
+            break
+        if len(eps) < limit:
+            break
+        offset += limit
+        await _delay()
 
     # Sort: prefer sort field, ep field as fallback
     all_eps.sort(key=lambda e: (e.get("sort") or e.get("ep") or 0))

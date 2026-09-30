@@ -10,16 +10,11 @@ import logging
 import httpx
 
 from .. import config
+from ..utils.http_client import http_client_manager
 
 logger = logging.getLogger(__name__)
 
 _BASE = "https://api.deepseek.com"
-
-
-def _proxy() -> str | None:
-    if config.PROXY_HOST:
-        return f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
-    return None
 
 
 def _auth_headers() -> dict[str, str]:
@@ -73,17 +68,11 @@ async def chat_completion(
         body["max_tokens"] = max_tokens
     body.update(kwargs)
 
-    async with httpx.AsyncClient(
-        timeout=120.0,
-        proxy=_proxy(),
-    ) as client:
-        resp = await client.post(
-            f"{_BASE}/v1/chat/completions",
-            content=json.dumps(body),
-            headers=headers,
-        )
-        resp.raise_for_status()
-        return resp
+    resp = await http_client_manager.get_client().post(
+        f"{_BASE}/v1/chat/completions", content=json.dumps(body), headers=headers, timeout=120.0, follow_redirects=False,
+    )
+    resp.raise_for_status()
+    return resp
 
 
 # ═══════════════════════════════════════════════════════════════════════

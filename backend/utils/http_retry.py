@@ -9,7 +9,7 @@ import asyncio
 
 import httpx
 
-from .. import config
+from .http_client import http_client_manager
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +29,6 @@ _RETRYABLE_EXCEPTIONS = (
     httpx.ReadTimeout,
     httpx.WriteTimeout,
 )
-
-
-def _proxy() -> str | None:
-    if config.PROXY_HOST:
-        return f"http://{config.PROXY_HOST}:{config.PROXY_PORT}"
-    return None
 
 
 async def fetch_with_retry(
@@ -75,18 +69,13 @@ async def fetch_with_retry(
 
     for attempt in range(1, max_retries + 1):
         try:
-            async with httpx.AsyncClient(
-                proxy=_proxy(),
-                timeout=timeout,
-                follow_redirects=True,
-                headers=_headers,
-            ) as client:
-                if method == "GET":
-                    resp = await client.get(url, params=params)
-                else:
-                    resp = await client.request(method, url, params=params)
-                resp.raise_for_status()
-                return resp
+            client = http_client_manager.get_client()
+            if method == "GET":
+                resp = await client.get(url, params=params, timeout=timeout, headers=_headers)
+            else:
+                resp = await client.request(method, url, params=params, timeout=timeout, headers=_headers)
+            resp.raise_for_status()
+            return resp
 
         except _RETRYABLE_EXCEPTIONS as e:
             last_error = e
