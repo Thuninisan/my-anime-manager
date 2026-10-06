@@ -86,7 +86,14 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
     const rd = replaceDialog;
     if (!rd || !data) return;
     setReplaceDialog(null);
-    try { await replaceEpisodeWithTorrent(data.bangumi_id, rd.sort, rd.file); onRefresh(); } catch { /* */ }
+    const toastId = showLoadingToast('单集种子替换中...');
+    try {
+      await replaceEpisodeWithTorrent(data.bangumi_id, rd.sort, rd.file);
+      updateToast(toastId, '单集种子替换完成', 'success');
+      onRefresh();
+    } catch (e) {
+      updateToast(toastId, e instanceof Error ? e.message : String(e), 'error');
+    }
   }, [replaceDialog, data, onRefresh]);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -98,7 +105,14 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
     if (intent.type === 'edit') {
       setReplaceDialog({ sort: intent.sort, file });
     } else {
-      try { await addEpisodeWithTorrent(data.bangumi_id, intent.sort, file); onRefresh(); } catch { /* */ }
+      const toastId = showLoadingToast('单集种子添加中...');
+      try {
+        await addEpisodeWithTorrent(data.bangumi_id, intent.sort, file);
+        updateToast(toastId, '单集种子添加完成', 'success');
+        onRefresh();
+      } catch (e) {
+        updateToast(toastId, e instanceof Error ? e.message : String(e), 'error');
+      }
     }
   };
 

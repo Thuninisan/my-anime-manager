@@ -678,85 +678,90 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict, me
         f.write(torrent_content)
         tmp_path = f.name
 
-    # ── Compute info-hash from the .torrent file ───────────────────
-    torrent_hash = compute_info_hash(tmp_path)
-
-    # ── Compute download paths from template ───────────────────────
-    show_name = sub.get("name", str(bangumi_id))
-    bgm = sub.get("bgm", {})
-    bgm_subject_name = bgm.get("subject_name") or show_name
-    series_name = sub.get("series_name") or show_name
-    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
-    rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    template = config.RSS_PATH_TEMPLATE
-    rel_path = format_download_path(template, sub, sort=sort, tvdb_episode=tvdb_ep_val).lstrip("/")
-    rel_dir = str(Path(rel_path).parent)
-    season_dir = str(Path(rss_base) / rel_dir)
-    show_dir = str(Path(season_dir).parent)
-
-    # ── Add to qBittorrent ─────────────────────────────────────────
-    # Pass the raw string (POSIX path) — don't let Path() convert to Windows style
     try:
-        qb = await qb_login(config.QBITTORRENT_URL, config.QBITTORRENT_USERNAME, config.QBITTORRENT_PASSWORD)
-        info_hash = await add_torrent(qb, tmp_path, rss_base, guid)
-        logger.info("RSS 种子已添加: bangumi_id=%s episode=%s hash=%s",
-                    bangumi_id, rss_ep_num, info_hash[:12])
-    except Exception as e:
-        logger.error(f"      ❌ qBittorrent 添加失败: {e}")
-        Path(tmp_path).unlink(missing_ok=True)
+        await submit_episode_torrent(
+            tmp_path, bangumi_id, sort, source, sub=sub, guid=guid,
+            rss_url=item.get("rss_url", ""), pub_date=item.get("pub_date", ""),
+            metadata_ctx=metadata_ctx,
+        )
+    except Exception:
+        logger.exception("RSS 单集提交失败: bangumi_id=%s sort=%s", bangumi_id, sort)
         return False
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+    return True
 
-    # ── Generate metadata + rename ─────────────────────────────────
-    if tmdb_id or tvdb_id:
+
+VIDEO_EXTENSIONS = {".mkv", ".mp4", ".mka", ".avi", ".mov", ".ts", ".wmv", ".flv", ".webm"}
+
+
+async def submit_episode_torrent(
+    torrent_path: str, bangumi_id: int, sort: int, source: str, *,
+    sub: dict, guid: str, rss_url: str = "", pub_date: str = "",
+    metadata_ctx: MetadataContext | None = None, replace_existing: bool = False,
+) -> str:
+    """Shared RSS/upload commit: paused add, metadata/rename, resume, history."""
+    tmdb = sub.get("tmdb", {})
+    tvdb = sub.get("tvdb", {})
+    bgm = sub.get("bgm", {})
+    tmdb_id = tmdb.get("id") or get_tmdb_id(bangumi_id) or 0
+    tvdb_id = tvdb.get("id") or get_tvdb_id(bangumi_id) or 0
+    if not tmdb_id and not tvdb_id:
+        raise HTTPException(400, "订阅未关联 TMDB 或 TVDB ID，无法生成 NFO")
+    torrent_hash = compute_info_hash(torrent_path)
+    rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
+    tvdb_ep = sort + tvdb.get("ep_offset", 0)
+    rel_path = format_download_path(
+        config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_ep,
+        tmdb_episode=sort + tmdb.get("ep_offset", 0),
+    ).lstrip("/")
+    season_dir = str(Path(rss_base) / Path(rel_path).parent)
+    show_dir = str(Path(season_dir).parent)
+    old = get_all_episodes(bangumi_id).get(str(sort), {})
+    qb = await qb_login(config.QBITTORRENT_URL, config.QBITTORRENT_USERNAME, config.QBITTORRENT_PASSWORD)
+    if replace_existing and old.get("info_hash"):
+        if old["info_hash"].lower() == torrent_hash.lower():
+            raise HTTPException(400, "新种子与当前种子相同")
+        await delete_torrent(qb, old["info_hash"], delete_files=True)
+    info_hash = await add_torrent(qb, torrent_path, rss_base, guid)
+    try:
+        files = await get_torrent_files(qb, info_hash)
+        videos = [f for f in files if Path(f["name"]).suffix.lower() in VIDEO_EXTENSIONS]
+        if len(videos) != 1:
+            raise RuntimeError(f"种子中视频文件数量不为1 (found {len(videos)})")
+        show_name = sub.get("name", str(bangumi_id))
+        success = await generate_metadata(
+            qb, info_hash, bangumi_id, sort, bangumi_id, tmdb_id, show_name,
+            videos[0]["name"], guid,
+            bgm_season=bgm.get("season", 1), tmdb_season=tmdb.get("season"),
+            tmdb_ep_offset=tmdb.get("ep_offset", 0),
+            tvdb_id=tvdb_id, tvdb_season=tvdb.get("season"),
+            tvdb_ep_offset=tvdb.get("ep_offset", 0), tvdb_ep=tvdb_ep,
+            season_dir=season_dir, show_dir=show_dir,
+            bgm_subject_name=bgm.get("subject_name") or show_name,
+            series_name=sub.get("series_name") or show_name,
+            metadata_ctx=metadata_ctx, base_path=rss_base,
+            overwrite=replace_existing,
+        )
+        if not success:
+            raise RuntimeError("NFO 生成或文件重命名失败")
+    except Exception:
         try:
-            from ..clients.qbittorrent import get_torrent_files
-            files = await get_torrent_files(qb, info_hash)
-            old_path = files[0]["name"] if files else guid
-            tvdb_meta = sub.get("tvdb", {})
-            tmdb_meta = sub.get("tmdb", {})
-            success = await generate_metadata(
-                qb, info_hash, bangumi_id, sort,
-                bgm_subject_id, tmdb_id, show_name,
-                old_path, guid,
-                bgm_season=bgm_season,
-                tmdb_season=tmdb_season,
-                tmdb_ep_offset=tmdb_meta.get("ep_offset", 0),
-                tvdb_id=tvdb_id or tvdb_meta.get("id") or 0,
-                tvdb_season=tvdb_meta.get("season"),
-                tvdb_ep_offset=tvdb_meta.get("ep_offset", 0),
-                tvdb_ep=tvdb_ep_val,
-                season_dir=season_dir,
-                show_dir=show_dir,
-                bgm_subject_name=bgm_subject_name,
-                series_name=series_name,
-                metadata_ctx=metadata_ctx,
-            )
-            if not success:
-                logger.error(f"      ❌ NFO 生成失败：TVDB 未找到对应剧集，种子已删除")
-                await delete_torrent(qb, info_hash, delete_files=False)
-                return False
-        except Exception as e:
-            logger.error(f"      ❌ NFO 生成失败: {e}，种子已删除")
             await delete_torrent(qb, info_hash, delete_files=False)
-            return False
-
-    # ── Resume download ────────────────────────────────────────────
+        except Exception:
+            logger.exception("清理失败种子失败: hash=%s", info_hash[:12])
+        raise
     try:
         await resume_torrent(qb, info_hash)
     except Exception:
-        pass  # resume might fail if auto-started
-
-    tmdb_ep_calc = sort + sub.get("tmdb", {}).get("ep_offset", 0)
-    mark_downloaded(bangumi_id, sort, item.get("rss_url", ""), guid, source,
-                    pub_date=item.get("pub_date", ""), info_hash=torrent_hash,
-                    tvdb_ep=tvdb_ep_val, tmdb_ep_calc=tmdb_ep_calc)
-
-    # Clear any previous failure count after a successful download
+        logger.warning("恢复种子失败: hash=%s", info_hash[:12], exc_info=True)
+    mark_downloaded(
+        bangumi_id, sort, rss_url, guid, source, pub_date=pub_date,
+        info_hash=torrent_hash, tvdb_ep=tvdb_ep,
+        tmdb_ep_calc=old.get("tmdb_ep") if old.get("tmdb_ep") is not None else sort + tmdb.get("ep_offset", 0),
+    )
     reset_fail_count(bangumi_id, sort)
-
-    return True
+    return torrent_hash
 
 
 def resolve_episode_paths(bangumi_id: int, sort: int) -> tuple[dict, str, str]:
@@ -792,8 +797,8 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     Raises HTTPException(4xx) on missing data, HTTPException(500) on failure.
     """
     sub, season_dir, show_dir = resolve_episode_paths(bangumi_id, sort)
-    if not sub.get("tmdb", {}).get("id"):
-        raise HTTPException(400, "订阅未关联 TMDB ID，无法生成 NFO")
+    if not sub.get("tmdb", {}).get("id") and not sub.get("tvdb", {}).get("id"):
+        raise HTTPException(400, "订阅未关联 TMDB 或 TVDB ID，无法生成 NFO")
     ep = get_all_episodes(bangumi_id).get(str(sort))
     if not ep:
         raise HTTPException(404, "该集的下载记录不存在")
@@ -811,7 +816,7 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     # rename step, which regen skips (rename_in_qbit=False) — placeholders.
     ok = await generate_metadata(
         None, "", bangumi_id, sort,
-        bangumi_id, sub["tmdb"]["id"], show_name,
+        bangumi_id, tmdb_meta.get("id") or 0, show_name,
         "", "",
         bgm_season=bgm_season,
         tmdb_season=tmdb_meta.get("season"),
@@ -824,6 +829,7 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
         series_name=series_name,
         rename_in_qbit=False,
         overwrite=True,
+        base_path=config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH,
     )
     if not ok:
         raise HTTPException(500, "NFO 生成失败")

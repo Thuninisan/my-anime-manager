@@ -628,4 +628,5 @@ async def batch_nfo_generator(
     tvdb_cache.clear()
     tmdb_show_cache.clear()
 
-    return {"nfoGenerated": nfo_count, "episodesProcessed": len(pending_eps), "imagesDownloaded": img_count}
+    return {"nfoGenerated": nfo_count, "episodesProcessed": len(pending_eps), "imagesDownloaded": img_count,
+            "episodePaths": [str((Path(rec["season_dir"]) / rec["file_stem"]).relative_to(pre_path)) for rec in pending_eps]}

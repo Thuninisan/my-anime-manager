@@ -13,7 +13,7 @@ from ... import config
 from ...clients.qbittorrent import rename_file
 from ...data import get_all_episodes
 
-from .generator import batch_nfo_generator, format_download_path
+from .generator import batch_nfo_generator
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ async def generate_metadata(
     rename_in_qbit: bool = True,
     overwrite: bool = False,
     metadata_ctx=None,
+    base_path: str | None = None,
 ) -> bool:
     """Generate NFO + images via :func:`batch_nfo_generator`, then rename in qBittorrent.
 
@@ -53,18 +54,18 @@ async def generate_metadata(
     """
     # ── Apply download-history overrides ────────────────────────────
     overrides = get_all_episodes(bangumi_id).get(str(sort), {})
-    eff_tmdb_season = tmdb_season or bgm_season
+    eff_tmdb_season = tmdb_season if tmdb_season is not None else bgm_season
     eff_tmdb_ep = sort + (tmdb_ep_offset or 0)
     if overrides.get("tmdb_season") is not None:
         eff_tmdb_season = overrides["tmdb_season"]
     if overrides.get("tmdb_ep") is not None:
         eff_tmdb_ep = overrides["tmdb_ep"]
 
-    eff_tvdb_season = tvdb_season or bgm_season
+    eff_tvdb_season = tvdb_season if tvdb_season is not None else bgm_season
     tvdb_ep_val = tvdb_ep or 1
 
     # ── Normalise to batch_nfo_generator format ─────────────────────
-    pre_path = str(Path(show_dir).parent)
+    pre_path = base_path if base_path is not None else str(Path(show_dir).parent)
     nfo_episodes = [{
         "bangumi_subject_id": bangumi_id,
         "bangumi_episode_sort": sort,
@@ -89,25 +90,14 @@ async def generate_metadata(
     # ── Rename in qBittorrent (skipped for NFO-only regeneration) ────
     if rename_in_qbit:
         ext = Path(old_torrent_path).suffix
-        _stem_sub = {
-            "name": show_name,
-            "series_name": series_name or show_name,
-            "bgm": {
-                "subject_name": bgm_subject_name or show_name,
-                "season": bgm_season,
-            },
-            "tvdb": {"season": eff_tvdb_season},
-            "tmdb": {"season": eff_tmdb_season},
-        }
-        new_path = format_download_path(
-            config.RSS_PATH_TEMPLATE, _stem_sub, sort=sort, ext=ext,
-            bangumi_sort=sort, bangumi_ep=sort,
-            tvdb_episode=tvdb_ep_val, tmdb_episode=eff_tmdb_ep,
-        ).lstrip("/")
+        new_path = summary["episodePaths"][0] + ext
         try:
-            await rename_file(qb_client, info_hash, old_torrent_path, new_path)
+            renamed = await rename_file(qb_client, info_hash, old_torrent_path, new_path)
+            if renamed is False:
+                return False
             logger.info("renamed: %s → %s", old_torrent_path, new_path)
         except Exception:
             logger.exception("rename failed")
+            return False
 
     return True
