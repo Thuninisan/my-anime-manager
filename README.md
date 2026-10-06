@@ -37,6 +37,8 @@ docker compose up -d --build
 
 启动前编辑 `docker-compose.yml`：填入 qBittorrent 地址与密码、TMDB 密钥，并将种子目录和下载目录的宿主机占位路径改为实际路径。不使用代理时保持 `PROXY_HOST` 为空。`./mam-data:/app/data` 用于持久化设置、订阅、历史、数据库和日志；`mam-source` 卷保留容器拉取的源码。
 
+代理地址可填写纯 IP/域名（如 `192.168.1.2`），配合 `PROXY_PORT` 使用；也可填写 `http://192.168.1.2:7890` 或 `https://proxy.example:8443`，地址中指定的端口优先。IPv6 地址同样支持。Docker 中的 `127.0.0.1` 指向容器自身，连接宿主机代理时需填写容器可访问的宿主机地址。环境变量只在首次启动且 `settings.json` 不存在时初始化设置；已有设置请通过网页 Settings 修改。
+
 应用与 qBittorrent 必须能访问同一份下载文件；跨容器时，建议两边使用相同的容器内路径，例如 `/downloads`。硬链接要求下载目录和目标媒体目录处于同一文件系统。启动后访问 `http://你的服务器地址:8000`，排查启动问题可运行 `docker compose logs -f my-anime-manager`。
 
 容器启动时需要访问 GitHub、Python 包仓库和 npm。网页“设置 → Updates”可以检查远端提交并触发拉取、前端重建和应用重启。更新基础镜像时，在宿主机运行：
