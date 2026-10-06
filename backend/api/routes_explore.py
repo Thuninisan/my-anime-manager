@@ -6,6 +6,7 @@ from time import monotonic
 from fastapi import APIRouter, HTTPException
 
 from ..clients import bangumi
+from ..services import rss_poster
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -39,7 +40,11 @@ async def explore_calendar() -> list[dict]:
                     "id": subject["id"],
                     "name": subject.get("name_cn") or subject.get("name") or str(subject["id"]),
                     "original_name": subject.get("name") or "",
-                    "poster_url": images.get("large") or images.get("common") or "",
+                    # Fetch covers through the server's configured proxy and cache,
+                    # just like RSS cards, instead of contacting Bangumi in the browser.
+                    "poster_url": rss_poster.poster_url(subject["id"]) if any(
+                        images.get(size) for size in ("common", "medium", "large", "grid", "small")
+                    ) else "",
                     "rating": rating.get("score") or 0,
                     "air_date": subject.get("air_date") or "",
                 })
