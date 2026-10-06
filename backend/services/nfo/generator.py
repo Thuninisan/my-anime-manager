@@ -627,6 +627,5 @@ async def batch_nfo_generator(
     bgm_subject_data_cache.clear()
     tvdb_cache.clear()
     tmdb_show_cache.clear()
-    tmdb_season_cache.clear()
 
     return {"nfoGenerated": nfo_count, "episodesProcessed": len(pending_eps), "imagesDownloaded": img_count}
