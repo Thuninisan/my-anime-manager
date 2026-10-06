@@ -1,5 +1,6 @@
 import { useMemo, useState, useCallback } from 'react';
 import MatchTable, { type MatchRow } from '@/components/torrent/MatchTable';
+import { subtitleStatus, type SubtitleAssociations, type SubtitleFilter } from '@/lib/subtitleMatching';
 import InfoCards from '@/components/torrent/InfoCards';
 import { submitDownload, type DownloadFileEntry, type UploadedSubEntry } from '@/api/torrentApi';
 
@@ -82,6 +83,8 @@ export default function TorrentPreview({
   const tvCount = parsedFiles.length - movieCount;
 
   // ── State lifted from MatchTable (for download button) ──
+  const [associations, setAssociations] = useState<SubtitleAssociations>({});
+  const [subtitleFilter, setSubtitleFilter] = useState<SubtitleFilter>('all');
   const [effectiveRows, setEffectiveRows] = useState<MatchRow[]>([]);
   const [uploadedSubtitles, setUploadedSubtitles] = useState<
     { originalFilename: string; storedFilename: string }[]
@@ -115,6 +118,14 @@ export default function TorrentPreview({
       const files: DownloadFileEntry[] = [];
       const matchedRows = effectiveRows.filter((r) => r.matched);
 
+      const subtitleSuffix = (row: MatchRow, id: string) => {
+        const linked = associations[row.torrent_path]?.linked || [];
+        const sub = linked.find(s => s.id === id)!;
+        const ext = sub.path.slice(sub.path.lastIndexOf('.'));
+        const group = (s: typeof sub) => `${s.source}:${s.path.replace(/\.[^.]+$/, '')}`;
+        const groups = [...new Set(linked.map(group))];
+        return groups.length > 1 ? `.sub${groups.indexOf(group(sub)) + 1}${ext}` : ext;
+      };
       for (const row of matchedRows) {
         const tmdbName = getTmdbShowName(searchResult, row.show_name);
         const bgmName = getBangumiShowName(searchResult, row);
@@ -139,26 +150,10 @@ export default function TorrentPreview({
           ...nfoMeta,
         });
 
-        // Matching subtitle files from the torrent
-        const videoStem = row.file_name.replace(/\.[^.]+$/, '').toLowerCase();
-        const torrentSubtitles: string[] = searchResult?.subtitles || [];
-        for (const sub of torrentSubtitles) {
-          if (sub.replace(/\.[^.]+$/, '').toLowerCase() === videoStem) {
-            // Find the torrent_path for this subtitle from parsed_files or skipped_files
-            const allFiles = [
-              ...(searchResult?.parsed_files || []),
-              ...(searchResult?.skipped_files || []),
-            ];
-            const subInfo = allFiles.find((f: any) => f.file_name === sub);
-            files.push({
-              torrent_path: subInfo?.torrent_path || sub,
-              is_subtitle: true,
-              tmdb_show_name: tmdbName,
-              bangumi_show_name: bgmName,
-              bangumi_sort: row.bgm_sort ?? row.src_episode,
-              ...nfoMeta,
-            });
-          }
+        for (const sub of associations[row.torrent_path]?.linked || []) {
+          if (sub.source !== 'torrent') continue;
+          files.push({ torrent_path: sub.path, is_subtitle: true, subtitle_suffix: subtitleSuffix(row, sub.id), tmdb_show_name: tmdbName,
+            bangumi_show_name: bgmName, bangumi_sort: row.bgm_sort ?? row.src_episode, ...nfoMeta });
         }
       }
 
@@ -166,12 +161,10 @@ export default function TorrentPreview({
       const uploadedSubs: UploadedSubEntry[] = [];
       for (const usub of uploadedSubtitles) {
         // Find which matched row this subtitle belongs to (by stem match)
-        const subStem = usub.storedFilename.replace(/\.[^.]+$/, '').toLowerCase();
-        const matchingRow = matchedRows.find(
-          (r) => r.file_name.replace(/\.[^.]+$/, '').toLowerCase() === subStem,
-        );
+        const matchingRow = matchedRows.find(r => associations[r.torrent_path]?.linked.some(s => s.id === `upload:${usub.storedFilename}`));
         if (matchingRow) {
           uploadedSubs.push({
+            subtitle_suffix: subtitleSuffix(matchingRow, `upload:${usub.storedFilename}`),
             stored_filename: usub.storedFilename,
             original_filename: usub.originalFilename,
             tmdb_show_name: getTmdbShowName(searchResult, matchingRow.show_name),
@@ -209,7 +202,7 @@ export default function TorrentPreview({
     } finally {
       setDownloading(false);
     }
-  }, [effectiveRows, uploadedSubtitles, searchResult, replaceBangumiId, onTorrentAdded]);
+  }, [effectiveRows, associations, uploadedSubtitles, searchResult, replaceBangumiId, onTorrentAdded]);
 
   const torrentName: string = searchResult?.torrent_name || 'Torrent Preview';
   const success = downloadResult && !downloading;
@@ -306,6 +299,8 @@ export default function TorrentPreview({
         {/* ── Match tables ── */}
         <MatchTable
           data={mergedResult}
+          subtitleFilter={subtitleFilter}
+          onAssociationsChange={setAssociations}
           onRowsComputed={handleRowsComputed}
           onSubtitlesChange={handleSubtitlesChange}
         />
@@ -337,6 +332,15 @@ export default function TorrentPreview({
 
       {/* ── Bottom action bar ── */}
       <div className="sticky bottom-0 bg-background/95 backdrop-blur-md border-t border-border-light dark:border-border-dark px-8 py-5 z-30">
+        {!success && <div className="mb-3 flex flex-wrap items-center justify-center gap-3 text-xs">
+          <span>已选 {effectiveRows.filter(r => r.matched).length} 个视频</span>
+          {(['linked', 'missing', 'pending'] as const).map(status => <span key={status}>{effectiveRows.filter(r => r.matched && subtitleStatus(associations[r.torrent_path]) === status).length} 个{status === 'linked' ? '已关联字幕' : status === 'missing' ? '未关联' : '待确认'}</span>)}
+          {(['all', 'missing', 'pending'] as const).map(filter => <button key={filter} type="button" aria-pressed={subtitleFilter === filter}
+            className={`rounded-md border px-2 py-1 cursor-pointer ${subtitleFilter === filter ? 'border-primary text-primary bg-primary/10' : 'border-border text-muted-foreground'}`}
+            onClick={() => { setSubtitleFilter(filter); document.getElementById('torrent-file-matches')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+            {filter === 'all' ? '全部视频' : filter === 'missing' ? '查看未关联' : '查看待确认'}</button>)}
+          <span className="text-muted-foreground">仅统计外置字幕</span>
+        </div>}
         <div className="flex justify-center">
           {success ? (
             /* ── Success state: offer to process another torrent ── */

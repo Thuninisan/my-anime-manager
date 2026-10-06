@@ -19,6 +19,12 @@ from ...utils.paths import SUBTITLE_DIR
 logger = logging.getLogger(__name__)
 
 
+def _subtitle_suffix(item: dict, fallback: str) -> str:
+    suffix = item.get("subtitle_suffix", "")
+    return suffix if re.fullmatch(r"(?:\.sub[1-9][0-9]*)?\.[a-zA-Z0-9]+", suffix) else fallback
+
+
+
 def build_processing(context: dict) -> dict:
     """Resolve confirmed selections into file operations before download starts."""
     from ..nfo import format_download_path
@@ -30,6 +36,8 @@ def build_processing(context: dict) -> dict:
     operations: list[dict] = []
 
     def destination(item: dict, suffix: str, *, is_subtitle: bool) -> Path:
+        if is_subtitle:
+            suffix = _subtitle_suffix(item, suffix)
         if movie_meta:
             title = movie_meta["tmdb_name"]
             return root / title / f"{title}{suffix}"
@@ -208,7 +216,7 @@ async def monitor_download(
                 for f in files:
                     torrent_path = f["torrent_path"]
                     is_sub = f.get("is_subtitle", False)
-                    src_ext = Path(torrent_path).suffix
+                    src_ext = _subtitle_suffix(f, Path(torrent_path).suffix) if is_sub else Path(torrent_path).suffix
                     src_path = Path(save_path) / torrent_path
 
                     if is_sub:
@@ -240,7 +248,7 @@ async def monitor_download(
                     if not src_sub.exists():
                         logger.warning("   上传的字幕文件不存在: %s", src_sub)
                         continue
-                    dest_path = movie_dir / f"{tmdb_name}{src_sub.suffix}"
+                    dest_path = movie_dir / f"{tmdb_name}{_subtitle_suffix(usub, src_sub.suffix)}"
                     try:
                         shutil.copy2(src_sub, dest_path)
                         created += 1
@@ -264,7 +272,7 @@ async def monitor_download(
                 for f in files:
                     torrent_path = f["torrent_path"]
                     is_sub = f.get("is_subtitle", False)
-                    src_ext = Path(torrent_path).suffix
+                    src_ext = _subtitle_suffix(f, Path(torrent_path).suffix) if is_sub else Path(torrent_path).suffix
 
                     sub = _make_sub_for_path(f, series_name)
                     tvdb_ep = f.get("tvdb_episode") or 0
@@ -318,7 +326,7 @@ async def monitor_download(
                         template, sub,
                         tvdb_episode=tvdb_ep, tmdb_episode=tmdb_ep,
                     ).lstrip("/")
-                    rel_path = str(Path(rel_path).with_suffix(src_sub.suffix))
+                    rel_path = str(Path(rel_path).with_suffix(_subtitle_suffix(usub, src_sub.suffix)))
 
                     dest_path = Path(hardlink_root) / rel_path
                     dest_path.parent.mkdir(parents=True, exist_ok=True)

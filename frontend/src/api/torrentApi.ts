@@ -75,6 +75,7 @@ export async function parseAndSearchTorrent(file: File): Promise<any> {
 // ── Download (submit to qBittorrent) ──
 
 export interface DownloadFileEntry {
+  subtitle_suffix?: string;
   torrent_path: string;
   is_subtitle: boolean;
   tmdb_show_name: string;
@@ -90,6 +91,7 @@ export interface DownloadFileEntry {
 }
 
 export interface UploadedSubEntry {
+  subtitle_suffix?: string;
   stored_filename: string;
   original_filename: string;
   tmdb_show_name: string;

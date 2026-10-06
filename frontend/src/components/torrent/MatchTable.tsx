@@ -18,6 +18,8 @@
 */
 
 import { useEffect } from 'react';
+import SubtitlePanel from '@/components/torrent/SubtitlePanel';
+import { subtitleStatus, type SubtitleAssociations, type SubtitleFilter } from '@/lib/subtitleMatching';
 import MappingCard from '@/components/torrent/MappingCard';
 import type { MatchRow, TmdbSeason } from '@/types/matchTable';
 
@@ -34,8 +36,10 @@ import { showError } from '@/lib/toast';
 export type { MatchRow, BgmEpisode } from '@/types/matchTable';
 export { computeMatches } from '@/lib/matchUtils';
 
-export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: {
+export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, onAssociationsChange, subtitleFilter = 'all' }: {
   data: any;
+  subtitleFilter?: SubtitleFilter;
+  onAssociationsChange?: (value: SubtitleAssociations) => void;
   onRowsComputed?: (rows: MatchRow[]) => void;
   onSubtitlesChange?: (subs: { originalFilename: string; storedFilename: string }[]) => void;
 }) {
@@ -65,18 +69,17 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
 
   // ── Subtitle state ──
   const {
-    uploadedSubtitles,
-    hasMatchingSubtitle,
-    isUploadedMatch,
-    getUploadedStoredFilename,
+    uploadedSubtitles, associations, subtitleFiles, setAssociation,
     handleSubtitleUploaded,
     makeHandleSubtitleDeleted,
     batchFolderRef,
     batchProcessing,
     batchProgress,
     handleBatchFolderUpload,
-  } = useSubtitleMatching(subtitles, torrentName, tvRows);
+  } = useSubtitleMatching(subtitles, torrentName, rows);
 
+  useEffect(() => { onAssociationsChange?.(associations); }, [associations, onAssociationsChange]);
+  const visible = (r: MatchRow) => subtitleFilter === 'all' || (r.matched && subtitleStatus(associations[r.torrent_path]) === subtitleFilter);
   // ── Notify parent ──
   useEffect(() => { onRowsComputed?.(rows); }, [rows, onRowsComputed]);
   useEffect(() => { onSubtitlesChange?.(uploadedSubtitles); }, [uploadedSubtitles, onSubtitlesChange]);
@@ -87,17 +90,17 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
   }, [matchError]);
 
   // ── Shared subtitle callbacks ──
-  const subProps = (fileName: string) => {
-    const sf = getUploadedStoredFilename(fileName);
+  const subProps = (row: MatchRow) => {
     return {
-      hasSubtitle: hasMatchingSubtitle(fileName),
-      isUploadedSubtitle: isUploadedMatch(fileName),
-      onSubtitleDeleted: sf ? makeHandleSubtitleDeleted(sf) : undefined,
+      subtitlePanel: <SubtitlePanel state={associations[row.torrent_path] || { linked: [], candidates: [] }} files={subtitleFiles}
+        onAssociate={(id, linked) => setAssociation(id, linked ? row.torrent_path : null)}
+        onDelete={file => makeHandleSubtitleDeleted(file.path)()} />,
     };
   };
 
   return (
-    <div className="space-y-10">
+    <div className="space-y-10" id="torrent-file-matches">
+      {subtitleFilter !== 'all' && !rows.some(visible) && <p className="text-sm text-muted-foreground">当前筛选下没有已选视频。</p>}
       {/* ── Movie Table ── */}
       {movieRows.length > 0 && (
         <div className="mb-10">
@@ -115,7 +118,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
             </div>
           </div>
           <div className="space-y-3">
-            {movieRows.map((r) => {
+            {movieRows.filter(visible).map((r) => {
               const i = (r as any)._idx as number;
               const currentEntryId = r.bgm_entry_id ?? 0;
               const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
@@ -123,8 +126,8 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
                 <MappingCard
                   key={i} row={r} rowIndex={i} variant="movie"
                   torrentName={torrentName}
-                  onSubtitleUploaded={handleSubtitleUploaded}
-                  {...subProps(r.file_name)}
+                  onSubtitleUploaded={(original, stored) => { handleSubtitleUploaded(original, stored); setAssociation(`upload:${stored}`, r.torrent_path); }}
+                  {...subProps(r)}
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps} currentEntryId={currentEntryId}
                   onBgmEntryChange={(v) => handleBgmEntryChange(i, v)}
@@ -169,7 +172,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
           </div>
           {batchProgress && <p className="text-xs text-slate-500 mb-3 -mt-1">{batchProgress}</p>}
           <div className="space-y-3">
-            {tvRows.map((r) => {
+            {tvRows.filter(visible).map((r) => {
               const i = (r as any)._idx as number;
               const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
               const currentEntryId = r.bgm_entry_id ?? 0;
@@ -189,8 +192,8 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
                 <MappingCard
                   key={i} row={r} rowIndex={i} variant="tv"
                   torrentName={torrentName}
-                  onSubtitleUploaded={handleSubtitleUploaded}
-                  {...subProps(r.file_name)}
+                  onSubtitleUploaded={(original, stored) => { handleSubtitleUploaded(original, stored); setAssociation(`upload:${stored}`, r.torrent_path); }}
+                  {...subProps(r)}
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps} currentEntryId={currentEntryId}
                   tmdbSeasonOptions={tmdbSeasonOpts} tmdbSeasonValue={r.tmdb_season ?? ''}
@@ -224,7 +227,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
             </div>
           </div>
           <div className="space-y-3">
-            {spRows.map((r) => {
+            {spRows.filter(visible).map((r) => {
               const i = (r as any)._idx as number;
               const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
               const currentEntryId = r.bgm_entry_id ?? 0;
@@ -256,8 +259,8 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange }: 
                 <MappingCard
                   key={i} row={r} rowIndex={i} variant="sp"
                   torrentName={torrentName}
-                  onSubtitleUploaded={handleSubtitleUploaded}
-                  {...subProps(r.file_name)}
+                  onSubtitleUploaded={(original, stored) => { handleSubtitleUploaded(original, stored); setAssociation(`upload:${stored}`, r.torrent_path); }}
+                  {...subProps(r)}
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps} currentEntryId={currentEntryId}
                   tmdbSeasonOptions={tmdbSeasonOpts} tmdbSeasonValue={tmdbSeasonVal}

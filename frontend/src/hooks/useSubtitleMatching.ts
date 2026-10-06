@@ -5,16 +5,16 @@
  */
 
 import { useState, useMemo, useCallback, useRef } from 'react';
+import { associateSubtitles, type SubtitleAssociations, type SubtitleFile } from '@/lib/subtitleMatching';
 import type { MatchRow } from '@/types/matchTable';
 import { BATCH_SUB_EXTENSIONS, extractEpisodeNumber } from '@/lib/matchUtils';
 import { deleteSubtitle, uploadSubtitle } from '@/api/torrentApi';
 
 export interface UseSubtitleMatchingReturn {
   uploadedSubtitles: { originalFilename: string; storedFilename: string }[];
-  combinedSubtitles: string[];
-  hasMatchingSubtitle: (videoFileName: string) => boolean;
-  isUploadedMatch: (videoFileName: string) => boolean;
-  getUploadedStoredFilename: (videoFileName: string) => string | null;
+  associations: SubtitleAssociations;
+  subtitleFiles: SubtitleFile[];
+  setAssociation: (id: string, target: string | null) => void;
   handleSubtitleUploaded: (originalFilename: string, storedFilename: string) => void;
   makeHandleSubtitleDeleted: (storedFilename: string) => () => Promise<void>;
   // Batch upload
@@ -27,18 +27,20 @@ export interface UseSubtitleMatchingReturn {
 export function useSubtitleMatching(
   subtitles: string[],
   torrentName: string,
-  tvRows: (MatchRow & { _idx: number })[],
+  tvRows: MatchRow[],
 ): UseSubtitleMatchingReturn {
+  const [manual, setManual] = useState<Record<string, string | null>>({});
+  const setAssociation = (id: string, target: string | null) => setManual(prev => ({ ...prev, [id]: target }));
   // ── Uploaded subtitles state ──
   const [uploadedSubtitles, setUploadedSubtitles] = useState<
     { originalFilename: string; storedFilename: string }[]
   >([]);
 
-  const combinedSubtitles = useMemo(
-    () => [...subtitles, ...uploadedSubtitles.map((u) => u.storedFilename)],
-    [subtitles, uploadedSubtitles],
-  );
-
+  const subtitleFiles = useMemo<SubtitleFile[]>(() => [
+    ...subtitles.map(path => ({ id: `torrent:${path}`, name: path.split('/').pop() || path, path, source: 'torrent' as const })),
+    ...uploadedSubtitles.map(u => ({ id: `upload:${u.storedFilename}`, name: u.originalFilename, path: u.storedFilename, source: 'upload' as const })),
+  ], [subtitles, uploadedSubtitles]);
+  const associations = useMemo(() => associateSubtitles(tvRows, subtitleFiles, manual), [tvRows, subtitleFiles, manual]);
   const handleSubtitleUploaded = useCallback(
     (originalFilename: string, storedFilename: string) => {
       setUploadedSubtitles((prev) => [...prev, { originalFilename, storedFilename }]);
@@ -53,29 +55,6 @@ export function useSubtitleMatching(
     },
     [torrentName],
   );
-
-  // ── Stem-based matching helpers ──
-  const hasMatchingSubtitle = (videoFileName: string): boolean => {
-    const videoStem = videoFileName.replace(/\.[^.]+$/, '').toLowerCase();
-    return combinedSubtitles.some(
-      (sub) => sub.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
-    );
-  };
-
-  const isUploadedMatch = (videoFileName: string): boolean => {
-    const videoStem = videoFileName.replace(/\.[^.]+$/, '').toLowerCase();
-    return uploadedSubtitles.some(
-      (u) => u.storedFilename.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
-    );
-  };
-
-  const getUploadedStoredFilename = (videoFileName: string): string | null => {
-    const videoStem = videoFileName.replace(/\.[^.]+$/, '').toLowerCase();
-    const match = uploadedSubtitles.find(
-      (u) => u.storedFilename.replace(/\.[^.]+$/, '').toLowerCase() === videoStem,
-    );
-    return match?.storedFilename ?? null;
-  };
 
   // ── Batch folder upload ──
   const batchFolderRef = useRef<HTMLInputElement>(null);
@@ -107,8 +86,10 @@ export function useSubtitleMatching(
     }
 
     const epToRow = new Map<number, typeof tvRows[0]>();
+    const ambiguous = new Set<number>();
     for (const row of tvRows) {
       const ep = row.src_episode;
+      if (epToRow.has(ep)) ambiguous.add(ep);
       if (ep != null && ep > 0 && !epToRow.has(ep)) {
         epToRow.set(ep, row);
       }
@@ -126,7 +107,7 @@ export function useSubtitleMatching(
       }
 
       const targetRow = epToRow.get(epNum);
-      if (!targetRow) {
+      if (!targetRow || ambiguous.has(epNum)) {
         skipped++;
         continue;
       }
@@ -139,6 +120,7 @@ export function useSubtitleMatching(
           originalFilename: file.name,
           storedFilename: result.filename,
         }]);
+        setManual(prev => ({ ...prev, [`upload:${result.filename}`]: targetRow.torrent_path }));
         matched++;
       } catch (err: any) {
         errors.push(`${file.name}: ${err.message}`);
@@ -156,10 +138,7 @@ export function useSubtitleMatching(
 
   return {
     uploadedSubtitles,
-    combinedSubtitles,
-    hasMatchingSubtitle,
-    isUploadedMatch,
-    getUploadedStoredFilename,
+    associations, subtitleFiles, setAssociation,
     handleSubtitleUploaded,
     makeHandleSubtitleDeleted,
     batchFolderRef,

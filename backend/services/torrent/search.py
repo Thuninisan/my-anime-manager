@@ -296,9 +296,9 @@ async def search_by_tmdb(
 
     # ── Collect subtitle files before anitopy parsing ──
     subtitle_files: list[str] = [
-        Path(f["name"]).name
+        f["name"]
         for f in file_list
-        if Path(f["name"]).suffix.lower() in SKIP_EXTENSIONS
+        if Path(f["name"]).suffix.lower() in {".ass", ".ssa", ".srt", ".sub", ".idx", ".vtt", ".ttml", ".sbv", ".dfxp"}
     ]
     if subtitle_files:
         logger.debug(f"   📝 {len(subtitle_files)} 个字幕文件")
