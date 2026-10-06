@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { getCalendar, type CalendarDay } from '@/api/exploreApi';
+import { useNavigate } from 'react-router-dom';
 import PosterCard from '@/components/shared/PosterCard';
 
 const weekdays = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'];
 
 export default function ExplorePage() {
+  const navigate = useNavigate();
   const [selectedDay, setSelectedDay] = useState(() => (new Date().getDay() + 6) % 7 + 1);
   const [calendar, setCalendar] = useState<CalendarDay[]>([]);
   const [loading, setLoading] = useState(true);
@@ -49,7 +51,7 @@ export default function ExplorePage() {
             <PosterCard key={item.id} bangumiId={item.id} name={item.name}
               posterUrl={item.poster_url} rating={item.rating}
               subtitle={item.original_name !== item.name ? item.original_name : item.air_date}
-              onClick={() => window.open(`https://bgm.tv/subject/${item.id}`, '_blank', 'noopener,noreferrer')} />
+              onClick={() => navigate(`/rss?${new URLSearchParams({ bangumi_id: String(item.id), name: item.name, name_original: item.original_name })}`)} />
           ))}
         </div>
       </>}

@@ -45,6 +45,8 @@ export async function getBangumiMeta(bangumiId: number): Promise<import('@/types
   return res.json();
 }
 
+export class MikanMappingNotFoundError extends Error {}
+
 export async function lookupBangumiRss(bangumiId: number): Promise<BangumiRssResponse> {
   const res = await fetch(`${API_BASE}/bangumi/${bangumiId}`);
   if (!res.ok) {
@@ -54,6 +56,7 @@ export async function lookupBangumiRss(bangumiId: number): Promise<BangumiRssRes
       const j = JSON.parse(text);
       msg = j.detail || text;
     } catch { /* not JSON */ }
+    if (res.status === 404) throw new MikanMappingNotFoundError(msg);
     throw new Error(msg || `HTTP ${res.status}`);
   }
   return res.json();

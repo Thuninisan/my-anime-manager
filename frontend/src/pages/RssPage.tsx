@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { RssFeedResponse } from '@/types/preview';
 import * as rssApi from '@/api/rssApi';
 import { showLoadingToast, updateToast } from '@/lib/toast';
@@ -17,7 +18,9 @@ import { useDownloadHistory } from '@/hooks/useDownloadHistory';
 export default function RssPage() {
   const [bangumiId, setBangumiId] = useState('');
   const [onlineSearch, setOnlineSearch] = useState<{ query: string; results: rssApi.BangumiOnlineResult[]; loading: boolean; error: string } | null>(null);
-  const { result, meta, searching, error: searchError, search, clear: clearSearch, setExternalResult } = useRssSearch();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [entryError, setEntryError] = useState('');
+  const { result, meta, mikanFallback, searching, error: searchError, search, clear: clearSearch, setExternalResult } = useRssSearch();
   const { subscriptions, loading: subLoading, subscribe, unsubscribe, activate, refresh: refreshSubs } = useSubscriptions();
   const { open: historyOpen, data: historyData, loading: historyLoading, subscription: historySub, openHistory, closeHistory, refreshHistory } = useDownloadHistory();
 
@@ -29,23 +32,38 @@ export default function RssPage() {
   const [subscribingId, setSubscribingId] = useState<number | null>(null);
   const [excludePatterns, setExcludePatterns] = useState<Record<number, string[]>>({});
 
-  // Mikan fallback state — opened when search result has no mikan_id
-  const [mikanFallback, setMikanFallback] = useState<{ bangumi_id: number; name: string } | null>(null);
-  const [mikanMeta, setMikanMeta] = useState<import('@/types/preview').BangumiMeta | null>(null);
-
-  // TMDB manual override state — Tier-2 fallback when auto-inference fails
+  // TMDB manual override state
   const [tmdbDialog, setTmdbDialog] = useState<{ bangumi_id: number; name: string } | null>(null);
 
   const handleSearch = (id: number, candidate?: { has_mikan_id: boolean; name: string }) => {
-    // Entry has bangumi_id but no mikan_id → trigger Mikan search fallback
-    if (candidate && !candidate.has_mikan_id) {
-      setMikanFallback({ bangumi_id: id, name: candidate.name });
-      // Fetch Bangumi meta in parallel for display in the dialog
-      rssApi.getBangumiMeta(id).then(setMikanMeta).catch(() => setMikanMeta(null));
-      return;
-    }
-    search(String(id));
+    setEntryError('');
+    void search(String(id), candidate);
   };
+
+  useEffect(() => {
+    const id = searchParams.get('bangumi_id');
+    if (!id || !/^[1-9]\d*$/.test(id)) return;
+    let active = true;
+    setBangumiId(id);
+    setEntryError('');
+    const name = searchParams.get('name');
+    const openEntry = async () => {
+      try {
+        const candidate = name ? await rssApi.saveBangumiSelection({
+          bangumi_id: Number(id), name,
+          name_original: searchParams.get('name_original') || '', date: '', poster_url: '',
+        }) : undefined;
+        if (!active) return;
+        // Consume the navigation request so subsequent RSS searches are independent.
+        setSearchParams({}, { replace: true });
+        void search(id, candidate);
+      } catch (e) {
+        if (active) setEntryError(e instanceof Error ? e.message : '打开订阅条目失败');
+      }
+    };
+    void openEntry();
+    return () => { active = false; };
+  }, [searchParams, setSearchParams, search]);
 
   const handleOnlineSearch = async (query: string) => {
     setOnlineSearch({ query, results: [], loading: true, error: '' });
@@ -69,12 +87,11 @@ export default function RssPage() {
   };
 
   const handleMikanAssigned = (rssResult: import('@/types/preview').BangumiRssResponse) => {
-    setExternalResult(rssResult, mikanMeta);
-    setMikanFallback(null);
+    setExternalResult(rssResult, meta);
   };
 
   const handleManualSubscribed = () => {
-    setMikanFallback(null);
+    clearSearch();
     refreshSubs();
   };
 
@@ -169,7 +186,7 @@ export default function RssPage() {
         <RssSearchBar
           bangumiId={bangumiId}
           searching={searching}
-          searchError={searchError}
+          searchError={entryError || searchError}
           onBangumiIdChange={setBangumiId}
           onSearch={handleSearch}
           onOnlineSearch={handleOnlineSearch}
@@ -206,8 +223,8 @@ export default function RssPage() {
           open={true}
           bangumiId={mikanFallback.bangumi_id}
           bangumiName={mikanFallback.name}
-          meta={mikanMeta}
-          onClose={() => { setMikanFallback(null); setMikanMeta(null); }}
+          meta={meta}
+          onClose={clearSearch}
           onMikanAssigned={handleMikanAssigned}
           onManualSubscribed={handleManualSubscribed}
         />
