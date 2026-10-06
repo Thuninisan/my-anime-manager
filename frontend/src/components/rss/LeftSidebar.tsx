@@ -1,5 +1,23 @@
 import type { DownloadHistoryResponse, SubscriptionOut } from '@/types/preview';
 
+function getMikanUrl(sub: SubscriptionOut | null): string | undefined {
+  for (const rssUrl of [sub?.primary?.rss_url, sub?.backup?.rss_url]) {
+    if (!rssUrl) continue;
+    try {
+      const url = new URL(rssUrl);
+      const mikanId = url.searchParams.get('bangumiId');
+      if ((url.protocol === 'https:' || url.protocol === 'http:')
+        && /^\/RSS\/Bangumi\/?$/i.test(url.pathname)
+        && mikanId && /^\d+$/.test(mikanId)) {
+        return new URL(`/Home/Bangumi/${mikanId}`, url.origin).href;
+      }
+    } catch {
+      // Try the backup feed when the primary URL cannot be parsed.
+    }
+  }
+  return undefined;
+}
+
 /* ── Metadata row helper ────────────────────────────────────── */
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -35,6 +53,7 @@ export default function LeftSidebar({
   onSetDeleteType, onConfirmDelete: _onConfirmDelete,
 }: Props) {
   const isActive = sub?.active !== 0;
+  const mikanUrl = getMikanUrl(sub);
 
   return (
     <aside className="w-full md:w-72 bg-muted/40 border-r border-border flex flex-col shrink-0">
@@ -192,14 +211,21 @@ export default function LeftSidebar({
         </div>
       </div>
 
-      {/* Edit TMDB — fixed at bottom */}
+      {/* Mikan link — fixed at bottom */}
       <div className="p-3 border-t border-border shrink-0">
-        <button className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary/10 text-primary hover:bg-primary/20 transition-colors rounded-full text-sm font-bold cursor-pointer">
+        <a
+          href={mikanUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-disabled={!mikanUrl}
+          title={mikanUrl ? '打开该条目的 Mikan 页面' : '该条目没有可用的 Mikan 链接'}
+          className={`w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary/10 text-primary transition-colors rounded-full text-sm font-bold ${mikanUrl ? 'hover:bg-primary/20 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+        >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
+            <path d="M15 3h6v6m0-6L10 14m-1-9H5a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2v-4" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2"/>
           </svg>
-          Edit TMDB
-        </button>
+          转到 Mikan
+        </a>
       </div>
     </aside>
   );
