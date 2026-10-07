@@ -70,8 +70,6 @@ async def lifespan(_app: FastAPI):
 
     async def recover_pending_torrents() -> None:
         while True:
-            if not torrent_store.list_pending_torrents():
-                return
             await recover_torrent_monitors()
             await asyncio.sleep(60)
 
@@ -104,10 +102,13 @@ async def lifespan(_app: FastAPI):
         logger.warning("RSS downloader stop: %s", e)
 
     # Cancel download monitor tasks
-    for info_hash, task in list(state._download_tasks.items()):
+    download_tasks = list(state._download_tasks.items())
+    for info_hash, task in download_tasks:
         if not task.done():
             task.cancel()
             logger.info("Download monitor cancelled: %s", info_hash[:8])
+    if download_tasks:
+        await asyncio.gather(*(task for _, task in download_tasks), return_exceptions=True)
     state._download_tasks.clear()
 
     await http_client_manager.aclose()

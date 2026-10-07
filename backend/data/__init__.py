@@ -640,7 +640,10 @@ def init_app_settings_from_env() -> dict | None:
         env_val = os.environ.get(key)
         if env_val is not None:
             default = CONFIG_DEFAULTS[key]
-            seeded[key] = int(env_val) if isinstance(default, int) else env_val
+            if isinstance(default, bool):
+                seeded[key] = env_val.strip().lower() in {"true", "1", "yes", "on"}
+            else:
+                seeded[key] = int(env_val) if isinstance(default, int) else env_val
 
     if seeded:
         _atomic_write(

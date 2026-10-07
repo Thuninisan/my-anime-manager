@@ -31,8 +31,10 @@ export function useConfig(): UseConfigReturn {
   const handleChange = useCallback((key: keyof AppConfig, value: string) => {
     if (!config) return;
     const current = config[key];
-    let newVal: string | number = value;
-    if (typeof current === 'number') {
+    let newVal: string | number | boolean = value;
+    if (typeof current === 'boolean') {
+      newVal = value === 'true';
+    } else if (typeof current === 'number') {
       newVal = value === '' ? 0 : parseInt(value, 10);
       if (isNaN(newVal as number)) return;
     }

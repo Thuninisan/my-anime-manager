@@ -10,6 +10,28 @@ from backend.db import connection, torrents
 
 
 class TorrentStoreTests(unittest.TestCase):
+    def test_fontinass_checkpoint_survives_media_completion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with (patch.object(connection, "DB_PATH", root / "mam.sqlite3"),
+                  patch.object(connection, "LEGACY_RESOURCE_DB", root / "missing.sqlite3"),
+                  patch.object(torrents, "LEGACY_FILE", root / "missing.json")):
+                torrents.save_torrent({"info_hash": "font-test", "processing": {"files": [
+                    {"action": "copy", "target_path": "/library/episode.ass"},
+                ]}, "other_data": "preserved"})
+                state = {"status": "processing", "ready": True, "files": [{
+                    "path": "/library/episode.ass", "status": "processing", "output_hash": "expected",
+                }]}
+                torrents.save_fontinass("font-test", state)
+                card = torrents.get_torrent("font-test")
+                self.assertEqual(card["fontinass"], state)
+                self.assertEqual(card["other_data"], "preserved")
+                self.assertEqual(card["processing"]["files"][0]["action"], "copy")
+                torrents.finish_torrent("font-test", "completed")
+                card = torrents.get_torrent("font-test")
+                self.assertEqual(card["fontinass"], state)
+                self.assertNotIn("processing", card)
+
     def test_legacy_import_upsert_and_finish(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -48,6 +48,17 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/settings").json()["RSS_EXCLUDE_PATTERNS"], ["全集", "预告"])
         self.assertEqual(json.loads(self.settings_path.read_text())["RSS_EXCLUDE_PATTERNS"], ["全集", "预告"])
 
+    def test_fontinass_settings_validation_and_persistence(self):
+        values = {"FONTINASS_ENABLED": True, "FONTINASS_URL": "https://example.test", "FONTINASS_TIMEOUT": 90}
+        self.assertEqual(self.client.patch("/api/settings", json=values).status_code, 200)
+        config._overrides.clear()
+        settings = self.client.get("/api/settings").json()
+        for key, value in values.items():
+            self.assertEqual(settings[key], value)
+        for invalid in ({"FONTINASS_ENABLED": "true"}, {"FONTINASS_TIMEOUT": 0},
+                        {"FONTINASS_URL": "file:///tmp"}, {"FONTINASS_URL": "https://user:secret@example.test"}):
+            self.assertEqual(self.client.patch("/api/settings", json=invalid).status_code, 422)
+
 
 if __name__ == "__main__":
     unittest.main()

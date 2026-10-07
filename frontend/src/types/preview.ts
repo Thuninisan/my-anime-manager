@@ -200,5 +200,8 @@ export interface AppConfig {
   TORRENT_EXCLUDE_PATTERNS: string;
   TORRENT_HARDLINK_PATH: string;
   MOVIE_HARDLINK_PATH: string;
+  FONTINASS_ENABLED: boolean;
+  FONTINASS_URL: string;
+  FONTINASS_TIMEOUT: number;
   RSS_PATH_TEMPLATE: string;
 }

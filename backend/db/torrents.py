@@ -155,6 +155,26 @@ def list_pending_torrents() -> list[dict]:
         return [_as_dict(session, card) for card in cards]
 
 
+def get_torrent(info_hash: str) -> dict | None:
+    _ensure_legacy_imported()
+    with new_session() as session:
+        card = session.scalar(select(TorrentCard).where(TorrentCard.info_hash == info_hash))
+        return _as_dict(session, card) if card else None
+
+
+def save_fontinass(info_hash: str, value: dict) -> None:
+    """Checkpoint subtitle processing without replacing the media processing plan."""
+    _ensure_legacy_imported()
+    with new_session() as session, session.begin():
+        card = session.scalar(select(TorrentCard).where(TorrentCard.info_hash == info_hash))
+        if card is None:
+            return
+        extra = structured_values.read(session, "torrent_card", card.id, "extra_data", {})
+        extra["fontinass"] = value
+        structured_values.replace(session, "torrent_card", card.id, "extra_data", extra)
+        card.updated_at = datetime.now().astimezone().isoformat(timespec="seconds")
+
+
 def finish_torrent(info_hash: str, status: str) -> None:
     _ensure_legacy_imported()
     with new_session() as session, session.begin():

@@ -14,6 +14,18 @@ export interface TorrentCollection {
   encoding_group: string;
   video_codec: string;
   bangumi_ids: number[];
+  fontinass?: {
+    status: string;
+    files: { path: string; status: string; attempts: number; code?: number; error?: string }[];
+  };
+}
+
+export async function retryFontinass(infoHash: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/torrent/${encodeURIComponent(infoHash)}/fontinass/retry`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `重试失败 (HTTP ${res.status})`);
+  }
 }
 
 export async function getTorrentCollections(): Promise<TorrentCollection[]> {

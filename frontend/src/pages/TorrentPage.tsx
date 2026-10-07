@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import TorrentUpload from '@/components/torrent/TorrentUpload';
 import TorrentPreview from '@/components/torrent/TorrentPreview';
+import FontinassStatus from '@/components/torrent/FontinassStatus';
 import PosterCard from '@/components/shared/PosterCard';
 import { getTorrentCollections, parseAndSearchTorrent, type TorrentCollection } from '@/api/torrentApi';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -97,17 +98,19 @@ export default function TorrentPage() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {[...collections].reverse().map((item) => (
-              <PosterCard
-                key={item.info_hash}
-                bangumiId={item.bangumi_ids?.[0]}
-                name={item.show_name || (item.bangumi_ids?.[0] ? `Bangumi ${item.bangumi_ids[0]}` : '未匹配 Bangumi')}
-                posterUrl={item.poster_url}
-                rating={item.bgm_rating}
-                tags={[
-                  ...(item.encoding_group === 'ktnbytes' ? ['ktnbytes'] : []),
-                  ...(item.video_codec?.toLowerCase() === 'av1' ? ['AV1'] : item.video_codec?.toLowerCase() === 'h265' ? ['H.265'] : []),
-                ]}
-              />
+              <div key={item.info_hash}>
+                <PosterCard
+                  bangumiId={item.bangumi_ids?.[0]}
+                  name={item.show_name || (item.bangumi_ids?.[0] ? `Bangumi ${item.bangumi_ids[0]}` : '未匹配 Bangumi')}
+                  posterUrl={item.poster_url}
+                  rating={item.bgm_rating}
+                  tags={[
+                    ...(item.encoding_group === 'ktnbytes' ? ['ktnbytes'] : []),
+                    ...(item.video_codec?.toLowerCase() === 'av1' ? ['AV1'] : item.video_codec?.toLowerCase() === 'h265' ? ['H.265'] : []),
+                  ]}
+                />
+                <FontinassStatus item={item} onRefresh={refreshCollections} />
+              </div>
             ))}
           </div>
         )}

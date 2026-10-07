@@ -9,12 +9,12 @@ import asyncio
 import logging
 import os
 import re
-import shutil
 from pathlib import Path
 
 from ... import config
 from ...clients.qbittorrent import get_torrents_by_hashes, login as qb_login
 from ...utils.paths import SUBTITLE_DIR
+from .fontinass import copy_subtitle
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +116,7 @@ async def monitor_processing(info_hash: str, torrent_name: str, processing: dict
                     os.replace(staged, dest)
                     linked.add(dest)
                 else:
-                    shutil.copy2(src, dest)
+                    copy_subtitle(info_hash, src, dest)
             except OSError:
                 logger.exception("Torrent 后处理失败: %s → %s", src, dest)
         return linked
@@ -227,7 +227,7 @@ async def monitor_download(
                     try:
                         if src_path.exists():
                             if is_sub:
-                                shutil.copy2(src_path, dest_path)
+                                copy_subtitle(info_hash, src_path, dest_path)
                             else:
                                 staged = dest_path.with_name(dest_path.name + ".mam-new")
                                 staged.unlink(missing_ok=True)
@@ -250,7 +250,7 @@ async def monitor_download(
                         continue
                     dest_path = movie_dir / f"{tmdb_name}{_subtitle_suffix(usub, src_sub.suffix)}"
                     try:
-                        shutil.copy2(src_sub, dest_path)
+                        copy_subtitle(info_hash, src_sub, dest_path)
                         created += 1
                         logger.info("   [uploaded] %s → %s", stored_name, dest_path)
                     except OSError as e:
@@ -296,7 +296,7 @@ async def monitor_download(
                     try:
                         if src_path.exists():
                             if is_sub:
-                                shutil.copy2(src_path, dest_path)
+                                copy_subtitle(info_hash, src_path, dest_path)
                             else:
                                 staged = dest_path.with_name(dest_path.name + ".mam-new")
                                 staged.unlink(missing_ok=True)
@@ -332,7 +332,7 @@ async def monitor_download(
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
 
                     try:
-                        shutil.copy2(src_sub, dest_path)
+                        copy_subtitle(info_hash, src_sub, dest_path)
                         created += 1
                         logger.info("   [uploaded] %s → %s", stored_name, dest_path)
                     except OSError as e:

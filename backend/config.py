@@ -14,7 +14,8 @@ Sensitive keys (password, api key) are masked in get_all().
 
 import os
 from typing import Any
-from pydantic import ConfigDict, Field, create_model
+from pydantic import ConfigDict, Field, create_model, field_validator
+from urllib.parse import urlsplit
 
 _SENSITIVE_KEYS = {"TMDB_API_KEY", "QBITTORRENT_PASSWORD", "TVDB_API_KEY", "DEEPSEEK_API_KEY"}
 
@@ -41,12 +42,28 @@ _DEFAULTS: dict[str, Any] = {
     "TORRENT_EXCLUDE_PATTERNS": "cds,scans,pv,cm,menu,iv,preview,mka,nced,ncop",
     "TORRENT_HARDLINK_PATH": "/Media/BD",
     "MOVIE_HARDLINK_PATH": "/Media/剧场版",
+    "FONTINASS_ENABLED": False,
+    "FONTINASS_URL": "https://font.anibt.net",
+    "FONTINASS_TIMEOUT": 180,
 }
 
 _BOUNDED_INTS = {"RESOURCE_POLL_INTERVAL_MIN": (1, 1440), "RSS_POLL_INTERVAL_MIN": (1, 1440), "API_DELAY_MS": (0, 60000), "PROXY_PORT": (1, 65535)}
+_BOUNDED_INTS["FONTINASS_TIMEOUT"] = (10, 600)
+
+
+@field_validator("FONTINASS_URL")
+def _fontinass_url(value: str) -> str:
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.query or parsed.fragment or any(char.isspace() for char in value):
+        raise ValueError("FontInAss 服务地址必须是有效的 HTTP/HTTPS 地址")
+    _ = parsed.port
+    return value
+
+
 _SettingsModel = create_model(
     "SettingsModel",
     __config__=ConfigDict(extra="forbid", strict=True),
+    __validators__={"fontinass_url": _fontinass_url},
     **{
         key: (list[str] if isinstance(default, list) else type(default), Field(default=default, ge=_BOUNDED_INTS[key][0], le=_BOUNDED_INTS[key][1]) if key in _BOUNDED_INTS else Field(default_factory=lambda value=default: list(value)) if isinstance(default, list) else Field(default=default))
         for key, default in _DEFAULTS.items()

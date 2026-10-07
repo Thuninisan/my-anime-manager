@@ -60,6 +60,10 @@ python run.py
 
 ## 设置与数据
 
+在 Settings → Torrent 的“ASS 字体处理”中开启 FontInAss，可在 Torrent 下载完成、外挂字幕复制到媒体目录后，自动上传本次复制的 ASS 并嵌入子集字体。默认服务地址为 `https://font.anibt.net`，请求超时为 180 秒；该功能默认关闭，仅处理 `.ass`，SRT 和其他格式仍按原流程复制。使用严格检查，只有完整成功且字幕事件数量、时间轴验证通过时才原位替换目标字幕，下载目录中的源字幕保持不变。
+
+FontInAss 网络故障、缺失字体、缺字形或返回警告时保留目标字幕。Torrent 卡片显示处理进度、失败原因，并可重试失败字幕；失败不影响视频下载和整理结果。处理记录保存在现有 SQLite 数据库，应用重启后恢复未完成处理，跳过已完成文件。FontInAss 请求使用应用已有的代理设置。开启该功能会将 ASS 字幕内容发送到配置的服务。
+
 首次打开网页后，在设置页填写 TMDB API Key、qBittorrent 连接信息、下载及整理路径。路径应填写**应用容器内**看到的路径。TVDB 和 DeepSeek 密钥是可选项。设置保存到 `MAM_DATA_DIR/settings.json`（Docker 中为 `/app/data/settings.json`）；环境变量仅在设置文件不存在的首次启动时初始化同名设置，之后以网页保存值为准。敏感字段在 API 中显示为 `***`。
 
 RSS 排除词、RSS 下载轮询间隔和资源采集轮询间隔也保存在同一设置文件。旧版 `rss_settings.json` 的排除词会自动迁入 `settings.json`。订阅、下载历史、Bangumi 映射、资源与种子关系均保存在 `MAM_DATA_DIR/mam.sqlite3`。首次使用新版本时，旧 `subscriptions.json`、`download_history.json`、`torrents.json` 和随程序提供的 `bangumi_mikan_map.json` 会自动导入数据库，原文件不会删除；此后以数据库为准。降级到旧版本前，先停止应用，运行 `python scripts/export_legacy_json.py /path/to/export`，将导出的用户数据 JSON 复制到旧版的数据目录、映射文件复制到旧版的 `backend/data/` 目录。

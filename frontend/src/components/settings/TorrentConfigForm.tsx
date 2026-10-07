@@ -32,6 +32,25 @@ export default function TorrentConfigForm({ config, dirty, onChange }: Props) {
 
   return (
     <div className="flex flex-col gap-6">
+      <section className="bg-card rounded-xl sakura-shadow border border-border/30 p-6">
+        <h3 className="text-base font-semibold mb-4">ASS 字体处理</h3>
+        <div className="grid grid-cols-1 gap-5">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={config.FONTINASS_ENABLED}
+              onChange={e => onChange('FONTINASS_ENABLED', String(e.target.checked))} />
+            启用 FontInAss
+          </label>
+          <p className="text-xs text-muted-foreground">Torrent 下载完成并复制字幕后，自动处理 ASS 字体并替换目标字幕。SRT 不处理。处理失败时保留原字幕。开启后会将 ASS 字幕上传到配置的服务。</p>
+          <FieldRow label="服务地址">
+            <input className={fieldClass('FONTINASS_URL')} type="url" value={config.FONTINASS_URL}
+              placeholder="https://font.anibt.net" onChange={e => onChange('FONTINASS_URL', e.target.value)} />
+          </FieldRow>
+          <FieldRow label="请求超时（秒）" hint="10–600 秒，默认 180 秒">
+            <input className={fieldClass('FONTINASS_TIMEOUT')} type="number" min={10} max={600}
+              value={config.FONTINASS_TIMEOUT} onChange={e => onChange('FONTINASS_TIMEOUT', e.target.value)} />
+          </FieldRow>
+        </div>
+      </section>
       {/* ── Download Path ── */}
       <section className="bg-card rounded-xl sakura-shadow border border-border/30 p-6">
         <div className="flex items-center gap-2 mb-5">
