@@ -69,7 +69,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
 
   // ── Subtitle state ──
   const {
-    uploadedSubtitles, associations, subtitleFiles, setAssociation,
+    uploadedSubtitles, associations, subtitleFiles, setAssociation, preference, changePreference, setSelected,
     handleSubtitleUploaded,
     makeHandleSubtitleDeleted,
     batchFolderRef,
@@ -93,13 +93,21 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
   const subProps = (row: MatchRow) => {
     return {
       subtitlePanel: <SubtitlePanel state={associations[row.torrent_path] || { linked: [], candidates: [] }} files={subtitleFiles}
-        onAssociate={(id, linked) => setAssociation(id, linked ? row.torrent_path : null)}
+        onAssociate={(id, linked) => setSelected(id, row.torrent_path, linked)}
+        onUnlink={id => setAssociation(id, null)}
         onDelete={file => makeHandleSubtitleDeleted(file.path)()} />,
     };
   };
 
   return (
-    <div className="space-y-10" id="torrent-file-matches">
+    <div className="space-y-10 scroll-mt-20" id="torrent-file-matches">
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <span className="font-semibold">字幕选择</span>
+        {(['all', 'simplified', 'traditional'] as const).map(value => <button key={value} type="button" aria-pressed={preference === value}
+          className={`rounded-md border px-3 py-1.5 cursor-pointer ${preference === value ? 'border-primary text-primary bg-primary/10' : 'border-border text-muted-foreground'}`}
+          onClick={() => changePreference(value)}>{value === 'all' ? '全部' : value === 'simplified' ? '简体' : '繁体'}</button>)}
+        <span className="text-xs text-muted-foreground">按文件名识别，语言未知默认保留；切换选项会重置逐文件选择。</span>
+      </div>
       {subtitleFilter !== 'all' && !rows.some(visible) && <p className="text-sm text-muted-foreground">当前筛选下没有已选视频。</p>}
       {/* ── Movie Table ── */}
       {movieRows.length > 0 && (

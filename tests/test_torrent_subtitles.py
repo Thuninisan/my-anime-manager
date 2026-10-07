@@ -21,6 +21,11 @@ class TorrentSubtitleTests(unittest.TestCase):
         ])
         self.assertEqual(result["files"][1]["torrent_path"], "folder/video.chs.ass")
 
+    def test_language_suffixes_are_preserved(self):
+        for suffix in ('.zh-CN.ass', '.zh-TW.srt', '.sub2.zh-CN.ass'):
+            self.assertEqual(_subtitle_suffix({'subtitle_suffix': suffix}, '.ass'), suffix)
+        self.assertEqual(_subtitle_suffix({'subtitle_suffix': '.zh-CN/evil.ass'}, '.ass'), '.ass')
+
     def test_tv_destination_and_invalid_suffix(self):
         self.assertEqual(_subtitle_suffix({"subtitle_suffix": "../../evil.ass"}, ".ass"), ".ass")
         context = {

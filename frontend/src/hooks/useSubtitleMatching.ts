@@ -5,7 +5,7 @@
  */
 
 import { useState, useMemo, useCallback, useRef } from 'react';
-import { associateSubtitles, type SubtitleAssociations, type SubtitleFile } from '@/lib/subtitleMatching';
+import { associateSubtitles, selectSubtitles, subtitlePeers, type SubtitlePreference, type SubtitleAssociations, type SubtitleFile } from '@/lib/subtitleMatching';
 import type { MatchRow } from '@/types/matchTable';
 import { BATCH_SUB_EXTENSIONS, extractEpisodeNumber } from '@/lib/matchUtils';
 import { deleteSubtitle, uploadSubtitle } from '@/api/torrentApi';
@@ -13,6 +13,9 @@ import { deleteSubtitle, uploadSubtitle } from '@/api/torrentApi';
 export interface UseSubtitleMatchingReturn {
   uploadedSubtitles: { originalFilename: string; storedFilename: string }[];
   associations: SubtitleAssociations;
+  preference: SubtitlePreference;
+  changePreference: (value: SubtitlePreference) => void;
+  setSelected: (id: string, target: string, selected: boolean) => void;
   subtitleFiles: SubtitleFile[];
   setAssociation: (id: string, target: string | null) => void;
   handleSubtitleUploaded: (originalFilename: string, storedFilename: string) => void;
@@ -29,8 +32,23 @@ export function useSubtitleMatching(
   torrentName: string,
   tvRows: MatchRow[],
 ): UseSubtitleMatchingReturn {
+  const [preference, setPreference] = useState<SubtitlePreference>('all');
+  const [selection, setSelection] = useState<Record<string, boolean>>({});
+  const changePreference = (value: SubtitlePreference) => { setPreference(value); setSelection({}); };
   const [manual, setManual] = useState<Record<string, string | null>>({});
-  const setAssociation = (id: string, target: string | null) => setManual(prev => ({ ...prev, [id]: target }));
+  const setAssociation = (id: string, target: string | null) => {
+    const file = subtitleFiles.find(file => file.id === id);
+    const peers = file ? subtitlePeers(file, subtitleFiles) : [];
+    setManual(prev => ({ ...prev, [id]: target, ...Object.fromEntries(peers.map(peer => [peer.id, target])) }));
+  };
+  const setSelected = (id: string, target: string, selected: boolean) => {
+    const file = subtitleFiles.find(file => file.id === id);
+    if (!file) return;
+    const peers = subtitlePeers(file, subtitleFiles);
+    // Selecting an unassociated candidate explicitly confirms its target.
+    if (selected) setAssociation(id, target);
+    setSelection(prev => ({ ...prev, ...Object.fromEntries(peers.map(peer => [peer.id, selected])) }));
+  };
   // ── Uploaded subtitles state ──
   const [uploadedSubtitles, setUploadedSubtitles] = useState<
     { originalFilename: string; storedFilename: string }[]
@@ -40,7 +58,7 @@ export function useSubtitleMatching(
     ...subtitles.map(path => ({ id: `torrent:${path}`, name: path.split('/').pop() || path, path, source: 'torrent' as const })),
     ...uploadedSubtitles.map(u => ({ id: `upload:${u.storedFilename}`, name: u.originalFilename, path: u.storedFilename, source: 'upload' as const })),
   ], [subtitles, uploadedSubtitles]);
-  const associations = useMemo(() => associateSubtitles(tvRows, subtitleFiles, manual), [tvRows, subtitleFiles, manual]);
+  const associations = useMemo(() => selectSubtitles(associateSubtitles(tvRows, subtitleFiles, manual), preference, selection), [tvRows, subtitleFiles, manual, preference, selection]);
   const handleSubtitleUploaded = useCallback(
     (originalFilename: string, storedFilename: string) => {
       setUploadedSubtitles((prev) => [...prev, { originalFilename, storedFilename }]);
@@ -138,7 +156,7 @@ export function useSubtitleMatching(
 
   return {
     uploadedSubtitles,
-    associations, subtitleFiles, setAssociation,
+    associations, subtitleFiles, setAssociation, preference, changePreference, setSelected,
     handleSubtitleUploaded,
     makeHandleSubtitleDeleted,
     batchFolderRef,

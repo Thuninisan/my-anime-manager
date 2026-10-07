@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 def _subtitle_suffix(item: dict, fallback: str) -> str:
     suffix = item.get("subtitle_suffix", "")
-    return suffix if re.fullmatch(r"(?:\.sub[1-9][0-9]*)?\.[a-zA-Z0-9]+", suffix) else fallback
+    return suffix if re.fullmatch(r"(?:\.sub[1-9][0-9]*)?(?:\.zh-(?:CN|TW))?\.[a-zA-Z0-9]+", suffix) else fallback
 
 
 
