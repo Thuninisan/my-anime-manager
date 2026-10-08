@@ -56,11 +56,11 @@ export function useMatchOverrides(
     const seen = new Set<number>();
 
     for (const entry of Object.values(searchResults)) {
-      if (entry.bangumi?.id && !seen.has(entry.bangumi.id)) {
-        seen.add(entry.bangumi.id);
+      if (entry.bangumi_subject_id && !seen.has(entry.bangumi_subject_id)) {
+        seen.add(entry.bangumi_subject_id);
         options.push({
-          id: entry.bangumi.id,
-          name: entry.bangumi.name_cn || entry.bangumi.name || `ID ${entry.bangumi.id}`,
+          id: entry.bangumi_subject_id,
+          name: entry.bangumi_display_name || entry.bangumi_display_name || `ID ${entry.bangumi_subject_id}`,
         });
       }
     }
@@ -86,7 +86,7 @@ export function useMatchOverrides(
       const specials = data.specials || [];
       const spRows: MatchRow[] = specials.map(s => ({
         file_name: s.file_name, torrent_path: s.torrent_path || s.file_name, show_name: s.show_name || '-',
-        mapping: createEpisodeMapping(s.parsed, null, null, null, null, data.index ?? null),
+        mapping: createEpisodeMapping(s.parsed, null, null, null, null, data.episode_match_source ?? null),
         bgm_entry: '-', bgm_ep_name: '-', bgm_ep_name_cn: '', tmdb_ep_name: '-',
         matched: false, media_type: 'special',
       }));
@@ -122,8 +122,8 @@ export function useMatchOverrides(
   ): MatchOverrides => {
     const ir = initialRows[rowIndex];
     const se = ir ? searchResults[ir.show_name] : undefined;
-    const mapEntry = se?.map_entries?.find(
-      (me) => me.bangumi_id === ir?.mapping.bangumi.subject_id,
+    const mapEntry = se?.mapping_hints?.find(
+      (me) => me.bangumi_subject_id === ir?.mapping.bangumi.subject_id,
     );
     return {
       bgmEntryId: existing?.bgmEntryId ?? ir?.mapping.bangumi.subject_id ?? 0,
@@ -131,8 +131,8 @@ export function useMatchOverrides(
       bgmEpId: existing?.bgmEpId ?? ir?.mapping.bangumi.episode_id ?? undefined,
       tmdbSeason: existing?.tmdbSeason ?? ir?.mapping.tmdb.season_number ?? undefined,
       tmdbEp: existing?.tmdbEp ?? ir?.mapping.tmdb.episode_number ?? undefined,
-      tmdbShowId: existing?.tmdbShowId ?? ir?.mapping.tmdb.series_id ?? se?.tmdb?.id,
-      tvdbShowId: existing?.tvdbShowId ?? ir?.mapping.tvdb.series_id ?? mapEntry?.tvdb_id,
+      tmdbShowId: existing?.tmdbShowId ?? ir?.mapping.tmdb.series_id ?? se?.tmdb_series_id ?? undefined,
+      tvdbShowId: existing?.tvdbShowId ?? ir?.mapping.tvdb.series_id ?? mapEntry?.tvdb_series_id ?? undefined,
       tvdbSeason: existing?.tvdbSeason ?? ir?.mapping.tvdb.season_number ?? undefined,
       tvdbEp: existing?.tvdbEp ?? ir?.mapping.tvdb.episode_number ?? undefined,
     };
@@ -201,9 +201,9 @@ export function useMatchOverrides(
     }
 
     const season = Number(seasonStr);
-    const tmdbId = searchResults[showName]?.tmdb?.id;
+    const tmdbSeriesId = searchResults[showName]?.tmdb_series_id;
     const tmdbSeasons: Record<string, TmdbSeason> =
-      (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+      (tmdbSeriesId && episodeData.tmdb?.[String(tmdbSeriesId)]) || {};
     const seasonData = tmdbSeasons[String(season)];
     const sortedEps = [...(seasonData?.episodes || [])].sort((a, b) => a.episode_number - b.episode_number);
     const firstEp = sortedEps[0]?.episode_number;
@@ -275,8 +275,8 @@ export function useMatchOverrides(
     setOverrides((prev) => {
       const existing = prev[rowIndex];
       const base = buildBaseOverride(rowIndex, existing);
-      const tvdbId = base.tvdbShowId;
-      const tvdbSeries = (tvdbId && episodeData?.tvdb?.[String(tvdbId)]) || null;
+      const tvdbSeriesId = base.tvdbShowId;
+      const tvdbSeries = (tvdbSeriesId && episodeData?.tvdb?.[String(tvdbSeriesId)]) || null;
       const seasonData = tvdbSeries?.seasons?.[String(season)];
       const sortedEps = [...(seasonData?.episodes || [])].sort((a, b) => a.episode_number - b.episode_number);
       const firstEp = sortedEps[0]?.episode_number;
@@ -323,9 +323,9 @@ export function useMatchOverrides(
       const effTmdbSeason = ov.tmdbSeason ?? r.mapping.tmdb.season_number;
       const effTmdbEp = ov.tmdbEp ?? r.mapping.tmdb.episode_number;
       if (effTmdbSeason != null && effTmdbEp != null) {
-        const tmdbId = ov.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
+        const tmdbSeriesId = ov.tmdbShowId ?? searchResults[r.show_name]?.tmdb_series_id;
         const tmdbSeasons: Record<string, CatalogSeason> =
-          (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
+          (tmdbSeriesId && episodeData.tmdb?.[String(tmdbSeriesId)]) || {};
         const sData = tmdbSeasons[String(effTmdbSeason)];
         const eData = sData?.episodes?.find((e) => e.episode_number === effTmdbEp);
         tmdbEpName = eData?.name || '-';

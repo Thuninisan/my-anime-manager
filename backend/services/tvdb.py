@@ -78,7 +78,7 @@ async def fetch_tvdb_series_episodes(
 
     Shared between the ktnbytes TMDB-first flow and the regular
     Bangumi-first flow.  Returns a structure suitable for
-    ``episode_data.tvdb``.
+    ``provider_catalogs.tvdb``.
 
     Args:
         tvdb_id: TVDB series ID.

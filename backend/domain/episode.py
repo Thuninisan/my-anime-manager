@@ -1,17 +1,20 @@
 """JSON-friendly episode domain models; no provider requests or matching policy."""
 from typing import Literal, NotRequired
 from typing_extensions import TypedDict
+from pydantic import ConfigDict
 
 EpisodeMatchSource = Literal["tmdb", "tvdb"]
 MetadataSource = Literal["bangumi", "tmdb", "tvdb", "translated"]
 
 
 class ParsedEpisodeRef(TypedDict):
+    __pydantic_config__ = ConfigDict(extra="forbid")
     season_number: int | None
     episode_number: int | float | None
 
 
 class BangumiEpisodeRef(TypedDict):
+    __pydantic_config__ = ConfigDict(extra="forbid")
     subject_id: int | None
     episode_id: int | None
     episode_number: int | float | None  # Bangumi API ep
@@ -19,6 +22,7 @@ class BangumiEpisodeRef(TypedDict):
 
 
 class TmdbEpisodeRef(TypedDict):
+    __pydantic_config__ = ConfigDict(extra="forbid")
     series_id: int | None
     episode_id: int | None
     season_number: int | None
@@ -30,6 +34,7 @@ class TvdbEpisodeRef(TmdbEpisodeRef):
 
 
 class EpisodeMapping(TypedDict):
+    __pydantic_config__ = ConfigDict(extra="forbid")
     parsed: ParsedEpisodeRef
     bangumi: BangumiEpisodeRef
     tmdb: TmdbEpisodeRef

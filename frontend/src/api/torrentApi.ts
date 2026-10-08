@@ -1,5 +1,5 @@
 import type { EpisodeMapping } from '@/types/episode';
-import { normalizeTorrentPreview, normalizeEpisodeCatalog, catalogSeriesTitle } from '@/lib/episodeAdapters';
+import { normalizeTorrentPreview } from '@/lib/episodeAdapters';
 import type { TorrentPreviewResponse } from '@/types/preview';
 import type { CatalogSeason, BangumiCatalogEntry } from '@/types/episode';
 import type { AppConfig } from '../types/preview';
@@ -186,14 +186,13 @@ export async function deleteSubtitle(
 // ── Episode data lookup by ID ──
 
 export async function fetchTmdbSeasonMap(tmdbId: number): Promise<{ name: string; seasons: Record<string, CatalogSeason> }> {
-  const res = await fetch(`/api/rss/tmdb/${tmdbId}/seasons`);
+  const res = await fetch(`${API_BASE}/torrent/catalogs/tmdb/${tmdbId}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const catalog = normalizeEpisodeCatalog({ tmdb: { [String(tmdbId)]: await res.json() } });
-  return { name: catalogSeriesTitle(catalog, String(tmdbId)) || `TMDB ${tmdbId}`, seasons: catalog.tmdb[String(tmdbId)] };
+  return res.json();
 }
 
 export async function fetchBangumiEpisodes(bangumiId: number): Promise<BangumiCatalogEntry> {
-  const res = await fetch(`${API_BASE}/torrent/bangumi/${bangumiId}/episodes`);
+  const res = await fetch(`${API_BASE}/torrent/catalogs/bangumi/${bangumiId}`);
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
@@ -209,7 +208,7 @@ export async function fetchBangumiEpisodes(bangumiId: number): Promise<BangumiCa
     }
     throw new Error(`Expected JSON but got ${ct || 'unknown'}`);
   }
-  return normalizeEpisodeCatalog({ bangumi: { [String(bangumiId)]: await res.json() } }).bangumi[String(bangumiId)];
+  return res.json();
 }
 
 export async function updateConfig(changes: Partial<AppConfig>): Promise<AppConfig> {

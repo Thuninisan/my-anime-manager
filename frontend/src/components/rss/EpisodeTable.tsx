@@ -1,4 +1,5 @@
-import type { DownloadHistoryResponse, EpisodeHistoryEntry, SubscriptionOut, SeasonInfo } from '@/types/preview';
+import type { CatalogSeason } from '@/types/episode';
+import type { DownloadHistoryResponse, EpisodeHistoryEntry, SubscriptionOut } from '@/types/preview';
 
 /* ── Status helpers ─────────────────────────────────────────── */
 
@@ -53,7 +54,7 @@ interface Props {
   expandedSort: number | null;
   tmdbForm: { ep: string; season: string };
   setTmdbForm: React.Dispatch<React.SetStateAction<{ ep: string; season: string }>>;
-  tmdbSeasonMap: Record<string, SeasonInfo> | null;
+  tmdbSeasonMap: Record<string, CatalogSeason> | null;
   onOpenTmdb: (sort: number, entry: EpisodeHistoryEntry) => void;
   onSaveTmdb: (sort: number, regen: boolean) => void;
   onRefreshNfo: (sort: number) => void;
@@ -199,7 +200,7 @@ export default function EpisodeTable({
                                 value={tmdbForm.season}
                                 onChange={ev => {
                                   const newSeason = ev.target.value;
-                                  const firstEp = tmdbSeasonMap[newSeason]?.episodes?.[0]?.epNum;
+                                  const firstEp = tmdbSeasonMap[newSeason]?.episodes?.[0]?.episode_number;
                                   setTmdbForm(p => ({ ...p, season: newSeason, ep: firstEp ? String(firstEp) : '' }));
                                 }}
                                 className="flex-1 bg-background border border-border rounded-xl px-3 py-2.5 text-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary shadow-sm"
@@ -218,8 +219,8 @@ export default function EpisodeTable({
                                 className="flex-[2] bg-background border border-border rounded-xl px-3 py-2.5 text-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary shadow-sm"
                               >
                                 {(tmdbSeasonMap[tmdbForm.season]?.episodes ?? []).map(epInfo => (
-                                  <option key={epInfo.epNum} value={String(epInfo.epNum)}>
-                                    EP{epInfo.epNum}: {epInfo.name}
+                                  <option key={epInfo.episode_number} value={String(epInfo.episode_number)}>
+                                    EP{epInfo.episode_number}: {epInfo.name}
                                   </option>
                                 ))}
                               </select>

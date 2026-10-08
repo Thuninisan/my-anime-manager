@@ -155,7 +155,7 @@ async def _fetch_bangumi_episodes(bgm_id: int) -> dict | None:
 # Episode data orchestration for a single TMDB ID
 # ═══════════════════════════════════════════════════════════════════════
 
-async def _fetch_all_episode_data(tmdb_id: int) -> dict:
+async def _fetch_all_provider_catalogs(tmdb_id: int) -> dict:
     """Fetch episode data from TMDB + related Bangumi + TVDB sources.
 
     Looks up ``bangumi_mikan_map.json`` for all entries linked to the
@@ -292,7 +292,7 @@ async def search_by_tmdb(
 
     Returns:
         Nested dict with ``parsed_files``, ``specials``, ``skipped_files``,
-        ``show_names``, ``search_results``, and ``episode_data``.
+        ``show_names``, ``search_results``, and ``provider_catalogs``.
 
     Raises:
         RuntimeError: If no files can be parsed from the torrent.
@@ -377,7 +377,7 @@ async def search_by_tmdb(
         file_counts[sn] = file_counts.get(sn, 0) + 1
 
     search_results: dict = {}
-    episode_data: dict = {
+    provider_catalogs: dict = {
         "tmdb": {},
         "bangumi": {},
         "tvdb": {},
@@ -409,8 +409,8 @@ async def search_by_tmdb(
             }
             continue
 
-        from ...domain.resource_adapters import identity_from_legacy
-        identity = identity_from_legacy(title=tmdb_info["name"], media_type="movie" if is_movie else "tv", tmdb_id=tmdb_info["id"])
+        from ...domain.resource_adapters import provider_binding_identity
+        identity = provider_binding_identity(title=tmdb_info["name"], media_type="movie" if is_movie else "tv", tmdb_id=tmdb_info["id"])
         tmdb_id = identity["tmdb_movie_id"] if is_movie else identity["tmdb_series_id"]
         logger.info(
             "torrent.tmdb_first selected torrent=%r query=%r tmdb_id=%s title=%r original_name=%r",
@@ -446,14 +446,14 @@ async def search_by_tmdb(
             logger.debug(f"   ✅ TMDB {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
 
             # Fetch episode data from all sources
-            all_data = await _fetch_all_episode_data(tmdb_id)
+            all_data = await _fetch_all_provider_catalogs(tmdb_id)
             if all_data.get("provider_fetch_errors"):
                 raise RuntimeError("preview_provider_fetch_failed")
 
-            # Merge into episode_data
-            episode_data["tmdb"].update(all_data["tmdb"])
-            episode_data["bangumi"].update(all_data["bangumi"])
-            episode_data["tvdb"].update(all_data["tvdb"])
+            # Merge into provider_catalogs
+            provider_catalogs["tmdb"].update(all_data["tmdb"])
+            provider_catalogs["bangumi"].update(all_data["bangumi"])
+            provider_catalogs["tvdb"].update(all_data["tvdb"])
 
             map_entries = all_data["map_entries"]
             bangumi_ids = sorted({me["bangumi_id"] for me in map_entries})
@@ -497,6 +497,6 @@ async def search_by_tmdb(
         "skipped_files": skipped_files,
         "show_names": show_names,
         "search_results": search_results,
-        "episode_data": episode_data,
-        "episode_catalog": episode_catalog(episode_data),
+        "provider_catalogs": provider_catalogs,
+        "episode_catalog": episode_catalog(provider_catalogs),
     }

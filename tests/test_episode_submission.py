@@ -1,3 +1,4 @@
+from tests.legacy_helpers import canonical_subscription_fixture
 """Single episode commits share mapping, select video files, and reject failures."""
 import io
 import unittest
@@ -14,7 +15,6 @@ class EpisodeSubmissionTests(unittest.IsolatedAsyncioTestCase):
         for method, value in (("get_bgm_episodes", []), ("get_tmdb_season_map", {}), ("get_tvdb_series", {})):
             stack.enter_context(patch.object(downloader.MetadataContext, method, AsyncMock(return_value=value)))
         values = {
-            'get_tmdb_id': 0, 'get_tvdb_id': 0,
             'get_all_episodes': {'3': {'tmdb_ep': 17, 'tmdb_season': 0}},
             'compute_info_hash': 'new-hash', 'qb_login': object(),
             'add_torrent': 'new-hash',
@@ -35,29 +35,29 @@ class EpisodeSubmissionTests(unittest.IsolatedAsyncioTestCase):
         for source in ('primary', 'backup', 'add', 'edit'):
             with self.subTest(source=source), ExitStack() as stack:
                 m = self.mocks(stack)
-                await downloader.submit_episode_torrent('x.torrent', 12, 3, source, sub=sub, guid='title')
+                await downloader.submit_episode_torrent('x.torrent', 12, 3, source, sub=canonical_subscription_fixture(sub, 12), guid='title')
                 args = m['generate_metadata'].await_args
-                self.assertEqual(args.args[7], 'original.mkv')
-                self.assertEqual(args.kwargs['tmdb_ep_offset'], 4)
-                self.assertEqual(args.kwargs['tvdb_id'], 20)
-                self.assertEqual(args.kwargs['tvdb_ep'], 11)
-                self.assertEqual(args.kwargs['tmdb_season'], 0)
-                self.assertEqual(m['mark_downloaded'].call_args.kwargs['tmdb_ep_calc'], 17)
+                self.assertEqual(args.args[2], 'original.mkv')
+                self.assertEqual(args.kwargs['episode_mapping']['tmdb']['series_id'], 10)
+                self.assertEqual(args.kwargs['episode_mapping']['tvdb']['series_id'], 20)
+                self.assertEqual(args.kwargs['episode_mapping']['tvdb']['episode_number'], 11)
+                self.assertEqual(args.kwargs['episode_mapping']['tmdb']['season_number'], 0)
+                self.assertEqual(m['mark_downloaded'].call_args.kwargs['episode_mapping']['tmdb']['episode_number'], 17)
                 self.assertEqual(m['mark_downloaded'].call_args.args[4], source)
 
     async def test_tvdb_only_subscription_generates_metadata(self):
         with ExitStack() as stack:
             m = self.mocks(stack)
-            await downloader.submit_episode_torrent('x', 12, 3, 'add', sub={'tvdb': {'id': 20}}, guid='title')
-            self.assertEqual(m['generate_metadata'].await_args.args[5], 0)
-            self.assertEqual(m['generate_metadata'].await_args.kwargs['tvdb_id'], 20)
+            await downloader.submit_episode_torrent('x', 12, 3, 'add', sub=canonical_subscription_fixture({'tvdb': {'id': 20}}, 12), guid='title')
+            self.assertEqual(m['generate_metadata'].await_args.kwargs['episode_mapping']['tmdb']['series_id'] or 0, 0)
+            self.assertEqual(m['generate_metadata'].await_args.kwargs['episode_mapping']['tvdb']['series_id'], 20)
 
     async def test_failure_removes_torrent_without_success_history(self):
         for files, success in ((None, False), ([{'name': 'subtitle.ass'}], True)):
             with ExitStack() as stack:
                 m = self.mocks(stack, files=files, success=success)
                 with self.assertRaises(RuntimeError):
-                    await downloader.submit_episode_torrent('x', 12, 3, 'add', sub={'tmdb': {'id': 10}}, guid='title')
+                    await downloader.submit_episode_torrent('x', 12, 3, 'add', sub=canonical_subscription_fixture({'tmdb': {'id': 10}}, 12), guid='title')
                 m['delete_torrent'].assert_awaited_once_with(m['qb_login'].return_value, 'new-hash', delete_files=False)
                 m['resume_torrent'].assert_not_awaited()
                 m['mark_downloaded'].assert_not_called()
@@ -66,7 +66,7 @@ class EpisodeSubmissionTests(unittest.IsolatedAsyncioTestCase):
         with ExitStack() as stack:
             m = self.mocks(stack)
             with self.assertRaises(HTTPException):
-                await downloader.submit_episode_torrent('x', 12, 3, 'edit', sub={}, guid='title', replace_existing=True)
+                await downloader.submit_episode_torrent('x', 12, 3, 'edit', sub=canonical_subscription_fixture({}, 12), guid='title', replace_existing=True)
             m['delete_torrent'].assert_not_awaited()
             m['add_torrent'].assert_not_awaited()
 

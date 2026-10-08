@@ -1,3 +1,4 @@
+from tests.legacy_helpers import canonical_subscription_fixture
 import unittest
 from backend.domain.episode_adapters import episode_catalog
 from backend.domain.rss_episode import rss_episode_ref
@@ -66,8 +67,8 @@ class RssLifecycleTests(unittest.IsolatedAsyncioTestCase):
         with patch("backend.services.tmdb.build_season_episode_map", AsyncMock()) as tmdb_fetch, \
              patch("backend.services.tvdb.fetch_tvdb_series_episodes", AsyncMock()) as tvdb_fetch:
             mapping = await subscription_episode_mapping(rss_episode_ref({"episode_number": 12}, "unrelated"),
-                sub, 1, ctx, sort=0, overrides={"tmdb_season": 0, "tmdb_ep": 0})
-            again = await subscription_episode_mapping(rss_episode_ref({}, ""), sub, 1, ctx, sort=0,
+                canonical_subscription_fixture(sub, 1), 1, ctx, sort=0, overrides={"tmdb_season": 0, "tmdb_ep": 0})
+            again = await subscription_episode_mapping(rss_episode_ref({}, ""), canonical_subscription_fixture(sub, 1), 1, ctx, sort=0,
                 overrides={"tmdb_season": 0, "tmdb_ep": 0})
             self.assertEqual(mapping, again)
             self.assertEqual(mapping["tmdb"]["episode_id"], 20)

@@ -40,6 +40,8 @@ from .models import (
     TmdbSearchResult,
 )
 
+from .external_api_v1_adapter import V1SubscriptionOut
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -213,7 +215,8 @@ async def rss_download_data():
 
 # ── /api/rss/subscriptions ──
 
-@router.get("/api/rss/subscriptions", response_model=list[SubscriptionOut])
+@router.get("/api/rss/subscriptions", response_model=list[V1SubscriptionOut], deprecated=True)
+@router.get("/api/rss/v2/subscriptions", response_model=list[SubscriptionOut])
 async def list_subscriptions():
     """List all saved RSS subscriptions (with downloaded episode counts)."""
     subs = data.list_subscriptions()
@@ -230,7 +233,8 @@ async def list_subscriptions():
     return subs
 
 
-@router.post("/api/rss/subscriptions", response_model=SubscriptionOut, status_code=201)
+@router.post("/api/rss/subscriptions", response_model=V1SubscriptionOut, status_code=201, deprecated=True)
+@router.post("/api/rss/v2/subscriptions", response_model=SubscriptionOut, status_code=201)
 async def create_subscription(body: SubscriptionIn):
     """Add or update a subscription.  The body is the complete desired state."""
     is_new = not any(s["bangumi_id"] == body.bangumi_id for s in data.list_subscriptions())
@@ -268,7 +272,8 @@ async def create_subscription(body: SubscriptionIn):
     return sub
 
 
-@router.post("/api/rss/manual-subscribe", response_model=SubscriptionOut, status_code=201)
+@router.post("/api/rss/manual-subscribe", response_model=V1SubscriptionOut, status_code=201, deprecated=True)
+@router.post("/api/rss/v2/manual-subscribe", response_model=SubscriptionOut, status_code=201)
 async def manual_subscribe(body: ManualSubscribeIn):
     """Create a subscription with manually provided RSS URLs.
 
@@ -321,12 +326,10 @@ def _get_cached_enrichment(bangumi_id: int) -> dict | None:
         bgm = s.get("bgm")
         if not bgm:
             continue
-        tvdb = s.get("tvdb", {})
-        tmdb = s.get("tmdb", {})
         # A valid enrichment has at least one of: episode range, TVDB ID, or TMDB ID
         has_eps = (bgm.get("sortrange") or [0, 0])[1] > 0
-        has_tvdb = (tvdb.get("id") or 0) > 0
-        has_tmdb = (tmdb.get("id") or 0) > 0
+        has_tvdb = s["resource_identity"]["tvdb_series_id"] is not None
+        has_tmdb = s["resource_identity"]["tmdb_series_id"] is not None or s["resource_identity"]["tmdb_movie_id"] is not None
         if has_eps or has_tvdb or has_tmdb:
             return {g: s[g] for g in ENRICH_GROUPS if g in s}
         # Stale/failed enrichment — ignore and re-run
@@ -451,7 +454,7 @@ async def search_tmdb_shows(q: str) -> list[TmdbSearchResult]:
     Used by the frontend Tier-2 manual fallback when a subscription's
     TMDB ID could not be auto-inferred during enrichment.
     """
-    from .clients import tmdb as tmdb_client
+    from ..clients import tmdb as tmdb_client
     try:
         res = await tmdb_client.search_tv(q, language="zh-CN")
         data_json = res.json()
@@ -588,6 +591,9 @@ async def subscription_history(bangumi_id: int):
             "guid": ep.get("guid", ""),
             "at": ep.get("at", ""),
             "info_hash": h,
+            "episode_mapping_snapshot": ep["episode_mapping_snapshot"],
+            "tmdb_episode_override": ep.get("tmdb_ep"),
+            "tmdb_season_override": ep.get("tmdb_season"),
         })
         if h:
             hashes.append(h)
@@ -624,7 +630,7 @@ async def subscription_history(bangumi_id: int):
     }
 
 
-@router.get("/api/rss/tmdb/{tmdb_id}/seasons")
+@router.get("/api/rss/tmdb/{tmdb_id}/seasons", deprecated=True)
 async def get_tmdb_seasons(tmdb_id: int) -> dict:
     """Fetch all TMDB seasons and episodes for a TV show.
 
@@ -654,7 +660,7 @@ async def get_tmdb_seasons(tmdb_id: int) -> dict:
 
     # Attach show name so the frontend can display "中文名 (ID)"
     try:
-        from .clients import tmdb as _tmdb
+        from ..clients import tmdb as _tmdb
         _detail_res = await _tmdb.get_tv_detail(tmdb_id)
         _detail = _detail_res.json()
         result["_show_name"] = _detail.get("name", str(tmdb_id))
@@ -664,7 +670,7 @@ async def get_tmdb_seasons(tmdb_id: int) -> dict:
     return result
 
 
-@router.get("/api/rss/subscriptions/{bangumi_id}/history-stream")
+@router.get("/api/rss/v2/subscriptions/{bangumi_id}/history-stream")
 async def subscription_history_stream(bangumi_id: int):
     """Stream download history + live qBittorrent updates as NDJSON.
 
@@ -694,8 +700,9 @@ async def subscription_history_stream(bangumi_id: int):
                 "guid": ep.get("guid", ""),
                 "at": ep.get("at", ""),
                 "info_hash": h,
-                "tmdb_ep": ep.get("tmdb_ep"),
-                "tmdb_season": ep.get("tmdb_season"),
+                "episode_mapping_snapshot": ep["episode_mapping_snapshot"],
+                "tmdb_episode_override": ep.get("tmdb_ep"),
+                "tmdb_season_override": ep.get("tmdb_season"),
             })
             if h:
                 hashes.append(h)
@@ -825,3 +832,12 @@ async def delete_subscription_rss(bangumi_id: int, type: str = "primary"):
         return {"ok": True, "deleted": True}
 
     return {"ok": True, "deleted": False}
+
+
+@router.get("/api/rss/subscriptions/{bangumi_id}/history-stream", deprecated=True)
+async def subscription_history_stream_v1(bangumi_id: int):
+    """Keep unknown external stream clients behind the explicit v1 boundary."""
+    from .external_api_v1_adapter import history_stream_v1
+    response = await subscription_history_stream(bangumi_id)
+    return StreamingResponse(history_stream_v1(response.body_iterator),
+                             media_type="application/x-ndjson", headers=dict(response.headers))

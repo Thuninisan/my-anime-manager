@@ -1,0 +1,115 @@
+{
+  "forbidden_tokens": [
+    "src_episode",
+    "merged_ep",
+    "bgm_sort",
+    "tmdb_ep",
+    "tvdb_ep",
+    "episode_data",
+    "preview_data",
+    "episode_compat",
+    "mapping_to_legacy_batch_episode",
+    "legacy_batch_episode_mapping",
+    "legacy_download_episode_mapping",
+    "download_entry_with_mapping",
+    "tmdb_ep_calc"
+  ],
+  "python_roots": [
+    "backend/services",
+    "backend/api",
+    "backend/domain"
+  ],
+  "token_exceptions": {
+    "backend/services/downloader.py": {
+      "tmdb_ep": {
+        "reason": "Explicit history numbering override configuration, never historical identity evidence.",
+        "functions": [
+          "regen_episode_nfo"
+        ]
+      }
+    },
+    "backend/services/rss_episode_matcher.py": {
+      "tmdb_ep": {
+        "reason": "User override at RSS numbering rule boundary.",
+        "functions": [
+          "subscription_episode_mapping"
+        ]
+      }
+    },
+    "backend/api/routes_history.py": {
+      "tmdb_ep": {
+        "reason": "Deprecated explicit history override API; business setting.",
+        "functions": [
+          "update_episode_overrides",
+          "update_canonical_episode_overrides"
+        ]
+      }
+    },
+    "backend/api/routes_rss.py": {
+      "tmdb_ep": {
+        "reason": "History business override response; not provider identity.",
+        "functions": [
+          "subscription_history",
+          "subscription_history_stream"
+        ]
+      }
+    },
+    "backend/api/external_api_v1_adapter.py": {
+      "tmdb_ep": {
+        "reason": "Deprecated external history stream business override projection; no DB writes or identity inference.",
+        "functions": [
+          "history_stream_v1"
+        ]
+      }
+    }
+  },
+  "legacy_import_boundaries": [
+    "backend/db/download_history.py",
+    "backend/db/identity.py",
+    "backend/db/torrents.py",
+    "backend/db/persistence_migration.py"
+  ],
+  "maintenance_only": [
+    "backend/db/persistence_migration.py:backfill",
+    "scripts/backfill_persistence.py"
+  ],
+  "provider_boundaries": [
+    "backend/clients",
+    "backend/domain/episode_adapters.py",
+    "backend/domain/episode_metadata_adapters.py",
+    "backend/domain/resource_adapters.py",
+    "backend/services/tmdb.py",
+    "backend/services/tvdb.py",
+    "backend/services/enrich.py",
+    "backend/services/torrent/search.py",
+    "backend/services/torrent/preview.py:provider acquisition",
+    "backend/services/torrent/preview_session.py:build_snapshot/normalize_metadata",
+    "backend/services/torrent/batch_service.py:build_preview/provider acquisition"
+  ],
+  "db_compatibility": [
+    "backend/legacy",
+    "backend/db/legacy_data.py",
+    "backend/db/models.py",
+    "backend/db/download_history.py:ensure_imported",
+    "backend/db/torrents.py:_ensure_legacy_imported"
+  ],
+  "business_configuration": [
+    "provider season/episode offsets",
+    "RSS offsets/filter ranges",
+    "explicit provider binding inputs",
+    "path-template placeholder vocabulary",
+    "history TMDB numbering overrides"
+  ],
+  "fixture_boundaries": [
+    "tests/legacy_helpers.py",
+    "tests/fixtures"
+  ],
+  "external_api_compatibility": [
+    "backend/api/external_api_v1_adapter.py",
+    "deprecated /api/rss/subscriptions and /api/rss/manual-subscribe",
+    "deprecated provider seasons/episodes GET endpoints",
+    "deprecated history override PATCH endpoint",
+    "scripts/export_legacy_json.py",
+    "deprecated /api/rss/subscriptions/{bangumi_id}/history-stream"
+  ]
+}

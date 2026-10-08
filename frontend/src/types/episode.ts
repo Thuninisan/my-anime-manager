@@ -102,3 +102,40 @@ export interface EpisodeCatalog {
   bangumi: Record<string, BangumiCatalogEntry>;
   tvdb: Record<string, { name: string; seasons: Record<string, CatalogSeason> }>;
 }
+
+export interface ResourceIdentity {
+  media_type: 'tv' | 'movie';
+  canonical_title: string | null;
+  bangumi_subject_id: number | null;
+  tmdb_series_id: number | null;
+  tmdb_movie_id: number | null;
+  tvdb_series_id: number | null;
+}
+
+export interface ResourceCandidate {
+  provider: 'bangumi' | 'tmdb' | 'tvdb';
+  provider_id: number;
+  media_type: 'tv' | 'movie' | 'special' | 'unknown';
+  title: string | null;
+  original_title: string | null;
+  alternative_titles: string[];
+  year: number | null;
+  source: string;
+}
+
+export interface ResourceResolution {
+  status: 'resolved' | 'ambiguous' | 'unresolved';
+  identity: ResourceIdentity | null;
+  candidates: ResourceCandidate[];
+  reason: string;
+}
+
+export interface EpisodeMappingSnapshot {
+  schema_version: number;
+  resource_identity_schema_version: number;
+  resource_identity: ResourceIdentity | null;
+  identity_revision: number | null;
+  source: string;
+  episode_mapping: EpisodeMapping;
+  processing_result: Record<string, string> | null;
+}

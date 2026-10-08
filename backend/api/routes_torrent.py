@@ -11,7 +11,6 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from .. import config
-from ..domain.episode_metadata_adapters import download_entry_with_mapping
 from ..db import torrents as torrent_store
 from . import state
 from ..clients import bangumi as bgm_client
@@ -120,18 +119,9 @@ def _torrent_tags(torrent_name: str, files: list[dict]) -> tuple[str, str]:
     return group, codec
 
 
-def _torrent_show_name(preview_data: dict | None, files: list[dict]) -> str:
-    """Use the confirmed Bangumi title from preview data, without a new lookup."""
+def _torrent_show_name(snapshot: dict, files: list[dict]) -> str:
     videos = [item for item in files if not item.get("is_subtitle")]
-    first_id = next((int(item["bangumi_id"]) for item in videos if item.get("bangumi_id")), 0)
-    for result in (preview_data or {}).get("search_results", {}).values():
-        bgm = result.get("bangumi") or {}
-        if bgm.get("id") == first_id:
-            return bgm.get("name_cn") or bgm.get("name") or ""
-    for item in videos:
-        if item.get("bangumi_show_name"):
-            return item["bangumi_show_name"]
-    return ""
+    return next((item["bangumi_show_name"] for item in videos if item.get("bangumi_show_name")), "")
 
 
 def _start_torrent_monitor(record: dict, context: dict | None = None) -> None:
@@ -161,7 +151,7 @@ def _start_torrent_monitor(record: dict, context: dict | None = None) -> None:
             if success and processing.get("replace_bangumi_id") is not None:
                 bangumi_id = processing["replace_bangumi_id"]
                 mapping = [
-                    {"bangumi_id": bangumi_id, "bangumi_sort": item["bangumi_sort"], "is_subtitle": False}
+                    {"episode_mapping": item["episode_mapping_snapshot"]["episode_mapping"], "is_subtitle": False}
                     for item in processing["files"] if item["action"] == "hardlink"
                 ]
                 episodes = bd_replacement.validate_mapping(bangumi_id, mapping)
@@ -386,7 +376,7 @@ async def torrent_parse_and_search(file: UploadFile = File(...)):
 
 # ── /api/torrent/bangumi/{id}/episodes ──
 
-@router.get("/api/torrent/bangumi/{bangumi_id}/episodes")
+@router.get("/api/torrent/bangumi/{bangumi_id}/episodes", deprecated=True)
 async def torrent_bangumi_episodes(bangumi_id: int):
     """Fetch episode data for a Bangumi subject (main + SP).
 
@@ -442,13 +432,14 @@ async def torrent_download(body: dict):
     hardlinks for video files and copies subtitle files into the configured
     ``TORRENT_HARDLINK_PATH`` directory.
 
-    If *preview_data* is present (the full parse-and-search result), NFO
-    files and images are generated **before** the torrent is resumed,
+    The immutable canonical preview snapshot supplies NFO
+    files and images generated **before** the torrent is resumed,
     matching the batch/scan flow behaviour.
     """
-    if "preview_id" in body:
-        from ..services.torrent.preview_session import restore_download_request
-        body = restore_download_request(body)
+    if "preview_id" not in body:
+        raise HTTPException(409, "preview_schema_outdated: create a canonical preview")
+    from ..services.torrent.preview_session import restore_download_request
+    body = restore_download_request(body)
     torrent_path = body.get("torrent_path", "")
     resource_id = body.get("resource_id")
     if resource_id is not None:
@@ -464,9 +455,9 @@ async def torrent_download(body: dict):
             raise HTTPException(400, "资源种子路径无效")
         torrent_path = str(expected)
     torrent_name = body.get("torrent_name", "")
-    files: list[dict] = [download_entry_with_mapping(file) for file in body.get("files", [])]
-    uploaded_subtitles: list[dict] = [download_entry_with_mapping(file) for file in body.get("uploaded_subtitles", [])]
-    preview_data: dict | None = body.get("preview_data")
+    files: list[dict] = body.get("files", [])
+    uploaded_subtitles: list[dict] = body.get("uploaded_subtitles", [])
+    preview_snapshot = body["preview_snapshot"]
     replace_bangumi_id = body.get("replace_bangumi_id")
 
     if not torrent_path or not Path(torrent_path).is_file():
@@ -509,10 +500,10 @@ async def torrent_download(body: dict):
         for item in files:
             if item.get("is_subtitle"):
                 continue
-            sort = int(item["bangumi_sort"])
+            sort = int(item["episode_mapping"]["bangumi"]["episode_absolute"])
             sub, _, _ = bd_replacement.downloader.resolve_episode_paths(replace_bangumi_id, sort)
-            tvdb_ep = sort + sub.get("tvdb", {}).get("ep_offset", 0)
-            rel = format_download_path(config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_ep).lstrip("/")
+            tvdb_episode_number = sort + sub.get("tvdb", {}).get("ep_offset", 0)
+            rel = format_download_path(config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_episode_number).lstrip("/")
             item["replacement_target"] = str(Path(rel).with_suffix(Path(item["torrent_path"]).suffix))
 
     # ── Add torrent (paused) ──
@@ -546,13 +537,13 @@ async def torrent_download(body: dict):
         logger.warning("设置文件优先级失败 (将继续下载所有文件): %s", e)
 
     # ── Derive series name for path template ──
-    series_name = derive_series_name(preview_data)
+    series_name = derive_series_name(preview_snapshot)
 
     # ── Generate NFO + images BEFORE resuming (if metadata provided) ──
     # pre_generate_nfo also detects movies — is_movie drives the monitor's
     # hardlink root for the flat movie layout.
     is_movie, nfo_generated, movie_meta = await pre_generate_nfo(
-        preview_data, files, torrent_name, hardlink_root, series_name,
+        preview_snapshot, files, torrent_name, hardlink_root, series_name,
     )
 
     context = {
@@ -582,12 +573,12 @@ async def torrent_download(body: dict):
     # Persist the card and minimal file operations together before dispatching.
     now = datetime.now().astimezone().isoformat(timespec="seconds")
     encoding_group, video_codec = _torrent_tags(torrent_name, files)
-    bangumi_ids = sorted({int(f["bangumi_id"]) for f in files if int(f.get("bangumi_id") or 0) > 0})
+    bangumi_ids = sorted({int(f["episode_mapping"]["bangumi"]["subject_id"]) for f in files if f["episode_mapping"]["bangumi"]["subject_id"]})
     card_meta = await _torrent_card_meta(bangumi_ids[0]) if bangumi_ids else {}
     record = {
         "info_hash": info_hash,
         "torrent_name": torrent_name,
-        "show_name": card_meta.get("show_name") or _torrent_show_name(preview_data, files),
+        "show_name": card_meta.get("show_name") or _torrent_show_name(preview_snapshot, files),
         "bgm_rating": card_meta.get("bgm_rating", 0),
         "poster_url": card_meta.get("poster_url", ""),
         "status": "downloading",
@@ -633,3 +624,23 @@ async def augment_preview(preview_id: str, body: dict):
     if type(provider_id) is not int or provider_id <= 0 or type(body.get("preview_revision")) is not int:
         raise HTTPException(422, "invalid_preview_augment")
     return await augment_preview_session(preview_id, body["preview_revision"], body.get("show_key", ""), provider, provider_id)
+
+
+@router.get("/api/torrent/catalogs/tmdb/{series_id}")
+async def tmdb_catalog_view(series_id: int):
+    from ..domain.episode_adapters import episode_catalog
+    from ..services.tmdb import build_season_episode_map
+    from ..clients import tmdb
+    seasons = await build_season_episode_map(series_id)
+    detail = (await tmdb.get_tv_detail(series_id)).json()
+    return {"name": detail.get("name") or str(series_id),
+            "seasons": episode_catalog({"tmdb": {str(series_id): seasons}})["tmdb"][str(series_id)]}
+
+
+@router.get("/api/torrent/catalogs/bangumi/{subject_id}")
+async def bangumi_catalog_view(subject_id: int):
+    from ..domain.episode_adapters import episode_catalog
+    # The legacy endpoint is a provider normalization boundary; its raw shape
+    # never enters the matcher contract.
+    raw = await torrent_bangumi_episodes(subject_id)
+    return episode_catalog({"bangumi": {str(subject_id): raw}})["bangumi"][str(subject_id)]

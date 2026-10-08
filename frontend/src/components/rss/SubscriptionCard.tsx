@@ -142,7 +142,7 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
           )}
         </div>
         {/* Missing TMDB warning — Tier-2 manual override trigger */}
-        {(!s.tmdb?.id || s.tmdb?.id === 0) && (
+        {(!s.resource_identity.tmdb_series_id && !s.resource_identity.tmdb_movie_id) && (
           <button
             className="w-full text-[10px] px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors font-medium"
             onClick={(e) => {

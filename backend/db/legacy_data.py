@@ -51,22 +51,16 @@ def _subscription_record(session, row: Subscription) -> dict:
         record["bgm"].update(bgm_extras)
     for kind in ("tmdb", "tvdb"):
         season = getattr(row, f"{kind}_season")
-        source_id = getattr(row, f"{kind}_id")
+        source_id = identity["tmdb_movie_id"] if kind == "tmdb" and identity["media_type"] == "movie" else identity[f"{kind}_series_id"]
         offset = getattr(row, f"{kind}_ep_offset")
         extras = structured_values.read(session, "subscription", row.bangumi_id,
                                         f"{kind}_extras", {})
         if extras or any(value is not None for value in (season, source_id, offset)):
-            record[kind] = {"id": source_id or 0, "season": season, "ep_offset": offset or 0}
+            record[kind] = {"season": season, "ep_offset": offset or 0}
             record[kind].update(extras)
     record["resource_identity"] = identity
     record["identity_revision"] = row.identity_revision or 1
     record["identity_source"] = row.identity_source or "legacy_unknown"
-    for provider in ("tmdb", "tvdb"):
-        provider_id = identity[f"{provider}_series_id"]
-        if provider == "tmdb" and identity["media_type"] == "movie":
-            provider_id = identity["tmdb_movie_id"]
-        if provider in record or provider_id is not None:
-            record[provider] = {**record.get(provider, {}), "id": provider_id or 0}
     for kind in ("primary", "backup"):
         feed = session.get(SubscriptionFeed, (row.bangumi_id, kind))
         if feed is None:
@@ -111,7 +105,6 @@ def _write_subscription(session, record: dict, position: int, *, identity_source
                                    if key not in fields_by_group[group]})
     bangumi_id = record["bangumi_id"]
     row = session.get(Subscription, bangumi_id)
-    was_new = row is None
     if row is None:
         row = Subscription(bangumi_id=bangumi_id, position=position)
         session.add(row)
@@ -128,32 +121,28 @@ def _write_subscription(session, record: dict, position: int, *, identity_source
         "bgm_subject_name": bgm.get("subject_name"),
         "bgm_series_name": bgm.get("series_name"), "bgm_rating": bgm.get("rating"),
         "bgm_air_date": bgm.get("air_date"),
-        "tmdb_id": tmdb.get("id"), "tmdb_season": tmdb.get("season"),
+        "tmdb_season": tmdb.get("season"),
         "tmdb_ep_offset": tmdb.get("ep_offset"),
-        "tvdb_id": tvdb.get("id"), "tvdb_season": tvdb.get("season"),
+        "tvdb_season": tvdb.get("season"),
         "tvdb_ep_offset": tvdb.get("ep_offset"),
     }
     from .identity import update_resource_identity, read_resource_identity
-    from ..domain.resource_adapters import identity_from_legacy
+    from ..domain.resource_adapters import provider_binding_identity
     current = read_resource_identity(row) if row.resource_identity_json is not None else None
     requested = record.get("resource_identity")
-    # Older API clients edit compatibility fields. Detect those edits against the
-    # stored canonical projection, including clearing a provider (0 / None).
-    mirror_changed = current is not None and (
-        tmdb.get("id") != row.tmdb_id or tvdb.get("id") != row.tvdb_id)
-    if requested is None or mirror_changed:
-        requested = identity_from_legacy(
-            title=record.get("series_name"), bangumi_id=bangumi_id,
-            media_type=current["media_type"] if current else "tv",
-            tmdb_id=tmdb.get("id"), tvdb_id=tvdb.get("id"))
+    # Provider IDs in input are explicit binding edits, not read-side mirrors.
+    binding_edited = any("id" in settings for settings in (tmdb, tvdb))
+    if requested is None or binding_edited:
+        base = requested or current or {}
+        media_type = base.get("media_type", "tv")
+        requested = provider_binding_identity(
+            title=record.get("series_name"), bangumi_id=bangumi_id, media_type=media_type,
+            tmdb_id=tmdb.get("id", base.get("tmdb_movie_id") if media_type == "movie" else base.get("tmdb_series_id")),
+            tvdb_id=tvdb.get("id", base.get("tvdb_series_id")))
     else:
         requested = {**requested, "canonical_title": record.get("series_name")}
     for key, value in fields.items():
-        if key not in {"tmdb_id", "tvdb_id"}:
-            setattr(row, key, value)
-    if (not was_new and current is None and identity_source == "explicit_user_mapping"
-            and tmdb.get("id") == row.tmdb_id and tvdb.get("id") == row.tvdb_id):
-        identity_source = "legacy_unknown"
+        setattr(row, key, value)
     update_resource_identity(row, requested, source=identity_source)
     for kind in ("primary", "backup"):
         data = record.get(kind)

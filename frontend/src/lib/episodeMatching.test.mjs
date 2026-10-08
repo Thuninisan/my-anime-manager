@@ -25,17 +25,17 @@ const empty = { series_id: null, episode_id: null, season_number: null, episode_
 
 function fixture({ parsedSeason = 1, parsedEpisode = 3, tmdbSeason = 1, tmdbEpisode = 3,
   tvdbSeason = 1, tvdbEpisode = 3, bgmEp = 3, bgmSort = 3, index = 'tvdb', tvdb = true } = {}) {
-  return normalizeTorrentPreview({ index, torrent_name: 'Show', torrent_path: '/tmp/show.torrent',
-    parsed_files: [{ file_name: 'Show.mkv', torrent_path: 'Show.mkv', show_name: 'Show', season: parsedSeason, episode: parsedEpisode }],
-    search_results: { Show: { tmdb: { id: 100, name: 'Show' }, bangumi: { id: 200, name: 'Show' },
-      map_entries: [{ bangumi_id: 200, name: 'Show', tvdb_id: 300 }] } },
-    episode_data: {
-      tmdb: { 100: { [tmdbSeason]: { name: 'Season', episodes: [{ epNum: tmdbEpisode, tmdbId: 101, name: 'First Day',
+  return normalizeTorrentPreview({ episode_match_source: index, torrent_name: 'Show', torrent_path: '/tmp/show.torrent',
+    parsed_files: [{ file_name: 'Show.mkv', torrent_path: 'Show.mkv', show_name: 'Show', parsed_episode: { season_number: parsedSeason, episode_number: parsedEpisode } }],
+    search_results: { Show: { tmdb_series_id: 100, display_name: 'Show', bangumi_subject_id: 200, bangumi_display_name: 'Show',
+      mapping_hints: [{ bangumi_subject_id: 200, name: 'Show', tvdb_series_id: 300 }] } },
+    episode_catalog: {
+      tmdb: { 100: { [tmdbSeason]: { name: 'Season', episodes: [{ episode_number: tmdbEpisode, episode_id: 101, name: 'First Day',
         overview: 'Plot', stillPath: '/still.jpg', airDate: '2026-01-01', voteAverage: 8,
         guestStars: [{ name: 'Actor', character: 'Hero' }] }] } } },
-      bangumi: { 200: { name: 'Show', episodes: [{ id: 201, ep: bgmEp, sort: bgmSort, raw_sort: bgmSort, name: 'First Day' }] } },
+      bangumi: { 200: { name: 'Show', episodes: [{ episode_id: 201, episode_number: bgmEp, matching_absolute: bgmSort, episode_absolute: bgmSort, name: 'First Day' }] } },
       tvdb: tvdb ? { 300: { name: 'Show', seasons: { [tvdbSeason]: { name: 'Season', episodes: [
-        { epNum: tvdbEpisode, tvdbId: 301, name: 'First Day', absoluteNumber: bgmSort }] } } } } : {},
+        { episode_number: tvdbEpisode, episode_id: 301, name: 'First Day', episode_absolute: bgmSort }] } } } } : {},
     },
   });
 }
@@ -53,7 +53,7 @@ assert.equal('name' in row.mapping.tmdb, false);
 // 2. Independent numbering; legacy Bangumi-first and TVDB-first retain behavior.
 for (const index of [undefined, 'tvdb']) {
   data = fixture({ parsedEpisode: 15, tmdbSeason: 2, tmdbEpisode: 3, tvdbEpisode: 15, bgmSort: 15, index });
-  if (index === undefined) delete data.index;
+  if (index === undefined) delete data.episode_match_source;
   row = computeMatches(data)[0];
   assert.equal(row.mapping.parsed.episode_number, 15);
   assert.equal(row.mapping.tmdb.season_number, 2);
@@ -65,12 +65,12 @@ for (const index of [undefined, 'tvdb']) {
 // 3. Specials, including dropdowns and download compatibility.
 for (const index of ['tmdb', 'tvdb', undefined]) {
   data = fixture({ parsedSeason: 0, tmdbSeason: 0, tvdbSeason: 0, index });
-  if (index === undefined) delete data.index;
+  if (index === undefined) delete data.episode_match_source;
   row = computeMatches(data)[0];
   assert.equal(row.mapping.parsed.season_number, 0);
   assert.equal(row.mapping.tmdb.season_number, 0);
   assert.equal(row.mapping.tvdb.season_number, 0);
-  assert.equal(buildTmdbEpOptions(0, data.episode_data.tmdb[100])[0].episode_number, 3);
+  assert.equal(buildTmdbEpOptions(0, data.episode_catalog.tmdb[100])[0].episode_number, 3);
   assert.equal(row.mapping.tmdb.season_number, 0);
 }
 // 4. An unmatched provider has nulls, never fake zero coordinates.
@@ -87,28 +87,28 @@ for (const bgmSort of [15, 0]) {
 }
 // Missing sort stays null; compatibility matching still uses the established fallback.
 data = fixture({ bgmSort: null });
-delete data.index;
+delete data.episode_match_source;
 row = computeMatches(data)[0];
 assert.equal(row.mapping.bangumi.episode_absolute, null);
 assert.equal(row.mapping.bangumi.episode_number, 3);
 // Projection never retains NFO metadata on the frontend.
 data = fixture();
-const catalogWire = JSON.stringify(data.episode_data);
+const catalogWire = JSON.stringify(data.episode_catalog);
 for (const field of ['overview', 'stillPath', 'guestStars', 'Plot']) assert.equal(catalogWire.includes(field), false);
-assert.equal('epNum' in data.episode_data.tmdb[100][1].episodes[0], false);
+assert.equal('epNum' in data.episode_catalog.tmdb[100][1].episodes[0], false);
 // Identical coordinates across series keep the exact candidate selected by fuzzy matching.
 data = fixture({ index: 'tmdb' });
 const other = normalizeEpisodeCatalog({ tvdb: { 999: { name: 'Other', seasons: { 1: { name: 'Season', episodes: [
-  { epNum: 3, tvdbId: 998, name: 'Unrelated' }] } } } } });
-data.episode_data.tvdb = { ...other.tvdb, ...data.episode_data.tvdb };
+  { episode_number: 3, episode_id: 998, name: 'Unrelated' }] } } } } });
+data.episode_catalog.tvdb = { ...other.tvdb, ...data.episode_catalog.tvdb };
 row = computeMatches(data)[0];
 assert.equal(row.mapping.tvdb.series_id, 300);
 assert.equal(row.mapping.tvdb.episode_id, 301);
 // TMDB merging keeps candidate series identity when matching a sequel.
 data = fixture({ index: 'tvdb' });
-data.episode_data.tmdb[100][1].episodes[0].name = 'Unrelated';
-data.episode_data.tmdb[999] = normalizeEpisodeCatalog({ tmdb: { 999: { 2: { name: 'Sequel', episodes: [
-  { epNum: 8, tmdbId: 998, name: 'First Day' }] } } } }).tmdb[999];
+data.episode_catalog.tmdb[100][1].episodes[0].name = 'Unrelated';
+data.episode_catalog.tmdb[999] = normalizeEpisodeCatalog({ tmdb: { 999: { 2: { name: 'Sequel', episodes: [
+  { episode_number: 8, episode_id: 998, name: 'First Day' }] } } } }).tmdb[999];
 row = computeMatches(data)[0];
 assert.equal(row.mapping.tmdb.series_id, 999);
 assert.equal(row.mapping.tmdb.episode_id, 998);
@@ -118,7 +118,7 @@ function overriddenRows(data, actions) {
   let effective;
   function Harness() {
     const [applied, setApplied] = React.useState(false);
-    const state = useMatchOverrides(data, data.search_results, data.episode_data);
+    const state = useMatchOverrides(data, data.search_results, data.episode_catalog);
     if (!applied) { actions(state); setApplied(true); }
     effective = state.rows;
     return null;
@@ -127,8 +127,8 @@ function overriddenRows(data, actions) {
   return effective;
 }
 data = fixture({ index: 'tmdb', tvdb: false });
-data.episode_data.tmdb[100][0] = normalizeEpisodeCatalog({ tmdb: { 100: { 0: { name: 'Specials', episodes: [
-  { epNum: 7, tmdbId: 777, name: 'Special' }] } } } }).tmdb[100][0];
+data.episode_catalog.tmdb[100][0] = normalizeEpisodeCatalog({ tmdb: { 100: { 0: { name: 'Specials', episodes: [
+  { episode_number: 7, episode_id: 777, name: 'Special' }] } } } }).tmdb[100][0];
 row = overriddenRows(data, state => state.handleTmdbSeasonChange(0, 'Show', '100:0'))[0];
 assert.deepEqual(row.mapping.parsed, { season_number: 1, episode_number: 3 });
 assert.deepEqual(row.mapping.tmdb, { series_id: 100, episode_id: 777, season_number: 0, episode_number: 7 });
@@ -136,12 +136,12 @@ assert.deepEqual(row.mapping.tvdb, empty);
 assert.equal(row.mapping.bangumi.episode_id, 201);
 // Manual provider/episode changes pick new identity and keep Bangumi ep distinct.
 data = fixture();
-data.episode_data.bangumi[200].episodes.push({ subject_id: 200, episode_id: 202, episode_number: 9, episode_absolute: 16, name: 'Next' });
+data.episode_catalog.bangumi[200].episodes.push({ subject_id: 200, episode_id: 202, episode_number: 9, episode_absolute: 16, name: 'Next' });
 row = overriddenRows(data, state => state.handleBgmEpChange(0, 200, '202'))[0];
 assert.equal(row.mapping.bangumi.episode_number, 9);
 assert.equal(row.mapping.bangumi.episode_absolute, 16);
 assert.equal(row.mapping.tmdb.episode_number, 3);
-assert.equal(buildSpSeasonOptions(data.episode_data, data.search_results, 'tvdb')[0].value, '300:1');
+assert.equal(buildSpSeasonOptions(data.episode_catalog, data.search_results, 'tvdb')[0].value, '300:1');
 const copied = createEpisodeMapping({ season_number: 0, episode_number: 1 }, null, null, null, null, null);
 assert.deepEqual(copied.tvdb, empty);
 data.parsed_files.push({ ...data.parsed_files[0], file_name: 'Duplicate.mkv' });
@@ -151,7 +151,7 @@ assert.throws(() => computeMatches(data), DuplicateEpisodeError);
 const explicitNull = normalizeTorrentPreview({ parsed_files: [{ file_name: 'Unknown.mkv', season: 1, episode: 3,
   parsed_episode: { season_number: null, episode_number: null } }] });
 assert.deepEqual(explicitNull.parsed_files[0].parsed, { season_number: null, episode_number: null });
-const unknownId = normalizeEpisodeCatalog({ tmdb: { 100: { 1: { episodes: [{ epNum: 3, episode_id: null, tmdbId: 999 }] } } } });
+const unknownId = normalizeEpisodeCatalog({ tmdb: { 100: { 1: { episodes: [{ episode_number: 3, episode_id: null }] } } } });
 assert.equal(unknownId.tmdb[100][1].episodes[0].episode_id, null);
 // Download carries the exact manual mapping and provider IDs alongside the legacy bridge.
 const submitted = { mapping: row.mapping };
@@ -165,15 +165,15 @@ console.log('Episode matching: canonical coordinates, identity, overrides, compa
 // Multi-series catalogs with identical episode names cannot leak identities.
 for (const index of ['tmdb', 'tvdb', undefined]) {
   data = fixture({ index });
-  data.search_results.Other = { tmdb: { id: 400, name: 'Other' }, bangumi: { id: 500, name: 'Other' },
-    map_entries: [{ bangumi_id: 500, name: 'Other', tvdb_id: 600 }] };
+  data.search_results.Other = { tmdb_series_id: 400, display_name: 'Other', bangumi_subject_id: 500, bangumi_display_name: 'Other',
+    mapping_hints: [{ bangumi_subject_id: 500, name: 'Other', tvdb_series_id: 600 }] };
   data.parsed_files.push({ ...data.parsed_files[0], file_name: 'Other.mkv', torrent_path: 'Other.mkv', show_name: 'Other' });
   const otherCatalog = normalizeEpisodeCatalog({
-    tmdb: { 400: { 1: { name: 'Season', episodes: [{ epNum: 3, tmdbId: 401, name: 'First Day' }] } } },
-    bangumi: { 500: { name: 'Other', episodes: [{ id: 501, ep: 3, sort: 3, name: 'First Day' }] } },
-    tvdb: { 600: { name: 'Other', seasons: { 1: { episodes: [{ epNum: 3, tvdbId: 601, name: 'First Day', absoluteNumber: 3 }] } } } },
+    tmdb: { 400: { 1: { name: 'Season', episodes: [{ episode_number: 3, episode_id: 401, name: 'First Day' }] } } },
+    bangumi: { 500: { name: 'Other', episodes: [{ episode_id: 501, episode_number: 3, matching_absolute: 3, episode_absolute: 3, name: 'First Day' }] } },
+    tvdb: { 600: { name: 'Other', seasons: { 1: { episodes: [{ episode_number: 3, episode_id: 601, name: 'First Day', episode_absolute: 3 }] } } } },
   });
-  for (const provider of ['tmdb', 'bangumi', 'tvdb']) Object.assign(data.episode_data[provider], otherCatalog[provider]);
+  for (const provider of ['tmdb', 'bangumi', 'tvdb']) Object.assign(data.episode_catalog[provider], otherCatalog[provider]);
   const matches = computeMatches(data);
   assert.equal(matches[0].mapping.tmdb.series_id, 100);
   assert.equal(matches[1].mapping.tmdb.series_id, 400);

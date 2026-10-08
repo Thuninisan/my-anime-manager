@@ -68,6 +68,9 @@ def _as_dict(session, card: TorrentCard) -> dict:
                 if getattr(row, field) is not None}}
             for row in session.scalars(select(TorrentCardOperation).where(
                 TorrentCardOperation.card_id == card.id).order_by(TorrentCardOperation.position))]
+        if processing.get("replace_bangumi_id") is not None:
+            from ..legacy.torrent import replacement_operation_view
+            processing["files"] = [replacement_operation_view(op, processing["replace_bangumi_id"]) for op in processing["files"]]
         result["processing"] = processing
     return result
 

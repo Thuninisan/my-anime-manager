@@ -18,15 +18,21 @@ FIELDS = ("rss_url", "guid", "source", "pub_date", "info_hash", "at",
           "tmdb_ep", "tmdb_season", "tvdb_ep", "tmdb_ep_calc", "fail_count")
 
 
+from ..domain.persistence import load_episode_mapping_snapshot, EPISODE_MAPPING_SNAPSHOT_VERSION
+from ..legacy.history import legacy_history_to_episode_mapping
+
+def history_snapshot(row):
+    if row.episode_mapping_snapshot is None:
+        return legacy_history_to_episode_mapping(row)
+    if row.episode_mapping_schema_version != EPISODE_MAPPING_SNAPSHOT_VERSION:
+        raise ValueError("unsupported_episode_mapping_snapshot_version")
+    return load_episode_mapping_snapshot(row.episode_mapping_snapshot)
+
 def _entry(row):
-    result = {field: getattr(row, field) for field in FIELDS if field != "fail_count"}
+    result = {field: getattr(row, field) for field in FIELDS if field not in {"fail_count", "tvdb_ep", "tmdb_ep_calc"}}
     if row.fail_count:
         result["fail_count"] = row.fail_count
-    from ..domain.persistence import history_snapshot
     result["episode_mapping_snapshot"] = history_snapshot(row)
-    mapping = result["episode_mapping_snapshot"]["episode_mapping"]
-    result["tmdb_ep_calc"] = mapping["tmdb"]["episode_number"]
-    result["tvdb_ep"] = mapping["tvdb"]["episode_number"]
     return result
 
 

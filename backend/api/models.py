@@ -1,6 +1,7 @@
 """API request/response Pydantic models."""
 
 from pydantic import BaseModel
+from ..domain.resource import ResourceIdentity
 
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -94,13 +95,11 @@ class BgmMeta(BaseModel):
 
 
 class TvdbMeta(BaseModel):
-    id: int = 0
     season: int | None = None
     ep_offset: int = 0
 
 
 class TmdbMeta(BaseModel):
-    id: int = 0
     season: int | None = None
     ep_offset: int = 0
 
@@ -114,7 +113,7 @@ class RssSource(BaseModel):
 
 
 class SubscriptionOut(BaseModel):
-    resource_identity: dict | None = None
+    resource_identity: ResourceIdentity
     identity_revision: int | None = None
     identity_source: str | None = None
     name: str

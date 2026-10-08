@@ -8,10 +8,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from backend.domain.episode import create_episode_mapping
-from backend.domain.episode_metadata_adapters import (
-    provider_metadata_candidates, legacy_batch_episode_mapping,
-    legacy_download_episode_mapping, mapping_to_legacy_batch_episode, seed_preview_metadata,
-)
+from backend.domain.episode_metadata_adapters import provider_metadata_candidates
+from tests.legacy_helpers import legacy_batch_episode_mapping, legacy_download_episode_mapping, mapping_to_legacy_batch_episode, seed_preview_metadata
 from backend.services.episode_metadata_resolver import resolve_episode, resolve_nfo_episode
 from backend.services.nfo.nfo_xml import generate_episode_nfo
 from backend.services.nfo.metadata_context import MetadataContext
@@ -216,13 +214,14 @@ class AsyncResolverTests(unittest.IsolatedAsyncioTestCase):
     async def test_multiseries_preview_uses_mapping_and_reuses_catalogs(self):
         preview = {'search_results': {'first': {'tmdb': {'id': 999, 'name': 'Wrong'}}},
                    'episode_data': {'tmdb': {'100': {'1': {'episodes': []}}, '110': {'1': {'episodes': []}}}}}
+        preview = {'series_contexts': {}, 'episode_metadata': {}}
         first, second = mapping(), mapping(tmdb_id=110, tvdb_id=310, subject_id=210)
         with patch('backend.services.nfo.generator.batch_nfo_generator', AsyncMock(return_value={'nfoGenerated': 2})) as generate:
             result = await pre_generate_nfo(preview, [{'episode_mapping': first}, {'episode_mapping': second}], 'Torrent', '/unused', '')
         self.assertTrue(result[1])
         episodes = generate.await_args.args[1]
-        self.assertEqual([ep['tmdb_id'] for ep in episodes], [100, 110])
-        self.assertEqual([ep['tvdb_id'] for ep in episodes], [300, 310])
+        self.assertEqual([ep['episode_mapping']['tmdb']['series_id'] for ep in episodes], [100, 110])
+        self.assertEqual([ep['episode_mapping']['tvdb']['series_id'] for ep in episodes], [300, 310])
         context = generate.await_args.kwargs['metadata_ctx']
         with patch('backend.services.tmdb.build_season_episode_map', AsyncMock()) as fetch:
             await context.get_tmdb_season_map(100, 'zh-CN')
@@ -309,18 +308,17 @@ class PlotPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['provenance']['title'], 'bangumi:translated')
         self.assertEqual(result['metadata']['sources']['title'], 'translated')
         self.assertEqual(plot.await_args.kwargs['tvdb_season'], 0)
-        self.assertEqual(plot.await_args.kwargs['tvdb_ep'], 0)
+        self.assertEqual(plot.await_args.kwargs['tvdb_episode_number'], 0)
         self.assertEqual(plot.await_args.kwargs['bangumi_sort'], 0)
         self.assertEqual(plot.await_args.kwargs['bangumi_episode_id'], 201)
 
-    async def test_legacy_file_boundary_uses_supplied_canonical_mapping(self):
-        from backend.services.nfo.episode_compat import write_episode_files
+    async def test_canonical_file_writer_uses_supplied_mapping(self):
         ref = mapping(0, 15)
         with tempfile.TemporaryDirectory() as tmp:
-            written = await write_episode_files({}, season_number=9, episode_number=99,
-                bangumi_ep_id=999, show_name='Show', original_name='Original',
-                bangumi_subject_name='Subject', episode_mapping=ref, output_dir=tmp, file_stem='episode')
-            xml = ET.parse(written['nfo_path']).getroot()
+            resolved = resolve_episode(ref, provider_metadata_candidates(tmdb={}))
+            written = generate_episode_nfo(resolved, show_name='Show',
+                bangumi_subject_name='Subject', output_dir=tmp, file_stem='episode')
+            xml = ET.parse(written).getroot()
             self.assertEqual(xml.findtext('season'), '0')
             self.assertEqual(xml.findtext('episode'), '15')
             self.assertEqual(xml.findtext('bangumiid'), '201')
@@ -329,7 +327,7 @@ class PlotPolicyTests(unittest.IsolatedAsyncioTestCase):
 
 class DownloadMappingTests(unittest.TestCase):
     def test_processing_and_nfo_share_specials_and_bangumi_path_coordinates(self):
-        from backend.domain.episode_metadata_adapters import download_entry_with_mapping
+        from tests.legacy_helpers import download_entry_with_mapping
         from backend.services.torrent.monitor import build_processing
         ref = mapping(0, 0)
         file = {'torrent_path': 'source.mkv', 'tmdb_show_name': 'Show', 'bangumi_show_name': 'Subject',

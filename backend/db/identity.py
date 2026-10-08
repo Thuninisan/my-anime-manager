@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 
 from ..domain.resource import validate_resource_identity
-from ..domain.resource_adapters import identity_from_legacy
+from ..legacy.subscription import subscription_identity_view
 from ..domain.persistence import RESOURCE_IDENTITY_SCHEMA_VERSION
 
 BINDING_FIELDS = ("media_type", "bangumi_subject_id", "tmdb_series_id", "tmdb_movie_id", "tvdb_series_id")
@@ -11,8 +11,7 @@ BINDING_FIELDS = ("media_type", "bangumi_subject_id", "tmdb_series_id", "tmdb_mo
 
 def read_resource_identity(row):
     if row.resource_identity_json is None:
-        return identity_from_legacy(title=row.series_name, bangumi_id=row.bangumi_id,
-                                    tmdb_id=row.tmdb_id, tvdb_id=row.tvdb_id)
+        return subscription_identity_view(row)
     if row.identity_schema_version != RESOURCE_IDENTITY_SCHEMA_VERSION:
         raise ValueError("unsupported_resource_identity_version")
     identity = json.loads(row.resource_identity_json)
@@ -42,6 +41,4 @@ def update_resource_identity(row, identity, *, source):
         row.identity_updated_at = datetime.now(timezone.utc).isoformat()
     row.resource_identity_json = json.dumps(identity, ensure_ascii=False, allow_nan=False)
     row.identity_schema_version = RESOURCE_IDENTITY_SCHEMA_VERSION
-    row.tmdb_id = identity["tmdb_movie_id"] if identity["media_type"] == "movie" else identity["tmdb_series_id"]
-    row.tvdb_id = identity["tvdb_series_id"]
     return changed

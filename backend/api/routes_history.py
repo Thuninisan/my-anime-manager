@@ -103,7 +103,7 @@ async def _submit_uploaded_episode(bangumi_id: int, sort: int, file: UploadFile,
         Path(tmp.name).unlink(missing_ok=True)
 
 
-@router.patch("/api/rss/download-history/{bangumi_id}/{sort}")
+@router.patch("/api/rss/download-history/{bangumi_id}/{sort}", deprecated=True)
 async def update_episode_overrides(
     bangumi_id: int, sort: int,
     fields: dict[str, object] = {},
@@ -152,3 +152,14 @@ async def regen_episode_nfo(bangumi_id: int, sort: int):
         raise HTTPException(500, f"NFO 重新生成失败: {e}")
     return {"ok": True}
 
+
+
+@router.patch("/api/rss/v2/download-history/{bangumi_id}/{sort}")
+async def update_canonical_episode_overrides(bangumi_id: int, sort: int,
+                                           fields: dict[str, object], regen_nfo: bool = False):
+    allowed = {"tmdb_episode_override", "tmdb_season_override"}
+    if set(fields) - allowed:
+        raise HTTPException(422, "invalid_episode_override_fields")
+    return await update_episode_overrides(bangumi_id, sort,
+        {"tmdb_ep": fields.get("tmdb_episode_override"), "tmdb_season": fields.get("tmdb_season_override")},
+        regen_nfo)

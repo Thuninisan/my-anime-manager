@@ -54,41 +54,7 @@ def load_episode_mapping_snapshot(raw):
                                     processing_result=value.get("processing_result"))
 
 
-def legacy_history_to_episode_mapping(row):
-    """Use only the row's facts. A current binding is never historical evidence.
-
-    tmdb_ep/season are mutable user overrides, hence are NOT evidence of the
-    original download. tmdb_ep_calc and tvdb_ep are recorded calculated numbers.
-    """
-    def coordinate(value):
-        return value if type(value) in (int, float) and math.isfinite(value) and value >= 0 else None
-
-    subject = row.bangumi_id if type(row.bangumi_id) is int and row.bangumi_id > 0 else None
-    sort = coordinate(row.episode_number)
-    mapping = create_episode_mapping(
-        {"season_number": None, "episode_number": sort},
-        {"subject_id": subject, "episode_id": None, "episode_number": None,
-         "episode_absolute": sort},
-        {"series_id": None, "episode_id": None, "season_number": None,
-         "episode_number": coordinate(row.tmdb_ep_calc)},
-        {"series_id": None, "episode_id": None, "season_number": None,
-         "episode_number": coordinate(row.tvdb_ep)},
-    )
-    return episode_mapping_snapshot(mapping, source="legacy_unresolved")
-
-
-def history_snapshot(row):
-    if row.episode_mapping_snapshot is not None:
-        if row.episode_mapping_schema_version != EPISODE_MAPPING_SNAPSHOT_VERSION:
-            raise ValueError("unsupported_episode_mapping_snapshot_version")
-        return load_episode_mapping_snapshot(row.episode_mapping_snapshot)
-    return legacy_history_to_episode_mapping(row)
-
-
 def write_history_snapshot(row, mapping, identity=None, revision=None, processing_result=None):
     snapshot = episode_mapping_snapshot(mapping, identity, revision=revision, processing_result=processing_result)
     row.episode_mapping_snapshot = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
     row.episode_mapping_schema_version = EPISODE_MAPPING_SNAPSHOT_VERSION
-    # Calculated fields are mirrors, while explicit overrides stay user configuration.
-    row.tmdb_ep_calc = mapping["tmdb"]["episode_number"]
-    row.tvdb_ep = mapping["tvdb"]["episode_number"]

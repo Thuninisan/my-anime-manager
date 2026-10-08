@@ -1,22 +1,5 @@
 /* TypeScript interfaces — shared types for RSS flow, download history, and config. */
 
-/* TMDB season/episode info for download history dropdowns */
-
-export interface TmdbEpisodeInfo {
-  epNum: number;
-  name: string;
-  tmdbId: number;
-  overview: string;
-  airDate: string;
-  runtime: number;
-  stillPath: string;
-}
-
-export interface SeasonInfo {
-  name: string;
-  episodes: TmdbEpisodeInfo[];
-}
-
 /* RSS */
 export interface RssSubtitleGroup {
   name: string;
@@ -106,13 +89,11 @@ export interface BgmMeta {
 }
 
 export interface TvdbMeta {
-  id?: number;
   season?: number | null;
   ep_offset?: number;
 }
 
 export interface TmdbMeta {
-  id?: number;
   season?: number | null;
   ep_offset?: number;
 }
@@ -126,6 +107,9 @@ export interface RssSourceMeta {
 }
 
 export interface SubscriptionOut {
+  resource_identity: import("./episode").ResourceIdentity;
+  identity_revision: number;
+  identity_source: string;
   name: string;
   bangumi_id: number;
   series_name?: string;
@@ -158,13 +142,14 @@ export interface QbitTorrentInfo {
 }
 
 export interface EpisodeHistoryEntry {
+  episode_mapping_snapshot: import("./episode").EpisodeMappingSnapshot;
   sort: number;
   source: string;
   guid: string;
   at: string;
   info_hash: string;
-  tmdb_ep?: number | null;
-  tmdb_season?: number | null;
+  tmdb_episode_override?: number | null;
+  tmdb_season_override?: number | null;
   qbit: QbitTorrentInfo | null;
 }
 
@@ -209,7 +194,7 @@ export interface AppConfig {
 
 /** Normalized preview used by the torrent UI; raw wire payloads stop in adapters. */
 export interface TorrentPreviewResponse {
-  series?: { show_key: string; display_name: string; tmdb_series_id: number | null;
+  series?: { show_key: string; display_name: string; tmdb_series_id: number | null; tmdb_movie_id: number | null;
     tvdb_series_id: number | null; bangumi_subject_id: number | null }[];
   preview_id: string;
   revision: number;
@@ -217,12 +202,12 @@ export interface TorrentPreviewResponse {
   subtitle_files?: import('./matchTable').ParsedFile[];
   parsed_files: import('./matchTable').ParsedFile[];
   search_results: Record<string, import('./matchTable').SearchEntry>;
-  episode_data: import('./episode').EpisodeCatalog;
-  index?: 'tmdb' | 'tvdb';
+  episode_catalog: import('./episode').EpisodeCatalog;
+  episode_match_source?: 'tmdb' | 'tvdb';
   specials?: import('./matchTable').ParsedFile[];
   skipped_files?: { file_name: string; reason?: string; torrent_path?: string }[];
-  subtitles?: string[]; torrent_name: string; torrent_path: string;
+  subtitles?: string[]; torrent_name: string;
   error?: string;
   resource_id?: number;
-  preprocessed_candidates?: { bangumi_id: number; index_season: number; media_type: string; reason: string }[];
+  resource_candidates?: import("./episode").ResourceCandidate[];
 }

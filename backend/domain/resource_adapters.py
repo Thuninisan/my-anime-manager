@@ -29,7 +29,7 @@ def provider_candidates(provider: str, results: list[dict], media_type="tv", sou
     return candidates
 
 
-def identity_from_legacy(*, title=None, media_type="tv", bangumi_id=None, tmdb_id=None, tvdb_id=None):
+def provider_binding_identity(*, title=None, media_type="tv", bangumi_id=None, tmdb_id=None, tvdb_id=None):
     """Only legacy boundaries interpret 0 as missing; canonical validation rejects 0."""
     return resource_identity(media_type, title, bangumi_subject_id=bangumi_id or None,
                              tmdb_movie_id=(tmdb_id or None) if media_type == "movie" else None,
@@ -50,24 +50,20 @@ def search_entry_resolution(entry: dict, title: str):
     candidates = provider_candidates("tmdb", [tmdb], media_type) + provider_candidates("bangumi", [bgm], media_type)
     if not candidates and tvdb_id is None:
         return ResourceResolver().resolve([], title=title, media_type=media_type)
-    identity = identity_from_legacy(title=tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or title,
+    identity = provider_binding_identity(title=tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or title,
                                     media_type=media_type, tmdb_id=tmdb.get("id"),
                                     bangumi_id=bgm.get("id"), tvdb_id=tvdb_id)
     return ResourceResolver().resolve(candidates, known=identity)
 
 
 def subscription_identity(sub: dict, subject_id: int):
-    """Subscription edits are authoritative; do not persist a stale parallel copy."""
-    if sub.get("resource_identity") is not None and sub.get("identity_revision") is not None:
-        from .resource import validate_resource_identity
-        identity = sub["resource_identity"]
-        validate_resource_identity(identity)
-        if identity["bangumi_subject_id"] != subject_id:
-            raise ValueError("subscription_subject_identity_conflict")
-        return dict(identity)
-    return identity_from_legacy(title=sub.get("series_name"), bangumi_id=subject_id,
-                               tmdb_id=sub.get("tmdb", {}).get("id"),
-                               tvdb_id=sub.get("tvdb", {}).get("id"))
+    """Repositories expose canonical bindings, including partial old DB views."""
+    from .resource import validate_resource_identity
+    identity = sub["resource_identity"]
+    validate_resource_identity(identity)
+    if identity["bangumi_subject_id"] != subject_id:
+        raise ValueError("subscription_subject_identity_conflict")
+    return dict(identity)
 
 
 def select_provider_result(provider, results, title=None, *, year=None, media_type="tv", source=None):
@@ -86,7 +82,7 @@ def select_provider_result(provider, results, title=None, *, year=None, media_ty
 
 
 
-def legacy_resource_context(identity, entry: dict) -> dict:
+def provider_catalog_context(identity, entry: dict) -> dict:
     """Canonical → compatibility projection for the existing catalog orchestrator."""
     from .resource import validate_resource_identity
     validate_resource_identity(identity)
@@ -103,6 +99,8 @@ def monitor_resource_candidates(rows, index_type, *, title=None):
     candidates = []
     seen = set()
     for row in rows:
+        if row.get("decision") == "excluded":
+            continue
         media_type = "movie" if row.get("media_type", "TV").lower() == "movie" else "tv"
         for provider, key in (("bangumi", "bangumi_id"), (index_type, "index_id")):
             if provider not in ("bangumi", "tmdb", "tvdb"):

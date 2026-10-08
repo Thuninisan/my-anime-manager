@@ -1,4 +1,4 @@
-"""Compatibility adapters for parser/provider data and the existing NFO pipeline."""
+"""Parser and provider normalization boundaries."""
 from .episode import EpisodeCatalog, EpisodeMetadata, EpisodeMetadataSources, ParsedEpisodeRef
 
 
@@ -6,13 +6,13 @@ def parsed_episode_ref(file: dict) -> ParsedEpisodeRef:
     return {"season_number": file.get("season"), "episode_number": file.get("episode")}
 
 
-def merged_episode_metadata(
+def provider_episode_metadata(
     episode: dict,
     sources: EpisodeMetadataSources | None = None,
     *,
     thumbnail_base_url: str | None = None,
 ) -> EpisodeMetadata:
-    """Adapt already merged NFO data without guessing provenance or fetching data."""
+    """Normalize provider metadata without matching, I/O or identity inference."""
     thumbnail = episode.get("still_path", episode.get("stillPath")) or None
     if thumbnail and not thumbnail.startswith(("https://", "http://")):
         # Relative provider paths require an explicit provider base URL. Do not
@@ -43,7 +43,7 @@ def merged_episode_metadata(
 def episode_catalog(data: dict) -> EpisodeCatalog:
     """Normalize legacy provider catalogs at the preview/search boundary.
 
-    Legacy episode_data remains available for the existing NFO/download pipeline.
+    Legacy provider_catalogs remains available for the existing NFO/download pipeline.
     ep and raw sort are independent; legacy sort's historical fallback stays in
     the legacy payload only.
     """

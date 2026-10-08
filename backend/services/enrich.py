@@ -531,7 +531,7 @@ async def _compute_tvdb_ep_offset(
         offset = best_num - bgm_ep_val
         _emit(
             f"   📐 tvdb_ep_offset={offset} "
-            f"(bgm_sort={bgm_ep_val} → tvdb_ep={best_num}, score={best_score:.3f})"
+            f"(bangumi_episode_sort={bgm_ep_val} → tvdb_episode_number={best_num}, score={best_score:.3f})"
         )
         return offset
 
@@ -597,7 +597,7 @@ async def _compute_tmdb_ep_offset(
         offset = best_num - bgm_ep_val
         _emit(
             f"   📐 tmdb_ep_offset={offset} "
-            f"(bgm_sort={bgm_ep_val} → tmdb_ep={best_num}, score={best_score:.3f})"
+            f"(bangumi_episode_sort={bgm_ep_val} → tmdb_episode_payload={best_num}, score={best_score:.3f})"
         )
         return offset
 
@@ -737,13 +737,13 @@ async def enrich_subscription(
         special_resolution = None
         if not tmdb_id or not tvdb_id:
             from .resource_resolver import resolve_primary_series_relation, resolve_special_binding
-            from ..domain.resource_adapters import identity_from_legacy
+            from ..domain.resource_adapters import provider_binding_identity
             main = resolve_primary_series_relation(await _get_bangumi_relations(bangumi_id))
             if main is not None:
                 main_tmdb = get_tmdb_id(main["id"])
                 main_tvdb = get_tvdb_id(main["id"])
                 if main_tmdb or main_tvdb:
-                    main_identity = identity_from_legacy(title=series_name, bangumi_id=main["id"],
+                    main_identity = provider_binding_identity(title=series_name, bangumi_id=main["id"],
                                                          tmdb_id=main_tmdb, tvdb_id=main_tvdb)
                     special_resolution = resolve_special_binding(bangumi_id, main_identity)
                     if not tmdb_id and main_tmdb:
@@ -808,7 +808,7 @@ async def enrich_subscription(
                 bgm_ep_v = eps[0].get("sort") if eps else None
                 if bgm_ep_v is not None:
                     tmdb_ep_offset = tmdb_auto_ep_number - bgm_ep_v
-                    _emit(f"   📐 tmdb_ep_offset={tmdb_ep_offset} (from auto-infer: bgm_sort={bgm_ep_v} → tmdb_ep={tmdb_auto_ep_number})")
+                    _emit(f"   📐 tmdb_ep_offset={tmdb_ep_offset} (from auto-infer: bangumi_episode_sort={bgm_ep_v} → tmdb_episode_payload={tmdb_auto_ep_number})")
             else:
                 tmdb_ep_offset = await _compute_tmdb_ep_offset(
                     bangumi_id, tmdb_id, tmdb_season, _emit, metadata_ctx=metadata_ctx,
@@ -821,7 +821,7 @@ async def enrich_subscription(
                 bgm_ep_v = eps[0].get("sort") if eps else None
                 if bgm_ep_v is not None:
                     tvdb_ep_offset = tvdb_auto_ep_number - bgm_ep_v
-                    _emit(f"   📐 tvdb_ep_offset={tvdb_ep_offset} (from auto-infer: bgm_sort={bgm_ep_v} → tvdb_ep={tvdb_auto_ep_number})")
+                    _emit(f"   📐 tvdb_ep_offset={tvdb_ep_offset} (from auto-infer: bangumi_episode_sort={bgm_ep_v} → tvdb_episode_number={tvdb_auto_ep_number})")
             else:
                 tvdb_ep_offset = await _compute_tvdb_ep_offset(
                     bangumi_id, tvdb_id, tvdb_season, _emit, metadata_ctx=metadata_ctx,
@@ -903,9 +903,9 @@ async def enrich_subscription(
                     _emit(f"   📐 backup rss_offset={backup_offset} "
                           f"(first_sort={first_sort} - first_rss_ep={smallest})")
 
-        from ..domain.resource_adapters import identity_from_legacy
+        from ..domain.resource_adapters import provider_binding_identity
         from .resource_resolver import ResourceResolver
-        identity = identity_from_legacy(title=series_name, bangumi_id=bangumi_id,
+        identity = provider_binding_identity(title=series_name, bangumi_id=bangumi_id,
                                         tmdb_id=tmdb_id, tvdb_id=tvdb_id)
         resolution = ResourceResolver().resolve([], known=identity)
         if special_resolution is not None:

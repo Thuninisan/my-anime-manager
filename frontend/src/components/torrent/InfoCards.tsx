@@ -7,8 +7,8 @@ import { searchBangumi } from '@/api/rssApi';
 
 interface Props {
   searchResult: TorrentPreviewResponse;
-  /** The current (merged) episode_data from the parent, including the user's
-   *  own additions.  Falls back to searchResult.episode_data when omitted. */
+  /** The current (merged) episode_catalog from the parent, including the user's
+   *  own additions.  Falls back to searchResult.episode_catalog when omitted. */
   episodeDataOverride?: EpisodeCatalog;
   onEpisodeDataChange: (augmented: EpisodeCatalog) => void;
   onPreviewChange: (view: TorrentPreviewResponse) => void;
@@ -26,23 +26,23 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
   const targetShowKey = showKeys.includes(selectedShowKey) ? selectedShowKey : (showKeys.length === 1 ? showKeys[0] : '');
   // Use the parent-merged data when available so the TMDB/Bangumi Match
   // display reflects the user's own additions immediately.
-  const episodeData = episodeDataOverride ?? (searchResult?.episode_data || { tmdb: {}, bangumi: {} });
+  const episodeData = episodeDataOverride ?? (searchResult?.episode_catalog || { tmdb: {}, bangumi: {} });
 
   // Collect unique TMDB / Bangumi entries from search_results
   const tmdbEntries = new Map<number, string>();
   const bangumiEntries = new Map<number, string>();
   for (const entry of Object.values(searchResults)) {
-    if (entry?.tmdb?.id && !tmdbEntries.has(entry.tmdb.id)) {
-      tmdbEntries.set(entry.tmdb.id, entry.tmdb.name || `ID ${entry.tmdb.id}`);
+    if (entry?.tmdb_series_id && !tmdbEntries.has(entry.tmdb_series_id)) {
+      tmdbEntries.set(entry.tmdb_series_id, entry.display_name || `ID ${entry.tmdb_series_id}`);
     }
-    if (entry?.bangumi?.id && !bangumiEntries.has(entry.bangumi.id)) {
+    if (entry?.bangumi_subject_id && !bangumiEntries.has(entry.bangumi_subject_id)) {
       bangumiEntries.set(
-        entry.bangumi.id,
-        entry.bangumi.name_cn || entry.bangumi.name || `ID ${entry.bangumi.id}`,
+        entry.bangumi_subject_id,
+        entry.bangumi_display_name || entry.bangumi_display_name || `ID ${entry.bangumi_subject_id}`,
       );
     }
   }
-  // Also from episode_data (sequels / specials / manually added).
+  // Also from episode_catalog (sequels / specials / manually added).
   // Provider show-name sentinels are normalized into tmdb_series_titles.
   for (const idStr of Object.keys(episodeData.tmdb || {})) {
     const id = Number(idStr);

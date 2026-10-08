@@ -1,3 +1,4 @@
+from tests.legacy_helpers import canonical_batch_fixture
 """Exercise actual provider boundaries offline, without mutating user data."""
 import unittest
 from types import SimpleNamespace

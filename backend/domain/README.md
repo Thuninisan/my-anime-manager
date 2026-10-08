@@ -1,3 +1,19 @@
+# Current canonical contract (Phase 7)
+
+Normal runtime accepts ResourceIdentity and EpisodeMapping only. Public torrent previews
+use v2 sessions, `episode_catalog`, `episode_match_source`, canonical series contexts and
+ResourceCandidate evidence. Downloads contain `preview_id`, `preview_revision`, `file_id`
+and `mapping`; server-side snapshots restore paths and private metadata.
+
+New subscription/history writes omit legacy identity mirrors. History repositories expose
+canonical snapshots or read-only partial legacy views from `backend/legacy/`; those adapters
+never search, access current bindings, or write back. Provider payload normalization remains
+in explicit provider adapters. User numbering rules and path-template vocabulary remain
+business configuration. See PHASE7_REPORT.md and legacy_allowlist.json for the current policy.
+
+The material below records earlier phases and is historical; its compatibility descriptions
+have been superseded by Phase 7.
+
 # Episode Domain：第一阶段
 
 匹配流程现在是 `filename/path → ParsedEpisodeRef → EpisodeCatalog → Matcher → EpisodeMapping → MatchTable`。

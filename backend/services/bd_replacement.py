@@ -20,8 +20,8 @@ def validate_mapping(bangumi_id: int, files: list[dict]) -> dict[str, dict]:
     if not episodes:
         raise HTTPException(400, "此订阅没有可替换的下载记录")
     expected = {int(sort) for sort in episodes}
-    mapped = [int(f.get("bangumi_sort") or 0) for f in files if not f.get("is_subtitle")]
-    if any(int(f.get("bangumi_id") or 0) != bangumi_id for f in files):
+    mapped = [int(f["episode_mapping"]["bangumi"]["episode_absolute"] or 0) for f in files if not f.get("is_subtitle")]
+    if any(int(f["episode_mapping"]["bangumi"]["subject_id"] or 0) != bangumi_id for f in files):
         raise HTTPException(400, "BD 文件包含其他 Bangumi 条目的映射")
     if len(mapped) != len(set(mapped)) or set(mapped) != expected:
         raise HTTPException(400, "BD 视频必须逐集覆盖全部 RSS 下载记录，且不能重复映射")

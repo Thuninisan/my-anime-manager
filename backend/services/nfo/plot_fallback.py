@@ -27,7 +27,7 @@ async def resolve_episode_plot(
     tmdb_id: int = 0,
     tvdb_id: int = 0,
     tvdb_season: int = 0,
-    tvdb_ep: int = 0,
+    tvdb_episode_number: int = 0,
     tmdb_season: int = 0,
     tmdb_ep_num: int = 0,
     bangumi_id: int = 0,
@@ -84,7 +84,7 @@ async def resolve_episode_plot(
         step("TMDB zh-CN：缺少映射，跳过")
 
     # ── Tier 2: TVDB Chinese ───────────────────────────────────────
-    if tvdb_id and tvdb_season is not None and tvdb_ep is not None:
+    if tvdb_id and tvdb_season is not None and tvdb_episode_number is not None:
         if preview_candidates is not None:
             plot = ""
             candidate = preview_candidates["tvdb"]
@@ -95,13 +95,13 @@ async def resolve_episode_plot(
                 except Exception:
                     logger.warning("TVDB selected episode translation failed", exc_info=True)
         elif metadata_ctx is None:
-            plot = await _try_tvdb_zh(tvdb_id, tvdb_season, tvdb_ep)
+            plot = await _try_tvdb_zh(tvdb_id, tvdb_season, tvdb_episode_number)
         else:
             plot = ""
             try:
                 data = await metadata_ctx.get_tvdb_series(tvdb_id, "zho")
                 for episode in data.get("episodes", []):
-                    if episode.get("seasonNumber") == tvdb_season and episode.get("number") == tvdb_ep:
+                    if episode.get("seasonNumber") == tvdb_season and episode.get("number") == tvdb_episode_number:
                         plot = (episode.get("overview") or "").strip()
                         break
             except Exception:

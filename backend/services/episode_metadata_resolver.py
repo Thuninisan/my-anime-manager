@@ -111,7 +111,7 @@ async def resolve_nfo_episode(
             tm, tv, bg = mapping["tmdb"], mapping["tvdb"], mapping["bangumi"]
             plot = await resolve_episode_plot(
                 tmdb_id=tm["series_id"], tmdb_season=tm["season_number"], tmdb_ep_num=tm["episode_number"],
-                tvdb_id=tv["series_id"], tvdb_season=tv["season_number"], tvdb_ep=tv["episode_number"],
+                tvdb_id=tv["series_id"], tvdb_season=tv["season_number"], tvdb_episode_number=tv["episode_number"],
                 bangumi_id=bg["subject_id"], bangumi_sort=bg["episode_absolute"], bangumi_episode_id=bg["episode_id"],
                 context=context, selected_source=sources, metadata_ctx=metadata_ctx, episode_mapping=mapping,
             )

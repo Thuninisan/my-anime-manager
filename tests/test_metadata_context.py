@@ -55,7 +55,7 @@ class MetadataContextTests(unittest.IsolatedAsyncioTestCase):
              patch('backend.services.nfo.plot_fallback._try_tmdb_zh', AsyncMock()) as tmdb_fetch, \
              patch('backend.services.nfo.plot_fallback._try_tvdb_zh', AsyncMock()) as tvdb_fetch:
             result = await resolve_episode_plot(tmdb_id=123, tmdb_season=1, tmdb_ep_num=1,
-                                                tvdb_id=456, tvdb_season=1, tvdb_ep=1,
+                                                tvdb_id=456, tvdb_season=1, tvdb_episode_number=1,
                                                 bangumi_id=789, bangumi_sort=1,
                                                 metadata_ctx=ctx)
             self.assertEqual(result, '这是中文简介。')

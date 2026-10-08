@@ -15,12 +15,18 @@ export interface ParsedFile {
 }
 
 export interface SearchEntry {
-  bangumi_ids?: number[];
-  tvdb_series_id?: number | null;
-  tmdb: { id: number; name: string; original_title?: string; original_name?: string } | null;
-  bangumi: { id: number; name: string; name_cn?: string } | null;
-  media_type?: "tv" | "movie" | "special";
-  map_entries?: { bangumi_id: number; name: string; tvdb_id?: number; tvdb_season?: number; tmdb_season?: number }[];
+  resource_resolution: import("./episode").ResourceResolution;
+  resource_identity: import('./episode').ResourceIdentity | null;
+  display_name: string;
+  bangumi_display_name: string;
+  tmdb_series_id: number | null;
+  tmdb_movie_id: number | null;
+  bangumi_subject_id: number | null;
+  bangumi_subject_ids: number[];
+  tvdb_series_id: number | null;
+  media_type: "tv" | "movie" | "special";
+  mapping_hints: { bangumi_subject_id: number | null; name: string;
+    tvdb_series_id: number | null; tvdb_season_number: number | null; tmdb_season_number: number | null }[];
 }
 
 export type TmdbEpisode = CatalogEpisode;

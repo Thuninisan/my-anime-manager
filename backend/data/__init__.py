@@ -450,8 +450,7 @@ def remove_episode_record(bangumi_id: int, ep_num: int) -> bool:
 
 def mark_downloaded(
     bangumi_id: int, ep_num: int, rss_url: str, guid: str, source: str,
-    pub_date: str = "", info_hash: str = "", tvdb_ep: int = 0,
-    tmdb_ep_calc: int = 0, *, episode_mapping=None, resource_identity=None, identity_revision=None, processing_result=None,
+    pub_date: str = "", info_hash: str = "", *, episode_mapping=None, resource_identity=None, identity_revision=None, processing_result=None,
 ) -> None:
     from ..db.models import DownloadEpisode
 
@@ -465,15 +464,19 @@ def mark_downloaded(
         row.pub_date = pub_date
         row.info_hash = info_hash
         row.at = time.strftime("%Y-%m-%dT%H:%M:%S")
-        row.tvdb_ep = tvdb_ep or row.tvdb_ep
-        row.tmdb_ep_calc = tmdb_ep_calc or row.tmdb_ep_calc
         if episode_mapping is not None:
             from ..domain.persistence import write_history_snapshot
             write_history_snapshot(row, episode_mapping, resource_identity, identity_revision, processing_result)
         elif row.episode_mapping_snapshot is None:
-            from ..domain.persistence import legacy_history_to_episode_mapping, EPISODE_MAPPING_SNAPSHOT_VERSION
-            row.episode_mapping_snapshot = json.dumps(legacy_history_to_episode_mapping(row), ensure_ascii=False)
-            row.episode_mapping_schema_version = EPISODE_MAPPING_SNAPSHOT_VERSION
+            # Manual marks know only subject/sort. Do not borrow a current binding.
+            from ..domain.episode import create_episode_mapping
+            from ..domain.persistence import write_history_snapshot
+            empty = {"series_id": None, "episode_id": None, "season_number": None, "episode_number": None}
+            mapping = create_episode_mapping(
+                {"season_number": None, "episode_number": ep_num},
+                {"subject_id": bangumi_id, "episode_id": None, "episode_number": None, "episode_absolute": ep_num},
+                dict(empty), dict(empty))
+            write_history_snapshot(row, mapping)
         row.fail_count = 0
         row.status = "downloaded"
     _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)

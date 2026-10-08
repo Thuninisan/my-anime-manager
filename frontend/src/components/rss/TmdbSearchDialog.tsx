@@ -1,5 +1,6 @@
+import type { CatalogSeason } from '@/types/episode';
 import { useEffect, useState } from 'react';
-import type { SeasonInfo } from '@/types/preview';
+
 import { searchTmdbShows, setSubscriptionTmdb, getTmdbSeasonMap } from '@/api/rssApi';
 import {
   DialogRoot, DialogContent, DialogHeader, DialogTitle,
@@ -34,7 +35,7 @@ export default function TmdbSearchDialog({
 
   // Selected TMDB show
   const [selectedShow, setSelectedShow] = useState<TmdbSearchResult | null>(null);
-  const [seasons, setSeasons] = useState<Record<string, SeasonInfo>>({});
+  const [seasons, setSeasons] = useState<Record<string, CatalogSeason>>({});
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [loadingSeasons, setLoadingSeasons] = useState(false);
   const [saving, setSaving] = useState(false);

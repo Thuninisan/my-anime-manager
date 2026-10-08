@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from tests.legacy_helpers import legacy_batch_episode_mapping
 from backend import config
 from backend.services.nfo import metadata_builder
 from backend.services.nfo.metadata_context import MetadataContext
@@ -30,14 +31,16 @@ class RssNfoGenerationTests(unittest.IsolatedAsyncioTestCase):
 
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(config, "RSS_PATH_TEMPLATE", template), \
-             patch.object(metadata_builder, "get_all_episodes", return_value={}), \
-             patch("backend.domain.episode_metadata_adapters.bind_legacy_episode_ids", side_effect=AssertionError("RSS must already own identity")), \
              patch.object(metadata_builder, "rename_file", AsyncMock()) as rename, \
              patch("backend.services.nfo.images.download_show_images", AsyncMock(return_value={})):
             success = await metadata_builder.generate_metadata(
-                qb, "test-hash", 789, 1, 789, 123, "订阅名称不同",
-                "original.mkv", "test-guid", tmdb_season=1,
-                show_dir=str(Path(tmp) / "测试番剧"), metadata_ctx=ctx, series_name="测试番剧",
+                qb,
+                "test-hash",
+                "original.mkv",
+                show_dir=str(Path(tmp) / "测试番剧"),
+                metadata_ctx=ctx,
+                series_name="测试番剧",
+                episode_mapping=legacy_batch_episode_mapping({"bangumi_subject_id":789,"bangumi_ep_id":790,"bangumi_episode_number":7,"bangumi_episode_sort":1,"tmdb_id":123,"tmdb_season":1,"tmdb_episode":1})
             )
 
             self.assertTrue(success)
@@ -58,15 +61,18 @@ class RssNfoGenerationTests(unittest.IsolatedAsyncioTestCase):
         ctx = MetadataContext()
         ctx.bgm_episodes[12] = []
         ctx.tmdb_season_maps[(10, "zh-CN")] = {}
-        with patch.object(metadata_builder, "get_all_episodes", return_value={}), \
-             patch.object(metadata_builder, "batch_nfo_generator", AsyncMock(return_value={
+        with patch.object(metadata_builder, "batch_nfo_generator", AsyncMock(return_value={
                  "episodesProcessed": 1, "episodePaths": ["Show/Season 00/episode"]})) as generate, \
              patch.object(metadata_builder, "rename_file", AsyncMock(return_value=False)):
             success = await metadata_builder.generate_metadata(
-                object(), "hash", 12, 3, 12, 10, "Show", "old.mkv", "guid",
-                tmdb_season=0, tvdb_season=0, tvdb_ep=3, base_path="/downloads", metadata_ctx=ctx,
+                object(),
+                "hash",
+                "old.mkv",
+                base_path="/downloads",
+                metadata_ctx=ctx,
+                episode_mapping=legacy_batch_episode_mapping({"bangumi_subject_id":12,"bangumi_episode_sort":3,"tmdb_id":10,"tmdb_season":0,"tmdb_episode":3,"tvdb_season":0})
             )
             self.assertFalse(success)
             episode = generate.await_args.args[1][0]
-            self.assertEqual(episode["tmdb_season"], 0)
-            self.assertEqual(episode["tvdb_season"], 0)
+            self.assertEqual(episode["episode_mapping"]["tmdb"]["season_number"], 0)
+            self.assertEqual(episode["episode_mapping"]["tvdb"]["season_number"], 0)

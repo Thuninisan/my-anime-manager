@@ -1,14 +1,13 @@
 """NFO orchestration: acquire provider data, resolve episodes, download assets, serialize.
 
-Legacy RSS/batch inputs cross the domain adapters before metadata resolution.
-The XML writer consumes only ResolvedEpisode; compatibility calls are re-exported.
+RSS, torrent and batch consumers supply canonical episode mappings.
+The XML writer consumes only ResolvedEpisode.
 """
 
 import logging
 from pathlib import Path
 
 from ... import config
-from .episode_compat import write_episode_files
 
 logger = logging.getLogger(__name__)
 
@@ -97,10 +96,7 @@ async def batch_nfo_generator(
 
     Args:
         pre_path: Base directory prepended to the formatted template path.
-        episodes: List of episode dicts, each with keys:
-            ``bangumi_subject_id``, ``bangumi_episode_sort``,
-            ``tvdb_id``, ``tvdb_season``, ``tvdb_episode``,
-            ``tmdb_id``, ``tmdb_season``, ``tmdb_episode``.
+        episodes: Canonical entries containing ``episode_mapping``.
         overwrite: Rewrite episode NFO + thumbs even if they exist (regen).
 
     Returns:
@@ -124,10 +120,10 @@ async def batch_nfo_generator(
     template = config.RSS_PATH_TEMPLATE
 
     from ...domain.episode_metadata_adapters import (
-        legacy_batch_episode_mapping, metadata_candidates_from_catalogs,
+        metadata_candidates_from_catalogs,
     )
     from ..episode_metadata_resolver import resolve_nfo_episode
-    mappings = [legacy_batch_episode_mapping(episode) for episode in episodes]
+    mappings = [episode["episode_mapping"] for episode in episodes]
 
     # ── Phase 1: Collect already determined identities ───────────────
     unique_bgm_ids = {mapping["bangumi"]["subject_id"] for mapping in mappings if mapping["bangumi"]["subject_id"]}
@@ -221,21 +217,20 @@ async def batch_nfo_generator(
 
     for ep, mapping in zip(episodes, mappings):
         bgm_id = mapping["bangumi"]["subject_id"]
-        bgm_sort = mapping["bangumi"]["episode_absolute"]
+        bangumi_episode_sort = mapping["bangumi"]["episode_absolute"]
         tvdb_id = mapping["tvdb"]["series_id"] or 0
         tvdb_season = mapping["tvdb"]["season_number"]  # keep None — 0 is valid (Specials)
-        tvdb_ep = mapping["tvdb"]["episode_number"]
+        tvdb_episode_number = mapping["tvdb"]["episode_number"]
         tmdb_id = mapping["tmdb"]["series_id"] or 0
         tmdb_season = mapping["tmdb"]["season_number"]
         tmdb_ep_num = mapping["tmdb"]["episode_number"]
-        ep_context = f"BGM {bgm_id} 第{bgm_sort}集 / TMDB {tmdb_id} S{int(tmdb_season or 0):02d}E{int(tmdb_ep_num or 0):02d}"
+        ep_context = f"BGM {bgm_id} 第{bangumi_episode_sort}集 / TMDB {tmdb_id} S{int(tmdb_season or 0):02d}E{int(tmdb_ep_num or 0):02d}"
 
         # ── Resolve metadata from caches ──
         show = tmdb_show_cache.get(tmdb_id, {})
         tmdb_title = show.get("title", str(tmdb_id))
 
         # Raw provider payloads stop at the catalog compatibility boundary.
-        is_legacy = ep.get("episode_mapping") is None or ep.get("_legacy_episode_mapping", False)
         season_map = await metadata_ctx.get_tmdb_season_map(tmdb_id, "zh-CN") if tmdb_id else {}
         if metadata_ctx.preview_snapshot is not None:
             from ..torrent.preview_session import metadata_candidates
@@ -243,11 +238,9 @@ async def batch_nfo_generator(
         else:
             candidates = metadata_candidates_from_catalogs(
                 mapping, season_map, tvdb_cache.get(tvdb_id, {}),
-                bgm_cache.get(bgm_id, []), legacy=is_legacy,
+                bgm_cache.get(bgm_id, []),
             )
         bangumi_ep_val = mapping["bangumi"]["episode_number"]
-        if is_legacy and bangumi_ep_val is None:
-            bangumi_ep_val = bgm_sort  # compatibility path naming only
         resolved = await resolve_nfo_episode(
             mapping, candidates,
             show_name=bgm_subject_cache.get(bgm_id) or tmdb_title,
@@ -268,8 +261,8 @@ async def batch_nfo_generator(
         }
         rel_path = format_download_path(
             template, sub,
-            bangumi_sort=bgm_sort, bangumi_ep=int(bangumi_ep_val if bangumi_ep_val is not None else 0),
-            tvdb_episode=tvdb_ep, tmdb_episode=tmdb_ep_num,
+            bangumi_sort=bangumi_episode_sort, bangumi_ep=int(bangumi_ep_val if bangumi_ep_val is not None else 0),
+            tvdb_episode=tvdb_episode_number, tmdb_episode=tmdb_ep_num,
             tmdb_title=tmdb_title,
         ).lstrip("/")
         file_stem = Path(rel_path).stem
@@ -382,7 +375,7 @@ async def batch_nfo_generator(
             "resolved": resolved,
             "season_dir": str(season_dir),
             "file_stem": file_stem,
-            "tmdb_id": tmdb_id,
+            "tmdb_series_id": tmdb_id,
             "has_thumb": bool(still),
         })
 
@@ -410,7 +403,7 @@ async def batch_nfo_generator(
                         "已下载" if thumb_path else "无")
         write_resolved_episode_nfo(
             rec["resolved"],
-            show_name=rec["show"].get("title", str(rec["tmdb_id"])),
+            show_name=rec["show"].get("title", str(rec["tmdb_series_id"])),
             bangumi_subject_name=rec["bgm_subject_name"],
             thumb_path=Path(thumb_path).name if thumb_path else "",
             output_dir=rec["season_dir"], file_stem=rec["file_stem"], overwrite=overwrite,

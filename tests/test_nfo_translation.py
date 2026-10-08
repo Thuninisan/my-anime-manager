@@ -116,7 +116,7 @@ class TranslationTests(unittest.IsolatedAsyncioTestCase):
              patch.object(fallback, '_try_tvdb_zh', AsyncMock(return_value='他出发了。')):
             self.assertEqual(await fallback.resolve_episode_plot(
                 tmdb_id=1, tmdb_season=1, tmdb_ep_num=1,
-                tvdb_id=1, tvdb_season=1, tvdb_ep=1), '他出发了。')
+                tvdb_id=1, tvdb_season=1, tvdb_episode_number=1), '他出发了。')
 
     async def test_foreign_metadata_translated_when_no_other_source(self):
         with patch.object(fallback, '_try_tmdb_zh', AsyncMock(return_value='He leaves.')), \
@@ -131,7 +131,7 @@ class TranslationTests(unittest.IsolatedAsyncioTestCase):
              self.assertLogs(fallback.logger, level='INFO') as logs:
             result = await fallback.resolve_episode_plot(
                 tmdb_id=1, tmdb_season=0, tmdb_ep_num=1,
-                tvdb_id=2, tvdb_season=0, tvdb_ep=1,
+                tvdb_id=2, tvdb_season=0, tvdb_episode_number=1,
                 context='S00E01')
         self.assertEqual(result, '他出发了。')
         messages = '\n'.join(logs.output)

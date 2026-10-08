@@ -21,7 +21,8 @@ def upgrade(connection):
 def backfill(session):
     from .models import Subscription, DownloadEpisode
     from .identity import read_resource_identity, update_resource_identity
-    from ..domain.persistence import legacy_history_to_episode_mapping, EPISODE_MAPPING_SNAPSHOT_VERSION
+    from ..legacy.history import legacy_history_to_episode_mapping
+    from ..domain.persistence import EPISODE_MAPPING_SNAPSHOT_VERSION
     stats = {"identities": 0, "history_partial": 0, "skipped_canonical": 0, "unresolved": 0}
     for row in session.scalars(select(Subscription)):
         if row.resource_identity_json is not None:

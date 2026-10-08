@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import AsyncMock, patch
 
 from backend.domain.episode import create_episode_mapping
-from backend.domain.episode_adapters import episode_catalog, merged_episode_metadata, parsed_episode_ref
+from backend.domain.episode_adapters import episode_catalog, provider_episode_metadata, parsed_episode_ref
 from backend.services.torrent import search
 
 
@@ -76,16 +76,16 @@ class EpisodeDomainTests(unittest.TestCase):
         raw = {"name": "Title", "overview": "Plot", "airDate": "2026-01-01", "runtime": 24,
                "still_path": "https://image.example/1.jpg", "voteAverage": 8.0,
                "guestStars": [{"name": "Actor", "character": "Hero"}], "genres": ["Animation"]}
-        metadata = merged_episode_metadata(raw)
+        metadata = provider_episode_metadata(raw)
         self.assertEqual(metadata["air_date"], "2026-01-01")
         self.assertEqual(metadata["rating"], 8.0)
         self.assertEqual(metadata["actors"], ["Actor"])
         self.assertEqual(metadata["runtime_minutes"], 24)
         self.assertNotIn("genres", metadata)
         self.assertTrue(all(value is None for value in metadata["sources"].values()))
-        self.assertIsNone(merged_episode_metadata({})["plot"])
-        self.assertIsNone(merged_episode_metadata({"stillPath": "/still.jpg"})["thumbnail_url"])
-        self.assertEqual(merged_episode_metadata(
+        self.assertIsNone(provider_episode_metadata({})["plot"])
+        self.assertIsNone(provider_episode_metadata({"stillPath": "/still.jpg"})["thumbnail_url"])
+        self.assertEqual(provider_episode_metadata(
             {"stillPath": "/still.jpg"}, thumbnail_base_url="https://image.example/original/",
         )["thumbnail_url"], "https://image.example/original/still.jpg")
 

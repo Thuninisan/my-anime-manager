@@ -606,7 +606,7 @@ def _organize(pairs: list[dict]) -> dict:
 # Step 5.5: Fetch episode listings for all discovered IDs
 # ═══════════════════════════════════════════════════════════════════════
 
-async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) -> dict:
+async def _fetch_provider_catalogs(search_results: dict, parsed_files: list[dict]) -> dict:
     """Fetch TMDB season→episode maps and Bangumi episode lists.
 
     Collects every unique TMDB / Bangumi ID from *search_results*
@@ -1035,7 +1035,7 @@ async def parse_and_search(torrent_path: str) -> dict:
         logger.debug(f"   [{key}] {t_info}")
         logger.debug(f"            {b_info}")
 
-    from ...domain.resource_adapters import search_entry_resolution, legacy_resource_context
+    from ...domain.resource_adapters import search_entry_resolution, provider_catalog_context
     from ..resource_resolver import ResourceResolver
     current_subscriptions = {sub["bangumi_id"]: sub for sub in data_store.list_subscriptions()}
     for key, entry in search_results.items():
@@ -1058,11 +1058,11 @@ async def parse_and_search(torrent_path: str) -> dict:
         entry["resource_resolution"] = search_entry_resolution(entry, key)
         entry["resource_identity"] = entry["resource_resolution"]["identity"]
         if entry["resource_identity"] is not None:
-            entry.update(legacy_resource_context(entry["resource_identity"], entry))
+            entry.update(provider_catalog_context(entry["resource_identity"], entry))
 
     # ── Step 5.5: Fetch episode listings ──
     logger.info("📡 获取剧集数据...")
-    episode_data = await _fetch_episode_data(search_results, parsed_files)
+    provider_catalogs = await _fetch_provider_catalogs(search_results, parsed_files)
 
     # ── Add map_entries to each search result (for frontend BGM→TVDB lookup) ──
     for key, entry in search_results.items():
@@ -1123,8 +1123,8 @@ async def parse_and_search(torrent_path: str) -> dict:
         "show_names": show_names,
         "search_results": search_results,
         "search_results_backup": search_results_backup,
-        "episode_data": episode_data,
-        "episode_catalog": episode_catalog(episode_data),
+        "provider_catalogs": provider_catalogs,
+        "episode_catalog": episode_catalog(provider_catalogs),
     }
 
 
@@ -1132,31 +1132,7 @@ async def parse_and_search(torrent_path: str) -> dict:
 # Series name derivation
 # ═════════════════════════════════════════════════════════════════════
 
-def derive_series_name(preview_data: dict | None) -> str:
-    """Derive the root series name for path template ``{series_name}``.
-
-    Priority: TMDB name from ``search_results`` → BGM name from
-    ``episode_data.bangumi``.  This mirrors the RSS enrichment flow
-    which prefers TMDB zh-CN over BGM.
-    """
-    if not preview_data:
-        return ""
-
-    # 1. Try TMDB name from search_results (usually Chinese or best
-    #    available localised title)
-    search_results = preview_data.get("search_results", {})
-    for entry in search_results.values():
-        if isinstance(entry, dict):
-            tmdb = entry.get("tmdb")
-            if isinstance(tmdb, dict) and tmdb.get("name"):
-                return tmdb["name"]
-
-    # 2. Fallback: first BGM entry from episode_data
-    episode_data = preview_data.get("episode_data", {})
-    bgm_data: dict = episode_data.get("bangumi", {})
-    if bgm_data:
-        first = next(iter(bgm_data.values()))
-        if isinstance(first, dict):
-            return first.get("name", "")
-
-    return ""
+def derive_series_name(snapshot: dict | None) -> str:
+    """Display-only root path label from the confirmed preview contexts."""
+    return next((series["display_name"] for series in (snapshot or {}).get("series_contexts", {}).values()
+                 if series["display_name"]), "")

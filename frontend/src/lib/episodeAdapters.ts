@@ -17,19 +17,19 @@ export function normalizeEpisodeCatalog(value: unknown): EpisodeCatalog {
   for (const provider of ['tmdb', 'tvdb'] as const) {
     for (const [id, value] of Object.entries(object(raw[provider]))) {
       const entry = object(value);
-      if (entry._show_name != null || entry._name != null) titles[id] = str(entry._show_name ?? entry._name);
+
       const seasons: Record<string, CatalogSeason> = {};
       for (const [season, data] of Object.entries(provider === 'tvdb' ? object(entry.seasons) : entry)) {
         const sd = object(data);
         if (!Array.isArray(sd.episodes)) continue;
         seasons[season] = { name: str(sd.name), episodes: sd.episodes.flatMap(value => {
           const ep = object(value);
-          const episodeNumber = num('episode_number' in ep ? ep.episode_number : ep.epNum);
+          const episodeNumber = num(ep.episode_number);
           if (episodeNumber == null) return [];
           const normalized = {
-            series_id: Number(id), episode_id: num('episode_id' in ep ? ep.episode_id : ep[provider === 'tmdb' ? 'tmdbId' : 'tvdbId']),
+            series_id: Number(id), episode_id: num(ep.episode_id),
             season_number: Number(season), episode_number: episodeNumber,
-            episode_absolute: num('episode_absolute' in ep ? ep.episode_absolute : ep.absoluteNumber),
+            episode_absolute: num(ep.episode_absolute),
             name: str(ep.name), name_cn: str(ep.name_cn),
           };
           return [normalized];
@@ -43,14 +43,14 @@ export function normalizeEpisodeCatalog(value: unknown): EpisodeCatalog {
     const entry = object(value);
     result.bangumi[id] = { name: str(entry.name), episodes: list(entry.episodes).flatMap(value => {
       const ep = object(value);
-      const episodeId = num('episode_id' in ep ? ep.episode_id : ep.id);
+      const episodeId = num(ep.episode_id);
       if (episodeId == null) return [];
       const normalized = { subject_id: Number(id), episode_id: episodeId,
-        episode_number: num('episode_number' in ep ? ep.episode_number : ep.ep),
+        episode_number: num(ep.episode_number),
         // Do not substitute ep for sort; preserve raw sort if supplied, including null.
-        episode_absolute: num('raw_sort' in ep ? ep.raw_sort : 'episode_absolute' in ep ? ep.episode_absolute : ep.sort),
+        episode_absolute: num(ep.episode_absolute),
         name: str(ep.name), name_cn: str(ep.name_cn),
-        matching_absolute: num(ep.matching_absolute ?? ep.sort) };
+        matching_absolute: num(ep.matching_absolute) };
       return [normalized];
     }) };
   }
@@ -62,25 +62,24 @@ export function normalizeTorrentPreview(value: unknown): TorrentPreviewResponse 
   const raw = object(value);
   const parsedFiles = (value: unknown): ParsedFile[] => list(value).map(value => {
     const file = object(value);
-    const parsed = object(file.parsed);
-    const coordinate = object(file.parsed_episode ?? ('season_number' in parsed ? parsed : undefined));
+    const coordinate = object(file.parsed_episode);
     return { file_id: str(file.file_id), file_name: str(file.file_name), torrent_path: str(file.torrent_path) || str(file.file_name),
       show_name: str(file.show_name), parsed: {
-        season_number: num('season_number' in coordinate ? coordinate.season_number : file.season),
-        episode_number: num('episode_number' in coordinate ? coordinate.episode_number : file.episode) } };
+        season_number: num(coordinate.season_number),
+        episode_number: num(coordinate.episode_number) } };
   });
   return {
     preview_id: str(raw.preview_id), revision: num(raw.revision) ?? 0, expires_at: str(raw.expires_at),
     search_results: object(raw.search_results) as TorrentPreviewResponse['search_results'],
-    index: raw.index === 'tmdb' ? 'tmdb' : raw.index === 'tvdb' ? 'tvdb' : undefined,
+    episode_match_source: raw.episode_match_source === 'tmdb' ? 'tmdb' : raw.episode_match_source === 'tvdb' ? 'tvdb' : undefined,
     subtitles: list(raw.subtitles).map(str), subtitle_files: parsedFiles(raw.subtitle_files),
     skipped_files: list(raw.skipped_files).map(value => { const file = object(value); return {
       file_name: str(file.file_name), torrent_path: str(file.torrent_path), reason: str(file.reason) }; }),
     resource_id: num(raw.resource_id) ?? undefined,
     series: raw.series as TorrentPreviewResponse['series'],
-    preprocessed_candidates: raw.preprocessed_candidates as TorrentPreviewResponse['preprocessed_candidates'],
-    torrent_name: str(raw.torrent_name), torrent_path: str(raw.torrent_path),
-    episode_data: normalizeEpisodeCatalog(raw.episode_catalog ?? raw.episode_data),
+    resource_candidates: raw.resource_candidates as TorrentPreviewResponse['resource_candidates'],
+    torrent_name: str(raw.torrent_name),
+    episode_catalog: normalizeEpisodeCatalog(raw.episode_catalog),
     parsed_files: parsedFiles(raw.parsed_files), specials: parsedFiles(raw.specials),
   };
 }
@@ -103,6 +102,6 @@ export function catalogSeriesTitle(catalog: EpisodeCatalog, id: string): string 
 }
 
 /** Preserve the pre-existing sort→ep fallback only inside legacy matching. */
-export function legacyBangumiAbsolute(episode: BangumiCatalogEpisode): number | null {
+export function matchingBangumiAbsolute(episode: BangumiCatalogEpisode): number | null {
   return episode.matching_absolute ?? episode.episode_absolute ?? episode.episode_number;
 }

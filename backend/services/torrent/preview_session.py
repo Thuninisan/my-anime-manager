@@ -17,7 +17,7 @@ from ...db.models import TorrentPreviewSession
 from ...domain.preview import PREVIEW_SCHEMA_VERSION, PreviewContextSnapshot, PreviewDownloadRequest
 from ...domain.episode import EpisodeMapping, EpisodeMetadataCandidates
 from ...domain.episode_adapters import episode_catalog
-from ...domain.episode_metadata_adapters import provider_metadata_candidates, download_entry_with_mapping
+from ...domain.episode_metadata_adapters import provider_metadata_candidates
 from ...utils.paths import USER_DATA_DIR
 
 PREVIEW_DIR = USER_DATA_DIR / "previews"
@@ -87,23 +87,26 @@ def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
         series[key] = {"identity_revision": entry.get("identity_revision"), "identity_source": entry.get("identity_source", resolution["reason"]), "resource_identity": identity, "resource_resolution": resolution, "show_key": key, "display_name": tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or key,
                        "bangumi_display_name": bgm.get("name_cn") or bgm.get("name") or "",
                        "media_type": identity["media_type"] if identity else entry.get("media_type") or "tv",
-                       "tmdb_series_id": (identity["tmdb_series_id"] or identity["tmdb_movie_id"]) if identity else None,
+                       "tmdb_series_id": identity["tmdb_series_id"] if identity else None,
+                       "tmdb_movie_id": identity["tmdb_movie_id"] if identity else None,
                        "tvdb_series_id": identity["tvdb_series_id"] if identity else None,
                        "bangumi_subject_id": identity["bangumi_subject_id"] if identity else None, "bangumi_subject_ids": entry.get("bangumi_ids", []),
-                       "mapping_hints": [{k: v for k, v in h.items() if k in {
-                           "bangumi_id", "name", "name_original", "tvdb_id", "tvdb_season", "tmdb_season"}} for h in hints]}
+                       "mapping_hints": [{"bangumi_subject_id": h.get("bangumi_id"), "name": h.get("name", ""),
+                           "tvdb_series_id": h.get("tvdb_id"), "tvdb_season_number": h.get("tvdb_season"),
+                           "tmdb_season_number": h.get("tmdb_season")} for h in hints]}
     from .preview import _extract_year
     for item in files:
         if item["show_key"] and item["show_key"] not in series:
             cleaned, _ = _extract_year(item["show_key"])
             if cleaned in series:
                 item["show_key"] = cleaned
-    return {"schema_version": PREVIEW_SCHEMA_VERSION,
+    return {"resource_candidates": copy.deepcopy(result.get("resource_candidates", [])),
+            "schema_version": PREVIEW_SCHEMA_VERSION,
             "torrent": {"name": result["torrent_name"], "source_path": str(source),
                         "sha256": hashlib.sha256(source.read_bytes()).hexdigest(), "resource_id": result.get("resource_id")},
             "parsed_files": files, "series_contexts": series,
-            "episode_catalog": episode_catalog(result.get("episode_data", {})),
-            "episode_metadata": normalize_metadata(result.get("episode_data", {})),
+            "episode_catalog": episode_catalog(result.get("provider_catalogs", {})),
+            "episode_metadata": normalize_metadata(result.get("provider_catalogs", {})),
             "skipped_files": [{k: v for k, v in item.items() if k in {"file_name", "torrent_path", "reason"}}
                               for item in result.get("skipped_files", [])],
             "episode_match_source": result.get("index", "tvdb")}
@@ -114,10 +117,10 @@ def validate_resource_contexts(snapshot: PreviewContextSnapshot) -> None:
     for context in snapshot["series_contexts"].values():
         identity = context.get("resource_identity")
         if identity is None:
-            continue  # Existing v1 sessions use the explicit legacy context.
+            continue  # Unresolved canonical context is allowed for explicit augmentation.
         validate_resource_identity(identity)
-        tmdb_id = identity["tmdb_series_id"] if identity["media_type"] == "tv" else identity["tmdb_movie_id"]
-        if (context["media_type"] != identity["media_type"] or context["tmdb_series_id"] != tmdb_id
+        if (context["media_type"] != identity["media_type"] or context["tmdb_series_id"] != identity["tmdb_series_id"]
+            or context["tmdb_movie_id"] != identity["tmdb_movie_id"]
             or context["tvdb_series_id"] != identity["tvdb_series_id"]
             or context["bangumi_subject_id"] != identity["bangumi_subject_id"]):
             raise ValueError("invalid_resource_identity: preview context conflict")
@@ -157,13 +160,15 @@ def load_preview_session(preview_id: str, revision: int | None = None) -> tuple[
         raise HTTPException(410, "preview_expired")
     if row.schema_version != PREVIEW_SCHEMA_VERSION:
         raise HTTPException(409, "preview_schema_outdated")
-    snapshot = json.loads(row.context_json)
-    if snapshot["schema_version"] != PREVIEW_SCHEMA_VERSION:
-        raise HTTPException(409, "preview_schema_outdated")
     try:
+        snapshot = json.loads(row.context_json)
+        if not isinstance(snapshot, dict):
+            raise ValueError("invalid_preview_context")
+        if snapshot.get("schema_version") != PREVIEW_SCHEMA_VERSION:
+            raise HTTPException(409, "preview_schema_outdated")
         _SNAPSHOT_ADAPTER.validate_python(snapshot, strict=True)
         validate_resource_contexts(snapshot)
-    except (ValidationError, ValueError):
+    except (ValidationError, ValueError, TypeError, KeyError):
         raise HTTPException(409, "preview_context_invalid")
     if revision is not None and row.revision != revision:
         raise HTTPException(409, "preview_revision_conflict")
@@ -280,8 +285,8 @@ def restore_download_request(body: dict) -> dict:
                     series = matching[0]
             if series and source["kind"] != "subtitle":
                 allowed_bgm = {series["bangumi_subject_id"], *series["bangumi_subject_ids"],
-                               *(h.get("bangumi_id") for h in series["mapping_hints"])}
-                allowed_tvdb = {series["tvdb_series_id"], *(h.get("tvdb_id") for h in series["mapping_hints"])}
+                               *(h.get("bangumi_subject_id") for h in series["mapping_hints"])}
+                allowed_tvdb = {series["tvdb_series_id"], *(h.get("tvdb_series_id") for h in series["mapping_hints"])}
                 if (mapping["tmdb"]["series_id"] not in (None, series["tmdb_series_id"])
                     or mapping["tvdb"]["series_id"] not in allowed_tvdb
                     or mapping["bangumi"]["subject_id"] not in allowed_bgm):
@@ -296,15 +301,14 @@ def restore_download_request(body: dict) -> dict:
             entry = {"identity_revision": selected_series.get("identity_revision"), "resource_identity": selected_series.get("resource_identity"), "episode_mapping": mapping, "torrent_path": source["torrent_path"],
                      "is_subtitle": source["kind"] == "subtitle", "tmdb_show_name": selected_series.get("display_name", ""),
                      "bangumi_show_name": snapshot["episode_catalog"]["bangumi"].get(str(mapping["bangumi"]["subject_id"]), {}).get("name", bgm_series.get("bangumi_display_name", "")),
-                     "bangumi_sort": mapping["bangumi"]["episode_absolute"] if mapping["bangumi"]["episode_absolute"] is not None else mapping["parsed"]["episode_number"],
                      **{k: item[k] for k in ("subtitle_suffix", "stored_filename", "original_filename") if k in item}}
-            restored[collection].append(download_entry_with_mapping(entry))
+            restored[collection].append(entry)
     selected_resources = [f.get("resource_identity") for f in restored["files"] if not f.get("is_subtitle")]
     movie_ids = {i["tmdb_movie_id"] for i in selected_resources if i and i["media_type"] == "movie"}
     if movie_ids and (len(movie_ids) > 1 or any(i and i["media_type"] == "tv" for i in selected_resources)):
         raise HTTPException(422, "ambiguous_resource: mixed_movie_download")
     restored.update(torrent_path=snapshot["torrent"]["source_path"], torrent_name=snapshot["torrent"]["name"],
-                    resource_id=None, preview_data=private_nfo_context(snapshot))
+                    resource_id=None, preview_snapshot=snapshot)
     source = Path(snapshot["torrent"]["source_path"])
     if not source.is_file():
         raise HTTPException(410, "preview_source_missing")
@@ -312,13 +316,6 @@ def restore_download_request(body: dict) -> dict:
         raise HTTPException(409, "preview_source_changed")
     touch_preview_session(row)
     return restored
-
-
-def private_nfo_context(snapshot: PreviewContextSnapshot) -> dict:
-    """Small legacy orchestration boundary, with canonical candidates held privately."""
-    from .preview_view import search_views
-    return {"search_results": search_views(snapshot), "episode_data": {"bangumi": snapshot["episode_catalog"]["bangumi"]},
-            "canonical_snapshot": snapshot}
 
 
 async def augment_preview_session(preview_id: str, revision: int, show_key: str, provider: str, provider_id: int):
@@ -334,11 +331,11 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
         if provider == "tmdb":
             from ...clients import tmdb
             detail = (await tmdb.get_movie_detail(provider_id)).json()
-            from ...domain.resource_adapters import identity_from_legacy
+            from ...domain.resource_adapters import provider_binding_identity
             from ..resource_resolver import ResourceResolver
-            identity = identity_from_legacy(title=detail.get("title") or context["display_name"], media_type="movie",
+            identity = provider_binding_identity(title=detail.get("title") or context["display_name"], media_type="movie",
                                             tmdb_id=provider_id, bangumi_id=context["bangumi_subject_id"])
-            context.update(tmdb_series_id=provider_id, display_name=identity["canonical_title"],
+            context.update(tmdb_movie_id=provider_id, display_name=identity["canonical_title"],
                            resource_identity=identity, resource_resolution=ResourceResolver().resolve([], known=identity))
             context["identity_revision"] = None
             context["identity_source"] = "explicit_user_mapping"

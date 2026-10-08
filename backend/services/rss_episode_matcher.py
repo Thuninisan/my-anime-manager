@@ -69,11 +69,11 @@ async def subscription_episode_mapping(ref: RssEpisodeRef, sub: dict, subject_id
     from ..domain.resource_adapters import subscription_identity
     identity = subscription_identity(sub, subject_id)
     rules = {"bangumi_subject_id": identity["bangumi_subject_id"], "bangumi_episode_sort": sort}
-    legacy = {"bangumi": {}, "tmdb": {}, "tvdb": {}}
+    provider_catalogs = {"bangumi": {}, "tmdb": {}, "tvdb": {}}
     for provider in ("bangumi", "tmdb", "tvdb"):
         try:
             if provider == "bangumi":
-                legacy[provider][str(subject_id)] = {"episodes": await metadata_ctx.get_bgm_episodes(subject_id)}
+                provider_catalogs[provider][str(subject_id)] = {"episodes": await metadata_ctx.get_bgm_episodes(subject_id)}
                 continue
             settings = sub.get(provider, {})
             series_id = identity[f"{provider}_series_id"]
@@ -86,11 +86,11 @@ async def subscription_episode_mapping(ref: RssEpisodeRef, sub: dict, subject_id
                 "episode_number": override.get("tmdb_ep") if provider == "tmdb" else tvdb_episode_number,
                 "episode_offset": settings.get("ep_offset", 0)}
             if series_id is not None:
-                legacy[provider][str(series_id)] = (
+                provider_catalogs[provider][str(series_id)] = (
                     await metadata_ctx.get_tmdb_season_map(series_id, "zh-CN") if provider == "tmdb"
                     else await metadata_ctx.get_tvdb_series(series_id)) or {}
         except Exception:
             logger.exception("RSS catalog acquisition failed: %s subject=%s", provider, subject_id)
-    catalog = episode_catalog(legacy)
+    catalog = episode_catalog(provider_catalogs)
     metadata_ctx.rss_episode_catalogs[subject_id] = catalog
     return build_episode_mapping(ref, rules, catalog)

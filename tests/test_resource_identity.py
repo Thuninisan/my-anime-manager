@@ -1,3 +1,4 @@
+from tests.legacy_helpers import canonical_batch_fixture
 import unittest
 from backend.domain.resource import resource_identity
 from backend.domain.resource_adapters import provider_candidates
@@ -86,12 +87,12 @@ class ResourceIdentityTests(unittest.TestCase):
     def test_batch_contexts_keep_independent_bindings(self):
         from backend.services.batch_episode_mapper import normalize_batch_episode
         for provider_id in (10, 20):
-            mapping = normalize_batch_episode({'tmdb_id': provider_id, 'tmdb_season': 0, 'tmdb_episode': 1})
+            mapping = normalize_batch_episode(canonical_batch_fixture({'tmdb_id': provider_id, 'tmdb_season': 0, 'tmdb_episode': 1}))
             self.assertEqual(mapping['tmdb']['series_id'], provider_id)
         with self.assertRaises(ValueError):
-            normalize_batch_episode({'tmdb_id': 10, 'resource_identity': resource_identity(tmdb_series_id=20)})
+            normalize_batch_episode(canonical_batch_fixture({'tmdb_id': 10, 'resource_identity': resource_identity(tmdb_series_id=20)}))
 
     def test_subscription_edits_win_over_stale_identity(self):
         from backend.domain.resource_adapters import subscription_identity
-        sub = {'tmdb': {'id': 20}, 'resource_identity': resource_identity(tmdb_series_id=10)}
-        self.assertEqual(subscription_identity(sub, 5)['tmdb_series_id'], 20)
+        sub = {'tmdb': {'id': 20}, 'resource_identity': resource_identity(bangumi_subject_id=5, tmdb_series_id=10)}
+        self.assertEqual(subscription_identity(sub, 5)['tmdb_series_id'], 10)

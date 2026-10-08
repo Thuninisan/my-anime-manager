@@ -2,6 +2,7 @@
 import unittest
 from unittest.mock import patch
 
+from tests.legacy_helpers import legacy_batch_episode_mapping
 from backend.services.torrent.monitor import build_processing, _subtitle_suffix
 
 
@@ -33,6 +34,7 @@ class TorrentSubtitleTests(unittest.TestCase):
                 {"torrent_path": "subs/video.ass", "is_subtitle": True, "subtitle_suffix": ".sub2.ass"},
             ],
         }
+        context["files"][0]["episode_mapping"] = legacy_batch_episode_mapping({})
         with patch('backend.services.nfo.format_download_path', return_value='Show/Season 1/Show S01E01.mkv'):
             result = build_processing(context)
         self.assertEqual(result["files"][0]["target_path"], '/library/Show/Season 1/Show S01E01.sub2.ass')

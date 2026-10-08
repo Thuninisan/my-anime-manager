@@ -2,6 +2,7 @@
 import copy
 import json
 import tempfile
+from backend.db.download_history import history_snapshot
 import unittest
 from pathlib import Path
 from unittest.mock import patch, AsyncMock
@@ -15,7 +16,7 @@ from backend.db.persistence_migration import upgrade, backfill
 from backend.domain.resource import resource_identity
 from backend.domain.episode import create_episode_mapping
 from backend.domain.persistence import (episode_mapping_snapshot, load_episode_mapping_snapshot,
-                                        history_snapshot, write_history_snapshot)
+                                        write_history_snapshot)
 
 
 def mapping(subject=10, tmdb=20, tvdb=30, number=0):
@@ -77,7 +78,7 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(timestamp, row.identity_updated_at)
             self.assertTrue(update_resource_identity(row, dict(first, tmdb_series_id=21), source='explicit_user_mapping'))
             self.assertEqual(row.identity_revision, 2)
-            self.assertEqual(row.tmdb_id, 21)
+            self.assertIsNone(row.tmdb_id)
             self.assertEqual(row.identity_schema_version, 1)
         with connection.new_session() as session:
             self.assertEqual(read_resource_identity(session.get(Subscription, 10))['tmdb_series_id'], 21)
@@ -130,8 +131,8 @@ class PersistenceTests(unittest.TestCase):
         after = data.get_all_episodes(10)['0']
         self.assertEqual(before, after)
         self.assertEqual(after['episode_mapping_snapshot']['resource_identity']['tmdb_series_id'], 20)
-        self.assertEqual(after['tmdb_ep_calc'], 0)
-        self.assertEqual(after['tvdb_ep'], 0)
+        self.assertEqual(after['episode_mapping_snapshot']['episode_mapping']['tmdb']['episode_number'], 0)
+        self.assertEqual(after['episode_mapping_snapshot']['episode_mapping']['tvdb']['episode_number'], 0)
         latest = data.list_subscriptions()[0]
         self.assertEqual(latest['resource_identity']['tmdb_series_id'], 99)
         self.assertEqual(latest['bgm']['season'], 0)
@@ -222,7 +223,7 @@ class PersistenceTests(unittest.TestCase):
                 'search_results':{'Show':{'tmdb':{'id':tid,'name':'Show'},'bangumi':{'id':10,'name':'Show'},
                     'resource_resolution':{'status':'resolved','identity':binding['resource_identity'],'candidates':[],'reason':'existing_mapping'},
                     'identity_revision':binding['identity_revision']}},
-                'episode_data':{'tmdb':{str(tid):{'0':{'name':'Specials','episodes':[{'tmdbId':1000,'epNum':0,'name':'Zero'}]}}},
+                'provider_catalogs':{'tmdb':{str(tid):{'0':{'name':'Specials','episodes':[{'tmdbId':1000,'epNum':0,'name':'Zero'}]}}},
                                 'bangumi':{'10':{'name':'Show','episodes':[{'id':2000,'ep':0,'sort':0,'raw_sort':0,'name':'Zero'}]}}}}
         with patch.object(preview_session, 'PREVIEW_DIR', self.root / 'previews'):
             old_row = preview_session.create_preview_session(result(sub), str(source))
@@ -255,7 +256,7 @@ class PersistenceTests(unittest.TestCase):
         with patch.object(downloader, 'generate_metadata', AsyncMock(return_value=True)) as generate:
             asyncio.run(downloader.regen_episode_nfo(10,0))
             self.assertEqual(generate.call_args.kwargs['episode_mapping'],mapping())
-            self.assertEqual(generate.call_args.kwargs['tmdb_season'],0)
+            self.assertEqual(generate.call_args.kwargs['episode_mapping']['tmdb']['season_number'],0)
 
     def test_snapshot_mismatch_rolls_back_without_changing_history(self):
         data.mark_downloaded(10,0,'feed','old','manual')
@@ -267,12 +268,12 @@ class PersistenceTests(unittest.TestCase):
 
     def test_preview_catalog_uses_canonical_tvdb_instead_of_community_hint(self):
         import asyncio
-        from backend.services.torrent.preview import _fetch_episode_data
+        from backend.services.torrent.preview import _fetch_provider_catalogs
         entry = {'tmdb':None,'bangumi':None,'identity_revision':2,
                  'resource_identity':resource_identity(tvdb_series_id=99),
                  'map_entries':[{'tvdb_id':30}]}
         with patch('backend.services.tvdb.fetch_tvdb_series_episodes', AsyncMock(return_value={'seasons':{}})) as fetch:
-            result = asyncio.run(_fetch_episode_data({'Show':entry}, []))
+            result = asyncio.run(_fetch_provider_catalogs({'Show':entry}, []))
         fetch.assert_awaited_once_with(99)
         self.assertIn('99',result['tvdb'])
         self.assertNotIn('30',result['tvdb'])
@@ -317,8 +318,8 @@ class PersistenceTests(unittest.TestCase):
         data.set_subscription_rss_offset(10,'primary',0)
         data.update_subscription(10, {'tmdb':{'id':99}})
         sub = data.list_subscriptions()[0]
-        self.assertEqual(sub['tmdb'],{'id':99,'season':0,'ep_offset':12})
-        self.assertEqual(sub['tvdb'],{'id':30,'season':0,'ep_offset':3})
+        self.assertEqual(sub['tmdb'],{'season':0,'ep_offset':12})
+        self.assertEqual(sub['tvdb'],{'season':0,'ep_offset':3})
         self.assertEqual(sub['primary']['offset'],0)
 
     def test_snapshot_rejects_invalid_ids_and_coordinates(self):

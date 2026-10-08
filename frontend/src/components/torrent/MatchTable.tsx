@@ -1,5 +1,5 @@
 import type { TorrentPreviewResponse } from '@/types/preview';
-/** Matching logic: parsed_files → search_results → episode_data → table.
+/** Matching logic: parsed_files → search_results → episode_catalog → table.
 
    1. parsed_file.show_name → search_results[key]
    2. parsed_file.parsed → provider candidates from EpisodeCatalog
@@ -8,7 +8,7 @@ import type { TorrentPreviewResponse } from '@/types/preview';
    5. Manual dropdown overrides update the same canonical mapping
 
    BGM Entry / BGM Name columns have dropdowns populated from
-   search_results + episode_data so the user can override the
+   search_results + episode_catalog so the user can override the
    auto-matched entry and episode.
 
    State management and matching logic live in:
@@ -45,7 +45,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
   onSubtitlesChange?: (subs: { originalFilename: string; storedFilename: string }[]) => void;
 }) {
   const searchResults = data.search_results || {};
-  const episodeData = data.episode_data || { tmdb: {}, bangumi: {} };
+  const episodeData = data.episode_catalog || { tmdb: {}, bangumi: {} };
   const subtitles: string[] = data.subtitles || [];
   const torrentName: string = data.torrent_name || '';
 
@@ -247,7 +247,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
               const tmdbSeasonVal = ov?.tmdbShowId && ov.tmdbSeason != null
                 ? `${ov.tmdbShowId}:${ov.tmdbSeason}` : (r.mapping.tmdb.season_number ?? '');
 
-              const lookupTmdbId = ov?.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
+              const lookupTmdbId = ov?.tmdbShowId ?? searchResults[r.show_name]?.tmdb_series_id;
               const lookupSeasons: Record<string, TmdbSeason> =
                 (lookupTmdbId && episodeData.tmdb?.[String(lookupTmdbId)]) || {};
               const spTmdbSeasons: Record<string, TmdbSeason> =

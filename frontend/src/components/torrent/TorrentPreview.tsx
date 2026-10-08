@@ -25,7 +25,7 @@ function computeStats(searchResult: TorrentPreviewResponse) {
   let mapped = 0;
   for (const pf of parsedFiles) {
     const entry = searchResults[pf.show_name];
-    if (entry?.tmdb && entry?.bangumi) mapped++;
+    if (entry?.tmdb_series_id && entry?.bangumi_subject_id) mapped++;
   }
 
   return {
@@ -46,7 +46,7 @@ export default function TorrentPreview({
   const [sessionView, setSessionView] = useState(initialSearchResult);
   const searchResult = sessionView.preview_id === initialSearchResult.preview_id ? sessionView : initialSearchResult;
   const mergedResult = augmentedEpData && searchResult
-    ? { ...searchResult, episode_data: augmentedEpData }
+    ? { ...searchResult, episode_catalog: augmentedEpData }
     : searchResult;
 
   const stats = useMemo(() => computeStats(searchResult), [searchResult]);
@@ -224,14 +224,14 @@ export default function TorrentPreview({
         </div>
 
         {/* ── Metadata Source Overrides ── */}
-        {(searchResult.preprocessed_candidates?.length ?? 0) > 0 && (
+        {(searchResult.resource_candidates?.length ?? 0) > 0 && (
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm">
             <p className="font-semibold">资源预识别的 Bangumi 候选</p>
             <p className="mt-1 text-muted-foreground">请在下方逐文件确认剧集对应关系。</p>
             <ul className="mt-2 flex flex-wrap gap-2">
-              {searchResult.preprocessed_candidates?.map((candidate) => (
-                <li key={`${candidate.bangumi_id}-${candidate.index_season}-${candidate.media_type}`} className="rounded-md border border-border px-2 py-1">
-                  Bangumi {candidate.bangumi_id} · {candidate.media_type === 'MOVIE' ? '电影' : `第 ${candidate.index_season} 季`} · {candidate.reason}
+              {searchResult.resource_candidates?.map((candidate) => (
+                <li key={`${candidate.provider}-${candidate.provider_id}-${candidate.media_type}`} className="rounded-md border border-border px-2 py-1">
+                  {candidate.provider.toUpperCase()} {candidate.provider_id} · {candidate.media_type === 'movie' ? '电影' : '剧集'} · {candidate.title || candidate.source}
                 </li>
               ))}
             </ul>
@@ -239,8 +239,8 @@ export default function TorrentPreview({
         )}
         <InfoCards
           searchResult={searchResult}
-          episodeDataOverride={mergedResult.episode_data}
-          onPreviewChange={view => { setSessionView(view); onEpisodeDataChange(view.episode_data); }}
+          episodeDataOverride={mergedResult.episode_catalog}
+          onPreviewChange={view => { setSessionView(view); onEpisodeDataChange(view.episode_catalog); }}
           onEpisodeDataChange={onEpisodeDataChange}
         />
 

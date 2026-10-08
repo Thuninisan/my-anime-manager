@@ -1,4 +1,4 @@
-import type { BangumiRssResponse, ManualSubscribeIn, MikanSearchResult, RssDataStatus, RssFeedResponse, RssSettings, SeasonInfo, SubscriptionIn, SubscriptionOut } from '../types/preview';
+import type { BangumiRssResponse, ManualSubscribeIn, MikanSearchResult, RssDataStatus, RssFeedResponse, RssSettings, SubscriptionIn, SubscriptionOut } from '../types/preview';
 
 const API_BASE = '/api/rss';
 
@@ -89,7 +89,7 @@ export async function assignMikanId(bangumiId: number, mikanId: number): Promise
 }
 
 export async function manualSubscribe(sub: ManualSubscribeIn): Promise<SubscriptionOut> {
-  const res = await fetch(`${API_BASE}/manual-subscribe`, {
+  const res = await fetch(`${API_BASE}/v2/manual-subscribe`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(sub),
@@ -124,13 +124,13 @@ export async function downloadData(): Promise<{ ok: boolean; output: string }> {
 }
 
 export async function listSubscriptions(): Promise<SubscriptionOut[]> {
-  const res = await fetch(`${API_BASE}/subscriptions`);
+  const res = await fetch(`${API_BASE}/v2/subscriptions`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
 export async function createSubscription(sub: SubscriptionIn): Promise<SubscriptionOut> {
-  const res = await fetch(`${API_BASE}/subscriptions`, {
+  const res = await fetch(`${API_BASE}/v2/subscriptions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(sub),
@@ -396,7 +396,7 @@ export function getDownloadHistoryStream(
 
   (async () => {
     try {
-      const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}/history-stream`, {
+      const res = await fetch(`${API_BASE}/v2/subscriptions/${bangumiId}/history-stream`, {
         signal: ctrl.signal,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -458,10 +458,10 @@ export async function setSubscriptionTmdb(
   }
 }
 
-export async function getTmdbSeasonMap(tmdbId: number): Promise<Record<string, SeasonInfo>> {
-  const res = await fetch(`/api/rss/tmdb/${tmdbId}/seasons`);
+export async function getTmdbSeasonMap(tmdbId: number): Promise<Record<string, import("../types/episode").CatalogSeason>> {
+  const res = await fetch(`/api/torrent/catalogs/tmdb/${tmdbId}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  return (await res.json()).seasons;
 }
 
 export async function fetchRssFeed(

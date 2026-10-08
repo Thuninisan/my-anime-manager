@@ -17,14 +17,13 @@ Image downloaders:
 Path & file generation:
   - :func:`.format_download_path`
   - :func:`.sanitize_path_name`
-  - :func:`.write_episode_files`
 
 Metadata orchestration:
   - :func:`.generate_metadata`
   - :func:`.batch_nfo_generator`
 """
 
-from .generator import batch_nfo_generator, format_download_path, sanitize_path_name, write_episode_files
+from .generator import batch_nfo_generator, format_download_path, sanitize_path_name
 from .images import (
     download_episode_thumb,
     download_season_poster,
@@ -33,5 +32,4 @@ from .images import (
     get_subscription_poster_url,
 )
 from .metadata_builder import generate_metadata
-from .episode_compat import generate_episode_nfo
-from .nfo_xml import generate_season_nfo, generate_tv_show_nfo
+from .nfo_xml import generate_episode_nfo, generate_season_nfo, generate_tv_show_nfo

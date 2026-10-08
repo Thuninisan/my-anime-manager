@@ -30,7 +30,7 @@ class PreviewSessionTests(unittest.TestCase):
                        'subtitles': ['a.ass'],
                        'search_results': {'A': {'tmdb': {'id': 1, 'name': 'A'}, 'bangumi': {'id': 2, 'name': 'A'}},
                                           'B': {'tmdb': {'id': 3, 'name': 'B'}, 'bangumi': None}},
-                       'episode_data': {'tmdb': {'1': {'0': {'name': 'Specials', 'episodes': [
+                       'provider_catalogs': {'tmdb': {'1': {'0': {'name': 'Specials', 'episodes': [
                            {'tmdbId': 11, 'epNum': 0, 'name': 'zero', 'overview': 'hidden plot', 'voteAverage': 0,
                             'guestStars': [{'name': 'Guest'}], 'directors': ['Director'], 'writers': ['Writer']}]}},
                                                 '3': {'1': {'name': 'Season', 'episodes': [{'tmdbId': 31, 'epNum': 1, 'name': 'B'}]}}},
@@ -67,7 +67,7 @@ class PreviewSessionTests(unittest.TestCase):
         request = self.request()
         restored = service.restore_download_request(request)
         self.assertEqual(restored['files'][0]['torrent_path'], 'a.mkv')
-        self.assertIn('canonical_snapshot', restored['preview_data'])
+        self.assertIn('episode_metadata', restored['preview_snapshot'])
         request['files'][0]['mapping']['tmdb'].update(episode_id=None, episode_number=99)
         restored = service.restore_download_request(request)
         self.assertIsNone(restored['files'][0]['episode_mapping']['tmdb']['episode_id'])
@@ -158,7 +158,7 @@ class PreviewSessionTests(unittest.TestCase):
                  patch.object(service.config, 'RSS_PATH_TEMPLATE', '{series_name}/Season {tmdb_season:02d}/{tmdb_title} {tmdb_episode:02d}'):
                 detail.return_value = Mock()
                 detail.return_value.json.return_value = {'name': 'A', 'overview': '作品中文简介。'}
-                result = await pre_generate_nfo(restored['preview_data'], restored['files'], 'Test', str(self.root / 'nfo'), 'A')
+                result = await pre_generate_nfo(restored['preview_snapshot'], restored['files'], 'Test', str(self.root / 'nfo'), 'A')
                 self.assertTrue(result[1])
                 tmdb.assert_not_awaited()
                 tvdb.assert_not_awaited()
@@ -246,7 +246,7 @@ class PreviewSessionTests(unittest.TestCase):
                 response = client.post('/api/torrent/parse-and-search', files={'file': ('new.torrent', b'torrent source')})
             self.assertEqual(response.status_code, 200)
             view = response.json()
-            self.assertNotIn('episode_data', view)
+            self.assertNotIn('provider_catalogs', view)
             self.assertNotIn('hidden plot', response.text)
             self.assertFalse(Path(captured[0]).exists())
             _, snapshot = service.load_preview_session(view['preview_id'])
@@ -254,7 +254,7 @@ class PreviewSessionTests(unittest.TestCase):
 
     def test_source_and_idless_coordinate_metadata(self):
         raw = copy.deepcopy(self.result)
-        raw['episode_data']['tmdb']['1']['0']['episodes'][0]['tmdbId'] = None
+        raw['provider_catalogs']['tmdb']['1']['0']['episodes'][0]['tmdbId'] = None
         snapshot = service.build_snapshot(raw, self.source)
         mapping = copy.deepcopy(self.mapping)
         mapping['tmdb']['episode_id'] = None
@@ -273,14 +273,14 @@ class PreviewSessionTests(unittest.TestCase):
     def test_movie_identity_without_episode_catalog(self):
         result = copy.deepcopy(self.result)
         result['search_results']['A']['media_type'] = 'movie'
-        result['episode_data'] = {}
+        result['provider_catalogs'] = {}
         row = service.create_preview_session(result, str(self.source))
         mapping = create_episode_mapping({'season_number': None, 'episode_number': None},
             {'subject_id': 2, 'episode_id': None, 'episode_number': None, 'episode_absolute': None})
         restored = service.restore_download_request({'preview_id': row.id, 'preview_revision': 1,
             'files': [{'file_id': service.file_id('a.mkv'), 'mapping': mapping}]})
         self.assertEqual(restored['files'][0]['bangumi_show_name'], 'A')
-        self.assertEqual(restored['preview_data']['search_results']['A']['tmdb']['id'], 1)
+        self.assertEqual(restored['preview_snapshot']['series_contexts']['A']['resource_identity']['tmdb_movie_id'], 1)
 
     def test_failed_insert_and_augment_leave_no_partial_context(self):
         import asyncio

@@ -1,5 +1,6 @@
+import type { CatalogSeason } from '@/types/episode';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { DownloadHistoryResponse, SubscriptionOut, SeasonInfo } from '@/types/preview';
+import type { DownloadHistoryResponse, SubscriptionOut } from '@/types/preview';
 import { updateSubscription, deleteSubscriptionRss, deleteEpisodeHistory, addEpisodeWithTorrent, replaceEpisodeWithTorrent, getTmdbSeasonMap, regenEpisodeNfo } from '@/api/rssApi';
 import LeftSidebar from './LeftSidebar';
 import EpisodeTable, { formatBytes } from './EpisodeTable';
@@ -25,15 +26,15 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
   useEffect(() => { if (sub) idRef.current = sub.bangumi_id; }, [sub]);
 
   // ── Fetch TMDB season/episode map on open ──
-  const [tmdbSeasonMap, setTmdbSeasonMap] = useState<Record<string, SeasonInfo> | null>(null);
+  const [tmdbSeasonMap, setTmdbSeasonMap] = useState<Record<string, CatalogSeason> | null>(null);
   useEffect(() => {
-    if (!open || !sub?.tmdb?.id) { setTmdbSeasonMap(null); return; }
+    if (!open || !sub?.resource_identity.tmdb_series_id) { setTmdbSeasonMap(null); return; }
     let cancelled = false;
-    getTmdbSeasonMap(sub.tmdb!.id)
+    getTmdbSeasonMap(sub.resource_identity.tmdb_series_id)
       .then(data => { if (!cancelled) setTmdbSeasonMap(data); })
       .catch(() => { if (!cancelled) setTmdbSeasonMap(null); })
     return () => { cancelled = true; };
-  }, [open, sub?.tmdb?.id]);
+  }, [open, sub?.resource_identity.tmdb_series_id]);
 
   // ── Card editing ──
   const [editingCard, setEditingCard] = useState<'primary' | 'backup' | null>(null);
@@ -120,12 +121,12 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
   const [expandedSort, setExpandedSort] = useState<number | null>(null);
   const [tmdbForm, setTmdbForm] = useState<{ ep: string; season: string }>({ ep: '', season: '' });
 
-  const openTmdbDropdown = (sort: number, entry: { tmdb_ep?: number | null; tmdb_season?: number | null }) => {
+  const openTmdbDropdown = (sort: number, entry: { tmdb_episode_override?: number | null; tmdb_season_override?: number | null }) => {
     setExpandedSort(sort === expandedSort ? null : sort);
 
     // Smart defaults: existing override → TMDB match → subscription default → bare fallback
-    let season = entry.tmdb_season != null ? String(entry.tmdb_season) : '';
-    let ep = entry.tmdb_ep != null ? String(entry.tmdb_ep) : '';
+    let season = entry.tmdb_season_override != null ? String(entry.tmdb_season_override) : '';
+    let ep = entry.tmdb_episode_override != null ? String(entry.tmdb_episode_override) : '';
 
     if (tmdbSeasonMap) {
       // Filter out S00 (Specials) from default candidates
@@ -135,10 +136,10 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
       }
       if (season && tmdbSeasonMap[season] && !ep) {
         const seasonEps = tmdbSeasonMap[season].episodes;
-        if (seasonEps.some(e => e.epNum === sort)) {
+        if (seasonEps.some(e => e.episode_number === sort)) {
           ep = String(sort);
         } else if (seasonEps.length > 0) {
-          ep = String(seasonEps[0].epNum);
+          ep = String(seasonEps[0].episode_number);
         }
       }
     }
@@ -154,11 +155,11 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
   const saveTmdbOverrides = async (sort: number, regen: boolean) => {
     if (!data) return;
     const fields: Record<string, number> = {};
-    if (tmdbForm.ep !== '') fields.tmdb_ep = Number(tmdbForm.ep);
-    if (tmdbForm.season !== '') fields.tmdb_season = Number(tmdbForm.season);
+    if (tmdbForm.ep !== '') fields.tmdb_episode_override = Number(tmdbForm.ep);
+    if (tmdbForm.season !== '') fields.tmdb_season_override = Number(tmdbForm.season);
     if (Object.keys(fields).length === 0) return;
     try {
-      await fetch(`/api/rss/download-history/${data.bangumi_id}/${sort}${regen ? '?regen_nfo=true' : ''}`, {
+      await fetch(`/api/rss/v2/download-history/${data.bangumi_id}/${sort}${regen ? '?regen_nfo=true' : ''}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields),
       });
       onRefresh();

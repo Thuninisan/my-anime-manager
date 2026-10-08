@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 
 from ... import config
-from ...domain.episode_metadata_adapters import download_entry_with_mapping, episode_path_parameters
+from ...domain.episode_metadata_adapters import episode_path_parameters
 from ...clients.qbittorrent import get_torrents_by_hashes, login as qb_login
 from ...utils.paths import SUBTITLE_DIR
 from .fontinass import copy_subtitle
@@ -60,8 +60,6 @@ def build_processing(context: dict) -> dict:
             "target_path": str(destination(item, Path(item["torrent_path"]).suffix, is_subtitle=is_subtitle)),
             "action": "copy" if is_subtitle else "hardlink",
         }
-        if context.get("replace_bangumi_id") is not None and not is_subtitle:
-            operation["bangumi_sort"] = int(item["bangumi_sort"])
         if (not is_subtitle and item.get("episode_mapping") is not None
                 and (item.get("resource_identity") or {}).get("media_type") != "movie"):
             from ...domain.persistence import episode_mapping_snapshot
@@ -139,7 +137,7 @@ def _sanitize(name: str) -> str:
 
 def _make_sub_for_path(f: dict, series_name: str = "") -> dict:
     """Build a pseudo-subscription dict for :func:`format_download_path`."""
-    f = download_entry_with_mapping(f)
+    mapping = f["episode_mapping"]
     bgm_name = f.get("bangumi_show_name", "")
     return {
         "name": bgm_name,
@@ -149,10 +147,10 @@ def _make_sub_for_path(f: dict, series_name: str = "") -> dict:
             "season": 1,
         },
         "tvdb": {
-            "season": f.get("tvdb_season") if f.get("tvdb_season") is not None else f.get("tmdb_season", 1),
+            "season": mapping["tvdb"]["season_number"] if mapping["tvdb"]["season_number"] is not None else mapping["tmdb"]["season_number"],
         },
         "tmdb": {
-            "season": f.get("tmdb_season", 1),
+            "season": mapping["tmdb"]["season_number"],
         },
     }
 
@@ -270,7 +268,6 @@ async def monitor_download(
                 template = config.RSS_PATH_TEMPLATE
                 from ..nfo import format_download_path
                 from ..nfo import (
-                    write_episode_files,
                     generate_tv_show_nfo,
                     generate_season_nfo,
                 )
@@ -390,8 +387,8 @@ async def monitor_download(
                     if season_key not in seen_season_dirs:
                         seen_season_dirs.add(season_key)
                         season_nfo_exists = (season_dir / "season.nfo").exists()
-                        bgm_id = f.get("bangumi_id", 0)
-                        tmdb_season = f.get("tmdb_season", 0)
+                        bgm_id = f["episode_mapping"]["bangumi"]["subject_id"] or 0
+                        tmdb_season = f["episode_mapping"]["tmdb"]["season_number"] or 0
                         generate_season_nfo(
                             title=f"Season {tmdb_season}",
                             original_title="",
@@ -406,22 +403,17 @@ async def monitor_download(
                             logger.info("NFO [%s season.nfo] 字段来源：季号=TMDB 映射；Bangumi ID=Bangumi 映射；简介=空", season_dir)
                         logger.info("   season.nfo → %s", season_dir / "season.nfo")
 
-                    # Episode NFO
-                    await write_episode_files(
-                        {},  # tmdb_ep (empty = skip thumb download)
-                        episode_mapping=f.get("episode_mapping"),
-                        season_number=f.get("tmdb_season", 0),
-                        episode_number=f.get("tmdb_episode", 0),
-                        bangumi_ep_id=f.get("bangumi_ep_id"),
-                        show_name=f.get("tmdb_show_name", ""),
-                        original_name=f.get("bangumi_show_name", ""),
+                    # Resolve the already confirmed mapping; no compatibility numbering.
+                    from ..episode_metadata_resolver import resolve_nfo_episode
+                    from ...domain.episode_metadata_adapters import provider_metadata_candidates
+                    from ..nfo.nfo_xml import generate_episode_nfo
+                    resolved = await resolve_nfo_episode(f["episode_mapping"], provider_metadata_candidates(),
+                        show_name=f.get("tmdb_show_name", ""))
+                    resolved["metadata"]["original_title"] = f.get("bangumi_show_name", "")
+                    resolved["provenance"]["original_title"] = "display_context"
+                    generate_episode_nfo(resolved, show_name=f.get("tmdb_show_name", ""),
                         bangumi_subject_name=f.get("bangumi_show_name", ""),
-                        studios=[],
-                        rating=0,
-                        output_dir=str(season_dir),
-                        thumb_source="tmdb",
-                        file_stem=file_stem,
-                    )
+                        output_dir=str(season_dir), file_stem=file_stem)
                     nfo_generated += 1
                     logger.info("   episode.nfo → %s", season_dir / f"{file_stem}.nfo")
 

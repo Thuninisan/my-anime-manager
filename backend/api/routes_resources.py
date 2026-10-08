@@ -128,13 +128,13 @@ async def preview_cached_torrent(resource_id: int):
     result["resource_id"] = resource_id
 
     recognition = resource_recognitions.get(resource_id)
-    result["preprocessed_candidates"] = [candidate for candidate in
-                                           (recognition or {}).get("candidates", [])
-                                           if candidate["decision"] != "excluded"]
-    episode_data = result.setdefault("episode_data", {})
-    bangumi_data = episode_data.setdefault("bangumi", {})
-    for candidate in result["preprocessed_candidates"]:
-        bgm_id = candidate["bangumi_id"]
+    result["resource_candidates"] = (recognition or {}).get("resource_candidates", [])
+    provider_catalogs = result.setdefault("provider_catalogs", {})
+    bangumi_data = provider_catalogs.setdefault("bangumi", {})
+    for candidate in result["resource_candidates"]:
+        if candidate["provider"] != "bangumi":
+            continue
+        bgm_id = candidate["provider_id"]
         if str(bgm_id) in bangumi_data:
             continue
         entry = data_store.get_map_entry(bgm_id) or {}
@@ -148,5 +148,4 @@ async def preview_cached_torrent(resource_id: int):
     from ..services.torrent.preview_view import session_view
     row = create_preview_session(result, str(path))
     view = session_view(row)
-    view["preprocessed_candidates"] = result["preprocessed_candidates"]
     return view
