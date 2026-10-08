@@ -32,7 +32,14 @@ def get(resource_id: int) -> dict | None:
             return None
         candidates = session.scalars(select(ResourceBangumiCandidate).where(
             ResourceBangumiCandidate.resource_id == resource_id)).all()
-        return {"title_snapshot": structured_values.read(
+        from ..domain.resource_adapters import monitor_resource_candidates
+        resource = session.get(Resource, resource_id)
+        candidate_rows = [{column.key: getattr(item, column.key)
+                           for column in ResourceBangumiCandidate.__table__.columns}
+                          for item in candidates]
+        return {"resource_candidates": monitor_resource_candidates(
+                    candidate_rows, resource.index_type, title=resource.title) if resource else [],
+                "title_snapshot": structured_values.read(
                     session, "recognition", resource_id, "title_snapshot", {}),
                 "status": record.status,
                 "error": record.error,

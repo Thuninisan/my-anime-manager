@@ -62,6 +62,13 @@ def build_processing(context: dict) -> dict:
         }
         if context.get("replace_bangumi_id") is not None and not is_subtitle:
             operation["bangumi_sort"] = int(item["bangumi_sort"])
+        if (not is_subtitle and item.get("episode_mapping") is not None
+                and (item.get("resource_identity") or {}).get("media_type") != "movie"):
+            from ...domain.persistence import episode_mapping_snapshot
+            operation["episode_mapping_snapshot"] = episode_mapping_snapshot(
+                item["episode_mapping"], item.get("resource_identity"), revision=item.get("identity_revision"))
+        if not is_subtitle and item.get("resource_identity") is not None:
+            operation["resource_identity"] = item["resource_identity"]
         operations.append(operation)
 
     for item in context.get("uploaded_subtitles", []):
@@ -75,6 +82,7 @@ def build_processing(context: dict) -> dict:
     return {
         "mode": "movie" if movie_meta else "tv",
         "replace_bangumi_id": context.get("replace_bangumi_id"),
+        "replaced_history": context.get("replaced_history"),
         "files": operations,
     }
 

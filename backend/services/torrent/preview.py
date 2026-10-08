@@ -851,6 +851,11 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
 
     for key, entry in search_results.items():
         bgm_id = entry.get("bangumi", {}).get("id") if entry.get("bangumi") else None
+        identity = entry.get("resource_identity")
+        if identity is not None:
+            if identity["tvdb_series_id"] is not None:
+                tvdb_ids.add(identity["tvdb_series_id"])
+            continue
         if bgm_id:
             map_entry = data_store.get_map_entry(bgm_id)
             if map_entry and map_entry.get("tvdb_id"):
@@ -1031,10 +1036,25 @@ async def parse_and_search(torrent_path: str) -> dict:
         logger.debug(f"            {b_info}")
 
     from ...domain.resource_adapters import search_entry_resolution, legacy_resource_context
+    from ..resource_resolver import ResourceResolver
+    current_subscriptions = {sub["bangumi_id"]: sub for sub in data_store.list_subscriptions()}
     for key, entry in search_results.items():
         bgm_id = (entry.get("bangumi") or {}).get("id")
         mapped = data_store.get_map_entry(bgm_id) if bgm_id else None
         entry["map_entries"] = [dict(mapped, bangumi_id=bgm_id)] if mapped else []
+        subscription = current_subscriptions.get(bgm_id)
+        if subscription is not None:
+            from ...domain.resource_adapters import subscription_identity
+            identity = subscription_identity(subscription, bgm_id)
+            if identity["media_type"] == entry.get("media_type", "tv"):
+                entry["resource_resolution"] = ResourceResolver().resolve([], known=identity)
+                entry["identity_revision"] = subscription.get("identity_revision")
+                entry["identity_source"] = subscription.get("identity_source", "legacy_unknown")
+                # Hints must not reintroduce the previous provider binding.
+                entry["map_entries"] = [{"bangumi_id": bgm_id,
+                    "tvdb_id": identity["tvdb_series_id"],
+                    "tmdb_season": subscription.get("tmdb", {}).get("season"),
+                    "tvdb_season": subscription.get("tvdb", {}).get("season")}]
         entry["resource_resolution"] = search_entry_resolution(entry, key)
         entry["resource_identity"] = entry["resource_resolution"]["identity"]
         if entry["resource_identity"] is not None:
@@ -1046,6 +1066,8 @@ async def parse_and_search(torrent_path: str) -> dict:
 
     # ── Add map_entries to each search result (for frontend BGM→TVDB lookup) ──
     for key, entry in search_results.items():
+        if entry.get("identity_revision") is not None:
+            continue
         bgm_id = entry.get("bangumi", {}).get("id") if entry.get("bangumi") else None
         if bgm_id:
             map_entry = data_store.get_map_entry(bgm_id)

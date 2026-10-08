@@ -84,7 +84,7 @@ def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
         tmdb = entry.get("tmdb") or {}
         bgm = entry.get("bangumi") or {}
         hints = entry.get("map_entries", [])
-        series[key] = {"resource_identity": identity, "resource_resolution": resolution, "show_key": key, "display_name": tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or key,
+        series[key] = {"identity_revision": entry.get("identity_revision"), "identity_source": entry.get("identity_source", resolution["reason"]), "resource_identity": identity, "resource_resolution": resolution, "show_key": key, "display_name": tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or key,
                        "bangumi_display_name": bgm.get("name_cn") or bgm.get("name") or "",
                        "media_type": identity["media_type"] if identity else entry.get("media_type") or "tv",
                        "tmdb_series_id": (identity["tmdb_series_id"] or identity["tmdb_movie_id"]) if identity else None,
@@ -293,7 +293,7 @@ def restore_download_request(body: dict) -> dict:
                 raise HTTPException(422, "invalid_episode_mapping")
             bgm_series = next((s for s in snapshot["series_contexts"].values()
                                if s["bangumi_subject_id"] == mapping["bangumi"]["subject_id"]), {})
-            entry = {"resource_identity": selected_series.get("resource_identity"), "episode_mapping": mapping, "torrent_path": source["torrent_path"],
+            entry = {"identity_revision": selected_series.get("identity_revision"), "resource_identity": selected_series.get("resource_identity"), "episode_mapping": mapping, "torrent_path": source["torrent_path"],
                      "is_subtitle": source["kind"] == "subtitle", "tmdb_show_name": selected_series.get("display_name", ""),
                      "bangumi_show_name": snapshot["episode_catalog"]["bangumi"].get(str(mapping["bangumi"]["subject_id"]), {}).get("name", bgm_series.get("bangumi_display_name", "")),
                      "bangumi_sort": mapping["bangumi"]["episode_absolute"] if mapping["bangumi"]["episode_absolute"] is not None else mapping["parsed"]["episode_number"],
@@ -340,6 +340,8 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
                                             tmdb_id=provider_id, bangumi_id=context["bangumi_subject_id"])
             context.update(tmdb_series_id=provider_id, display_name=identity["canonical_title"],
                            resource_identity=identity, resource_resolution=ResourceResolver().resolve([], known=identity))
+            context["identity_revision"] = None
+            context["identity_source"] = "explicit_user_mapping"
             context["resource_resolution"]["reason"] = "manual_provider_confirmation"
             updated = update_preview_session(row, snapshot)
             from .preview_view import build_preview_view
@@ -377,6 +379,8 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
         context["bangumi_display_name"] = data["bangumi"][str(provider_id)]["name"]
     context["resource_identity"] = current
     context["resource_resolution"] = ResourceResolver().resolve([], known=current)
+    context["identity_revision"] = None
+    context["identity_source"] = "explicit_user_mapping"
     context["resource_resolution"]["reason"] = "manual_provider_confirmation"
     normalized = episode_catalog(data)
     for key in normalized:

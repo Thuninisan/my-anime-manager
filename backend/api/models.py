@@ -114,6 +114,9 @@ class RssSource(BaseModel):
 
 
 class SubscriptionOut(BaseModel):
+    resource_identity: dict | None = None
+    identity_revision: int | None = None
+    identity_source: str | None = None
     name: str
     bangumi_id: int
     series_name: str = ""

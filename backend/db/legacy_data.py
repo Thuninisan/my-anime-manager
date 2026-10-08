@@ -27,6 +27,8 @@ def _document(path: Path, kind: type):
 
 
 def _subscription_record(session, row: Subscription) -> dict:
+    from .identity import read_resource_identity
+    identity = read_resource_identity(row)
     record = {"bangumi_id": row.bangumi_id, "name": row.name,
               "download_path": row.download_path, "active": row.active,
               "created_at": row.created_at}
@@ -41,7 +43,7 @@ def _subscription_record(session, row: Subscription) -> dict:
     if bgm_extras or any(value is not None for value in (
             row.bgm_season, row.bgm_sort_start, row.bgm_sort_end,
             row.bgm_subject_name, row.bgm_series_name, row.bgm_rating, row.bgm_air_date)):
-        record["bgm"] = {"season": row.bgm_season or 1,
+        record["bgm"] = {"season": row.bgm_season if row.bgm_season is not None else 1,
                          "sortrange": [row.bgm_sort_start or 0, row.bgm_sort_end or 0],
                          "subject_name": row.bgm_subject_name or "",
                          "series_name": row.bgm_series_name or "",
@@ -56,6 +58,15 @@ def _subscription_record(session, row: Subscription) -> dict:
         if extras or any(value is not None for value in (season, source_id, offset)):
             record[kind] = {"id": source_id or 0, "season": season, "ep_offset": offset or 0}
             record[kind].update(extras)
+    record["resource_identity"] = identity
+    record["identity_revision"] = row.identity_revision or 1
+    record["identity_source"] = row.identity_source or "legacy_unknown"
+    for provider in ("tmdb", "tvdb"):
+        provider_id = identity[f"{provider}_series_id"]
+        if provider == "tmdb" and identity["media_type"] == "movie":
+            provider_id = identity["tmdb_movie_id"]
+        if provider in record or provider_id is not None:
+            record[provider] = {**record.get(provider, {}), "id": provider_id or 0}
     for kind in ("primary", "backup"):
         feed = session.get(SubscriptionFeed, (row.bangumi_id, kind))
         if feed is None:
@@ -77,10 +88,11 @@ def _subscription_record(session, row: Subscription) -> dict:
     return record
 
 
-def _write_subscription(session, record: dict, position: int) -> None:
+def _write_subscription(session, record: dict, position: int, *, identity_source="explicit_user_mapping") -> None:
     fields_by_group = {
         "record": {"bangumi_id", "name", "series_name", "download_path", "active",
-                   "created_at", "updated_at", "bgm", "tmdb", "tvdb", "primary", "backup"},
+                   "created_at", "updated_at", "bgm", "tmdb", "tvdb", "primary", "backup",
+                   "resource_identity", "resource_resolution", "identity_source", "identity_revision"},
         "bgm": {"season", "sortrange", "subject_name", "series_name", "rating", "air_date"},
         "tmdb": {"id", "season", "ep_offset"},
         "tvdb": {"id", "season", "ep_offset"},
@@ -99,6 +111,7 @@ def _write_subscription(session, record: dict, position: int) -> None:
                                    if key not in fields_by_group[group]})
     bangumi_id = record["bangumi_id"]
     row = session.get(Subscription, bangumi_id)
+    was_new = row is None
     if row is None:
         row = Subscription(bangumi_id=bangumi_id, position=position)
         session.add(row)
@@ -120,8 +133,28 @@ def _write_subscription(session, record: dict, position: int) -> None:
         "tvdb_id": tvdb.get("id"), "tvdb_season": tvdb.get("season"),
         "tvdb_ep_offset": tvdb.get("ep_offset"),
     }
+    from .identity import update_resource_identity, read_resource_identity
+    from ..domain.resource_adapters import identity_from_legacy
+    current = read_resource_identity(row) if row.resource_identity_json is not None else None
+    requested = record.get("resource_identity")
+    # Older API clients edit compatibility fields. Detect those edits against the
+    # stored canonical projection, including clearing a provider (0 / None).
+    mirror_changed = current is not None and (
+        tmdb.get("id") != row.tmdb_id or tvdb.get("id") != row.tvdb_id)
+    if requested is None or mirror_changed:
+        requested = identity_from_legacy(
+            title=record.get("series_name"), bangumi_id=bangumi_id,
+            media_type=current["media_type"] if current else "tv",
+            tmdb_id=tmdb.get("id"), tvdb_id=tvdb.get("id"))
+    else:
+        requested = {**requested, "canonical_title": record.get("series_name")}
     for key, value in fields.items():
-        setattr(row, key, value)
+        if key not in {"tmdb_id", "tvdb_id"}:
+            setattr(row, key, value)
+    if (not was_new and current is None and identity_source == "explicit_user_mapping"
+            and tmdb.get("id") == row.tmdb_id and tvdb.get("id") == row.tvdb_id):
+        identity_source = "legacy_unknown"
+    update_resource_identity(row, requested, source=identity_source)
     for kind in ("primary", "backup"):
         data = record.get(kind)
         feed = session.get(SubscriptionFeed, (bangumi_id, kind))
@@ -166,7 +199,7 @@ def ensure_subscriptions(path: Path, migrate):
             if not isinstance(record, dict) or not isinstance(record.get("bangumi_id"), int):
                 raise ValueError(f"Invalid subscription record in {path}")
             if session.get(Subscription, record["bangumi_id"]) is None:
-                _write_subscription(session, record, position)
+                _write_subscription(session, record, position, identity_source="legacy_backfill")
         session.flush()
         if old_table:
             session.connection().exec_driver_sql("DROP TABLE subscriptions")
@@ -199,7 +232,8 @@ def mutate_subscription(path: Path, migrate, bangumi_id: int, operation):
         else:
             last_position = session.scalar(select(func.max(Subscription.position))) if row is None else None
             position = row.position if row else (last_position if last_position is not None else -1) + 1
-            _write_subscription(session, after, position)
+            _write_subscription(session, after, position,
+                                identity_source=after.pop("_identity_update_source", "legacy_unknown"))
         return result
 
 

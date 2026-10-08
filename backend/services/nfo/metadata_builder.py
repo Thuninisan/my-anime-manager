@@ -38,6 +38,7 @@ async def generate_metadata(
     metadata_ctx=None,
     base_path: str | None = None,
     episode_mapping=None,
+    processing_result=None,
 ) -> bool:
     """Generate NFO + images via :func:`batch_nfo_generator`, then rename in qBittorrent.
 
@@ -90,6 +91,10 @@ async def generate_metadata(
             renamed = await rename_file(qb_client, info_hash, old_torrent_path, new_path)
             if renamed is False:
                 return False
+            if processing_result is not None:
+                processing_result.update(source_path=old_torrent_path,
+                                         target_path=str(Path(pre_path) / new_path),
+                                         season_dir=season_dir, show_dir=show_dir)
             logger.info("renamed: %s → %s", old_torrent_path, new_path)
         except Exception:
             logger.exception("rename failed")

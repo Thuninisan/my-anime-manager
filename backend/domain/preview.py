@@ -25,6 +25,8 @@ class PreviewParsedFile(TypedDict):
 
 
 class SeriesContext(TypedDict):
+    identity_revision: NotRequired[int | None]
+    identity_source: NotRequired[str]
     resource_identity: NotRequired[ResourceIdentity | None]
     resource_resolution: NotRequired[ResourceResolution]
     show_key: str

@@ -58,6 +58,13 @@ def search_entry_resolution(entry: dict, title: str):
 
 def subscription_identity(sub: dict, subject_id: int):
     """Subscription edits are authoritative; do not persist a stale parallel copy."""
+    if sub.get("resource_identity") is not None and sub.get("identity_revision") is not None:
+        from .resource import validate_resource_identity
+        identity = sub["resource_identity"]
+        validate_resource_identity(identity)
+        if identity["bangumi_subject_id"] != subject_id:
+            raise ValueError("subscription_subject_identity_conflict")
+        return dict(identity)
     return identity_from_legacy(title=sub.get("series_name"), bangumi_id=subject_id,
                                tmdb_id=sub.get("tmdb", {}).get("id"),
                                tvdb_id=sub.get("tvdb", {}).get("id"))
@@ -89,3 +96,22 @@ def legacy_resource_context(identity, entry: dict) -> dict:
     bid = identity['bangumi_subject_id']
     result['bangumi'] = dict(entry.get('bangumi') or {}, id=bid) if bid is not None else None
     return result
+
+
+def monitor_resource_candidates(rows, index_type, *, title=None):
+    """Persisted monitor results are candidate evidence, never confirmed identity."""
+    candidates = []
+    seen = set()
+    for row in rows:
+        media_type = "movie" if row.get("media_type", "TV").lower() == "movie" else "tv"
+        for provider, key in (("bangumi", "bangumi_id"), (index_type, "index_id")):
+            if provider not in ("bangumi", "tmdb", "tvdb"):
+                continue
+            adapted = provider_candidates(provider, [{"id": row.get(key), "name": title}],
+                                          media_type, "resource_monitor_candidate")
+            for candidate in adapted:
+                marker = (provider, candidate["provider_id"], media_type)
+                if marker not in seen:
+                    candidates.append(candidate)
+                    seen.add(marker)
+    return candidates

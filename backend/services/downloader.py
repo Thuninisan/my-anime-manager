@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from .. import config
 from ..clients.qbittorrent import login as qb_login, add_torrent, resume_torrent, delete_torrent, get_torrent_files
 from ..data import (
-    get_tmdb_id, get_tvdb_id,
+    get_tmdb_id, get_tvdb_id,  # Compatibility import for older integration callers.
     list_subscriptions, mark_downloaded, get_episode_source,
     get_episode_pub_date, remove_episode_record,
     get_all_episodes,
@@ -567,8 +567,6 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict, me
     logger.debug(f"      ⬇️ EP{rss_ep_num:02d} [{source}] {guid[:60]}...")
 
     bgm_subject_id = bangumi_id
-    tmdb_id = get_tmdb_id(bangumi_id)
-    tvdb_id = get_tvdb_id(bangumi_id)
 
     # ── Ensure subscription has enrichment fields ──────────────────
     bgm_season = sub.get("bgm", {}).get("season")
@@ -588,7 +586,10 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict, me
             backup_offset = enriched.pop("backup_offset", None)
             sub.update(enriched)
             from ..data import update_subscription, set_subscription_rss_offset
-            update_subscription(bangumi_id, enriched)
+            update_subscription(bangumi_id, enriched, identity_source=(enriched.get("resource_resolution") or {}).get("reason", "legacy_unknown"))
+            current = next((value for value in list_subscriptions() if value["bangumi_id"] == bangumi_id), None)
+            if current is not None:
+                sub.update(current)
             if primary_offset is not None:
                 set_subscription_rss_offset(bangumi_id, "primary", primary_offset)
                 sub.setdefault("primary", {})["offset"] = primary_offset
@@ -601,11 +602,10 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict, me
 
     bgm_season = sub.get("bgm", {}).get("season", 1)
     tmdb_season = sub.get("tmdb", {}).get("season")
-    # Re-read tmdb_id/tvdb_id: enrichment may have just persisted them
-    if not tmdb_id:
-        tmdb_id = get_tmdb_id(bangumi_id) or sub.get("tmdb", {}).get("id") or 0
-    if not tvdb_id:
-        tvdb_id = get_tvdb_id(bangumi_id) or sub.get("tvdb", {}).get("id") or 0
+    from ..domain.resource_adapters import subscription_identity
+    identity = subscription_identity(sub, bangumi_id)
+    tmdb_id = identity["tmdb_series_id"] or 0
+    tvdb_id = identity["tvdb_series_id"] or 0
 
     # ── Match RSS episode to Bangumi sort ──────────────────────────
     # sort is assigned by _fetch_passed_items via rss_ep + rss_offset.
@@ -710,8 +710,10 @@ async def submit_episode_torrent(
     tmdb = sub.get("tmdb", {})
     tvdb = sub.get("tvdb", {})
     bgm = sub.get("bgm", {})
-    tmdb_id = tmdb.get("id") or get_tmdb_id(bangumi_id) or 0
-    tvdb_id = tvdb.get("id") or get_tvdb_id(bangumi_id) or 0
+    from ..domain.resource_adapters import subscription_identity
+    identity = subscription_identity(sub, bangumi_id)
+    tmdb_id = identity["tmdb_series_id"] or 0
+    tvdb_id = identity["tvdb_series_id"] or 0
     if not tmdb_id and not tvdb_id:
         raise HTTPException(400, "订阅未关联 TMDB 或 TVDB ID，无法生成 NFO")
     torrent_hash = compute_info_hash(torrent_path)
@@ -738,6 +740,7 @@ async def submit_episode_torrent(
             raise HTTPException(400, "新种子与当前种子相同")
         await delete_torrent(qb, old["info_hash"], delete_files=True)
     info_hash = await add_torrent(qb, torrent_path, rss_base, guid)
+    processing_result = {}
     try:
         files = await get_torrent_files(qb, info_hash)
         videos = [f for f in files if Path(f["name"]).suffix.lower() in VIDEO_EXTENSIONS]
@@ -755,7 +758,7 @@ async def submit_episode_torrent(
             bgm_subject_name=bgm.get("subject_name") or show_name,
             series_name=sub.get("series_name") or show_name,
             metadata_ctx=metadata_ctx, base_path=rss_base,
-            overwrite=replace_existing, episode_mapping=mapping,
+            overwrite=replace_existing, episode_mapping=mapping, processing_result=processing_result,
         )
         if not success:
             raise RuntimeError("NFO 生成或文件重命名失败")
@@ -773,6 +776,9 @@ async def submit_episode_torrent(
         bangumi_id, sort, rss_url, guid, source, pub_date=pub_date,
         info_hash=torrent_hash, tvdb_ep=tvdb_ep,
         tmdb_ep_calc=mapping["tmdb"]["episode_number"],
+        episode_mapping=mapping, resource_identity=identity,
+        identity_revision=sub.get("identity_revision"),
+        processing_result=processing_result,
     )
     reset_fail_count(bangumi_id, sort)
     return torrent_hash
@@ -795,6 +801,11 @@ def resolve_episode_paths(bangumi_id: int, sort: int) -> tuple[dict, str, str]:
     rel_path = format_download_path(
         config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_ep_val,
     ).lstrip("/")
+    # Historical directories belong to the original output, not today's binding.
+    historical = get_all_episodes(bangumi_id).get(str(sort), {}).get("episode_mapping_snapshot", {})
+    processing_result = historical.get("processing_result") or {}
+    if processing_result.get("season_dir") and processing_result.get("show_dir"):
+        return sub, processing_result["season_dir"], processing_result["show_dir"]
     rel_dir = str(Path(rel_path).parent)
     season_dir = str(Path(rss_base) / rel_dir)
     show_dir = str(Path(season_dir).parent)
@@ -811,12 +822,27 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     Raises HTTPException(4xx) on missing data, HTTPException(500) on failure.
     """
     sub, season_dir, show_dir = resolve_episode_paths(bangumi_id, sort)
-    if not sub.get("tmdb", {}).get("id") and not sub.get("tvdb", {}).get("id"):
-        raise HTTPException(400, "订阅未关联 TMDB 或 TVDB ID，无法生成 NFO")
     ep = get_all_episodes(bangumi_id).get(str(sort))
     if not ep:
         raise HTTPException(404, "该集的下载记录不存在")
 
+    historical = ep.get("episode_mapping_snapshot") or {}
+    historical_mapping = historical.get("episode_mapping") if historical.get("source") == "canonical" else None
+    if historical_mapping is not None:
+        # Explicit regeneration overrides affect this output, never the saved fact.
+        import copy
+        historical_mapping = copy.deepcopy(historical_mapping)
+        for legacy_field, canonical_field in (("tmdb_ep", "episode_number"),
+                                               ("tmdb_season", "season_number")):
+            if ep.get(legacy_field) is not None and ep[legacy_field] != historical_mapping["tmdb"][canonical_field]:
+                historical_mapping["tmdb"][canonical_field] = ep[legacy_field]
+                historical_mapping["tmdb"]["episode_id"] = None
+        sub = {**sub, **{provider: {**sub.get(provider, {}),
+                                   "id": historical_mapping[provider]["series_id"],
+                                   "season": historical_mapping[provider]["season_number"]}
+                        for provider in ("tmdb", "tvdb")}}
+    if not sub.get("tmdb", {}).get("id") and not sub.get("tvdb", {}).get("id"):
+        raise HTTPException(400, "历史记录或订阅未关联 TMDB 或 TVDB ID，无法生成 NFO")
     show_name = sub.get("name", str(bangumi_id))
     series_name = sub.get("series_name") or show_name
     bgm_season = sub.get("bgm", {}).get("season", 1)
@@ -841,6 +867,7 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
         tvdb_ep=tvdb_ep_val,
         season_dir=season_dir, show_dir=show_dir,
         series_name=series_name,
+        episode_mapping=historical_mapping,
         rename_in_qbit=False,
         overwrite=True,
         base_path=config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH,

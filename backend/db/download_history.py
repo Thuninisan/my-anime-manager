@@ -22,6 +22,11 @@ def _entry(row):
     result = {field: getattr(row, field) for field in FIELDS if field != "fail_count"}
     if row.fail_count:
         result["fail_count"] = row.fail_count
+    from ..domain.persistence import history_snapshot
+    result["episode_mapping_snapshot"] = history_snapshot(row)
+    mapping = result["episode_mapping_snapshot"]["episode_mapping"]
+    result["tmdb_ep_calc"] = mapping["tmdb"]["episode_number"]
+    result["tvdb_ep"] = mapping["tvdb"]["episode_number"]
     return result
 
 

@@ -564,6 +564,7 @@ async def torrent_download(body: dict):
         "skip_nfo": nfo_generated,
         "movie_meta": movie_meta,
         "replace_bangumi_id": replace_bangumi_id,
+        "replaced_history": episodes if replace_bangumi_id is not None else None,
     }
     try:
         processing = build_processing(context)

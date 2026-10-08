@@ -59,6 +59,8 @@ def get_engine() -> Engine:
         # columns into typed columns and child rows before serving requests.
         with engine.begin() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
+            from .persistence_migration import upgrade
+            upgrade(connection)
             columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(resources)")}
             if "index_type" not in columns:
                 connection.exec_driver_sql(

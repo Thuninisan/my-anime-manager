@@ -256,7 +256,7 @@ async def create_subscription(body: SubscriptionIn):
     for s in all_subs:
         if s["bangumi_id"] == body.bangumi_id and "bgm" in s:
             cached = {g: s[g] for g in ENRICH_GROUPS if g in s}
-            data.update_subscription(body.bangumi_id, cached)
+            data.update_subscription(body.bangumi_id, cached, identity_source="existing_mapping")
             sub.update(cached)
             break
 
@@ -415,7 +415,7 @@ async def enrich_subscription_stream(bangumi_id: int):
                     # Pop offsets before top-level update_subscription
                     primary_offset = result.pop("primary_offset", None)
                     backup_offset = result.pop("backup_offset", None)
-                    data.update_subscription(bangumi_id, result)
+                    data.update_subscription(bangumi_id, result, identity_source=(result.get("resource_resolution") or {}).get("reason", "legacy_unknown"))
                     # Write offsets into nested primary/backup keys
                     if primary_offset is not None:
                         data.set_subscription_rss_offset(bangumi_id, "primary", primary_offset)
@@ -481,7 +481,10 @@ async def set_subscription_tmdb(bangumi_id: int, body: SetTmdbRequest):
     fields: dict = {"tmdb": {"id": body.tmdb_id}}
     if body.tmdb_season is not None:
         fields["tmdb"]["season"] = body.tmdb_season
-    ok = data.update_subscription(bangumi_id, fields)
+    try:
+        ok = data.update_subscription(bangumi_id, fields)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if not ok:
         raise HTTPException(404, f"Subscription not found: {bangumi_id}")
 
@@ -784,7 +787,10 @@ async def activate_subscription(bangumi_id: int):
 @router.patch("/api/rss/subscriptions/{bangumi_id}")
 async def update_subscription_fields(bangumi_id: int, fields: dict[str, object]):
     """Update specific fields of a subscription (e.g. exclude_patterns)."""
-    ok = data.update_subscription(bangumi_id, fields)
+    try:
+        ok = data.update_subscription(bangumi_id, fields)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     if not ok:
         raise HTTPException(404, "订阅不存在")
     return {"ok": True}

@@ -21,7 +21,7 @@ _import_lock = threading.Lock()
 
 CARD_FIELDS = {
     "info_hash", "torrent_name", "show_name", "bgm_rating", "poster_url", "status",
-    "created_at", "updated_at", "encoding_group", "video_codec", "bangumi_ids", "processing",
+    "created_at", "updated_at", "encoding_group", "video_codec", "bangumi_ids", "processing", "completion_snapshot",
 }
 
 
@@ -42,13 +42,17 @@ def _card_values(record: dict) -> dict:
 
 def _as_dict(session, card: TorrentCard) -> dict:
     result = structured_values.read(session, "torrent_card", card.id, "extra_data", {})
-    for field in CARD_FIELDS - {"processing"}:
+    for field in CARD_FIELDS - {"processing", "completion_snapshot"}:
         if field == "bangumi_ids":
             result[field] = [row.bangumi_id for row in session.scalars(
                 select(TorrentCardBangumi).where(TorrentCardBangumi.card_id == card.id)
                 .order_by(TorrentCardBangumi.position))]
         else:
             result[field] = getattr(card, field)
+    if card.completion_snapshot_json is not None:
+        if card.completion_schema_version != 1:
+            raise ValueError("unsupported_torrent_completion_version")
+        result["completion_snapshot"] = json.loads(card.completion_snapshot_json)
     if card.processing_present:
         processing = structured_values.read(session, "torrent_card", card.id,
                                             "processing_extra", {})
@@ -181,6 +185,19 @@ def finish_torrent(info_hash: str, status: str) -> None:
         card = session.scalar(select(TorrentCard).where(TorrentCard.info_hash == info_hash))
         if card is None:
             return
+        if status == "completed" and card.processing_present:
+            from ..domain.persistence import load_episode_mapping_snapshot
+            plan = _as_dict(session, card)["processing"]
+            operations = plan["files"]
+            for operation in operations:
+                if operation.get("episode_mapping_snapshot") is not None:
+                    operation["episode_mapping_snapshot"] = load_episode_mapping_snapshot(operation["episode_mapping_snapshot"])
+                if plan.get("replace_bangumi_id") is not None and operation.get("action") == "hardlink":
+                    operation["target_path"] = operation.get("target_path", "").removesuffix(".mam-bd-pending")
+            card.completion_snapshot_json = json.dumps({"schema_version": 1, "files": operations,
+                                                       "replaced_history": plan.get("replaced_history")},
+                                                       ensure_ascii=False, allow_nan=False)
+            card.completion_schema_version = 1
         card.status = status
         card.updated_at = datetime.now().astimezone().isoformat(timespec="seconds")
         card.processing_present = 0
