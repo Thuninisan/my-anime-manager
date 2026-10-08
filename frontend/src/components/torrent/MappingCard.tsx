@@ -133,6 +133,19 @@ export default function MappingCard({
                 <polyline points="14 2 14 8 20 8" />
               </svg>
               <h4 className="font-mono text-xs font-bold text-slate-700 dark:text-slate-200 truncate">{row.file_name}</h4>
+              {row.match_status && <div className="flex flex-wrap gap-2 mt-1 text-[10px] text-muted-foreground">
+                {Object.entries(row.match_status).map(([provider, status]) => <span key={provider}>
+                  {provider.toUpperCase()}: {status === 'manual' ? '手动选择' : status === 'matched' ? '已匹配' : status === 'ambiguous' ? '需要确认' : '未匹配'}
+                </span>)}
+              </div>}
+              {row.match_status && Object.values(row.match_status).includes('ambiguous') && <details className="mt-1 text-xs">
+                <summary className="cursor-pointer text-primary">查看集名候选，在下方选择对应剧集</summary>
+                {Object.entries(row.match_candidates || {}).map(([provider, candidates]) =>
+                  row.match_status?.[provider] === 'ambiguous' && <p key={provider} className="mt-1 text-muted-foreground">
+                    {provider.toUpperCase()}: {candidates.map(ep => `${ep.name} (${ep.episode_id})`).join(' / ')}
+                  </p>)}
+              </details>}
+
             </div>
           </div>
           {showUploadButton && (

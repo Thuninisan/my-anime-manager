@@ -644,3 +644,11 @@ async def bangumi_catalog_view(subject_id: int):
     # never enters the matcher contract.
     raw = await torrent_bangumi_episodes(subject_id)
     return episode_catalog({"bangumi": {str(subject_id): raw}})["bangumi"][str(subject_id)]
+
+
+@router.post("/api/torrent/previews/{preview_id}/match-source")
+async def change_preview_match_source(preview_id: str, body: dict):
+    from ..services.torrent.preview_session import set_preview_match_source
+    if type(body.get("preview_revision")) is not int:
+        raise HTTPException(422, "invalid_preview_revision")
+    return set_preview_match_source(preview_id, body["preview_revision"], body.get("source"))

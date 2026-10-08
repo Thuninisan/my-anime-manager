@@ -4,7 +4,7 @@ import { useMemo, useState, useCallback } from 'react';
 import MatchTable, { type MatchRow } from '@/components/torrent/MatchTable';
 import { subtitleStatus, subtitleDestinationSuffix, type SubtitleAssociations, type SubtitleFilter } from '@/lib/subtitleMatching';
 import InfoCards from '@/components/torrent/InfoCards';
-import { submitDownload, type DownloadFileEntry, type UploadedSubEntry } from '@/api/torrentApi';
+import { submitDownload, setPreviewMatchSource, type DownloadFileEntry, type UploadedSubEntry } from '@/api/torrentApi';
 
 interface TorrentPreviewProps {
   replaceBangumiId?: number;
@@ -49,6 +49,9 @@ export default function TorrentPreview({
     ? { ...searchResult, episode_catalog: augmentedEpData }
     : searchResult;
 
+  const [indexLoading, setIndexLoading] = useState(false);
+  const [indexError, setIndexError] = useState('');
+
   const stats = useMemo(() => computeStats(searchResult), [searchResult]);
 
   const parsedFiles = searchResult?.parsed_files || [];
@@ -87,7 +90,7 @@ export default function TorrentPreview({
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const handleBeginProcessing = useCallback(async () => {
-    if (effectiveRows.length === 0) return;
+    if (effectiveRows.length === 0 || indexLoading) return;
 
     setDownloading(true);
     setDownloadError(null);
@@ -97,6 +100,9 @@ export default function TorrentPreview({
       // Compile the files list from matched rows
       const files: DownloadFileEntry[] = [];
       const matchedRows = effectiveRows.filter((r) => r.matched);
+      const pending = matchedRows.find(row => !row.mapping.bangumi.subject_id ||
+        (row.media_type !== 'movie' && !row.mapping.bangumi.episode_id));
+      if (pending) throw new Error(`${pending.file_name}: 请先选择对应的 Bangumi 剧集`);
 
       const subtitleSuffix = (row: MatchRow, id: string) => {
         const selected = associations[row.torrent_path]?.selected || [];
@@ -149,7 +155,7 @@ export default function TorrentPreview({
     } finally {
       setDownloading(false);
     }
-  }, [effectiveRows, associations, uploadedSubtitles, searchResult, replaceBangumiId, onTorrentAdded]);
+  }, [effectiveRows, associations, uploadedSubtitles, searchResult, replaceBangumiId, onTorrentAdded, indexLoading]);
 
   const torrentName: string = searchResult?.torrent_name || 'Torrent Preview';
   const success = downloadResult && !downloading;
@@ -244,6 +250,31 @@ export default function TorrentPreview({
           onEpisodeDataChange={onEpisodeDataChange}
         />
 
+        <div className="rounded-xl border border-border p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">集数匹配索引</span>
+            {(['tmdb', 'tvdb'] as const).map(source => {
+              const available = source === 'tmdb'
+                ? Object.values(searchResult.episode_catalog.tmdb || {}).some(seasons => Object.values(seasons).some(season => season.episodes.length > 0))
+                : Object.values(searchResult.episode_catalog.tvdb || {}).some(series => Object.values(series.seasons).some(season => season.episodes.length > 0));
+              return <button key={source} type="button" disabled={indexLoading || !available}
+                title={available ? '' : `未获取 ${source.toUpperCase()} 剧集目录`}
+                aria-pressed={searchResult.episode_match_source === source}
+                className={`rounded-lg px-4 py-2 text-sm disabled:opacity-40 ${searchResult.episode_match_source === source ? 'bg-primary text-white' : 'bg-muted'}`}
+                onClick={async () => {
+                  if (source === searchResult.episode_match_source) return;
+                  setIndexLoading(true); setIndexError('');
+                  try { const view = await setPreviewMatchSource(searchResult, source);
+                    setSessionView(view); onEpisodeDataChange(view.episode_catalog);
+                  } catch (error) { setIndexError(error instanceof Error ? error.message : '切换失败'); }
+                  finally { setIndexLoading(false); }
+                }}>{source.toUpperCase()}</button>;
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">按文件解析出的季号、集号匹配 {searchResult.episode_match_source?.toUpperCase()}，再按集名匹配另外两个来源。手动修改会保留。</p>
+          {indexError && <p className="text-xs text-destructive">{indexError}</p>}
+        </div>
+
         {/* ── Match tables ── */}
         <MatchTable
           key={searchResult.preview_id}
@@ -317,7 +348,7 @@ export default function TorrentPreview({
             <button
               className="flex items-center gap-3 px-8 py-4 bg-primary text-white rounded-2xl shadow-2xl shadow-pink-500/40 hover:scale-[1.02] active:scale-95 transition-all group cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={handleBeginProcessing}
-              disabled={downloading || effectiveRows.filter((r) => r.matched).length === 0}
+              disabled={downloading || indexLoading || effectiveRows.filter((r) => r.matched).length === 0}
             >
               {downloading ? (
                 <>

@@ -105,7 +105,7 @@ class PreviewAmbiguityTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(TimeoutError):
                 await preview._search_bangumi_for_name('A', 100, 'Original')
 
-    async def test_full_preview_preserves_mapping_candidates_without_fetching_them(self):
+    async def test_full_preview_loads_linked_directories_without_confirming_identity(self):
         files = [{'name': f'Show - {ep:02}.mkv'} for ep in range(1, 4)]
         response = SimpleNamespace(json=lambda: {'results': [{'id': 100, 'name': 'Show'}]})
         linked = [{'bangumi_id': 1, 'name': 'Season 1'}, {'bangumi_id': 2, 'name': 'Season 2'}]
@@ -115,15 +115,17 @@ class PreviewAmbiguityTests(unittest.IsolatedAsyncioTestCase):
              patch.object(preview.data_store, 'get_map_entries_by_tmdb_id', return_value=linked), \
              patch.object(preview.data_store, 'list_subscriptions', return_value=[]), \
              patch.object(preview.tmdb_service, 'build_season_episode_map', AsyncMock(return_value={})), \
-             patch.object(preview.bgm_client, 'get_episodes', AsyncMock()) as episodes:
+             patch.object(preview.bgm_client, 'get_subject', AsyncMock(return_value={'name': 'Season'})), \
+             patch.object(preview.bgm_client, 'get_episodes', AsyncMock(return_value=[])) as episodes:
             result = await preview.parse_and_search('/tmp/input.torrent')
         resolution = result['search_results']['Show']['resource_resolution']
         self.assertEqual(resolution['status'], 'ambiguous')
         self.assertEqual(resolution['identity']['tmdb_series_id'], 100)
         self.assertIsNone(resolution['identity']['bangumi_subject_id'])
         self.assertEqual(len(resolution['candidates']), 3)
-        self.assertEqual(result['search_results']['Show']['map_entries'], [])
-        episodes.assert_not_awaited()
+        self.assertEqual(result['search_results']['Show']['bangumi_ids'], [1, 2])
+        self.assertEqual(len(result['search_results']['Show']['map_entries']), 2)
+        self.assertEqual(episodes.await_count, 2)
 
     async def test_tmdb_first_path_retains_ambiguous_tmdb_candidates(self):
         from backend.services.torrent import search

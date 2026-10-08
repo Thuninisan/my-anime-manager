@@ -281,13 +281,28 @@ def restore_download_request(body: dict) -> dict:
                 mapping = _MAPPING_ADAPTER.validate_python(item.get("mapping"), strict=True)
             except ValidationError:
                 raise HTTPException(422, "invalid_episode_mapping")
+            if mapping["match_source"] is not None and mapping["match_source"] != snapshot["episode_match_source"]:
+                raise HTTPException(409, "episode_match_source_conflict")
             validate_mapping(snapshot, mapping)
             series = snapshot["series_contexts"].get(source["show_key"], {})
             if not series:
-                matching = [s for s in snapshot["series_contexts"].values() if
-                            mapping["tmdb"]["series_id"] is not None and s["tmdb_series_id"] == mapping["tmdb"]["series_id"]]
+                def belongs(context):
+                    bids = {context["bangumi_subject_id"], *context["bangumi_subject_ids"]}
+                    tids = {context["tvdb_series_id"], *(h.get("tvdb_series_id") for h in context["mapping_hints"])}
+                    refs = [(mapping["tmdb"]["series_id"], {context["tmdb_series_id"]}),
+                            (mapping["tvdb"]["series_id"], tids), (mapping["bangumi"]["subject_id"], bids)]
+                    return any(value is not None for value, _ in refs) and all(
+                        value is None or value in allowed for value, allowed in refs)
+                matching = [s for s in snapshot["series_contexts"].values() if belongs(s)]
                 if len(matching) == 1:
                     series = matching[0]
+            if not series and source["kind"] != "subtitle":
+                raise HTTPException(422, "invalid_resource_identity: select a series")
+            if source["kind"] != "subtitle":
+                if mapping["bangumi"]["subject_id"] is None:
+                    raise HTTPException(422, "bangumi_subject_required")
+                if series.get("media_type") != "movie" and mapping["bangumi"]["episode_id"] is None:
+                    raise HTTPException(422, "bangumi_episode_required")
             if series and source["kind"] != "subtitle":
                 allowed_bgm = {series["bangumi_subject_id"], *series["bangumi_subject_ids"],
                                *(h.get("bangumi_subject_id") for h in series["mapping_hints"])}
@@ -297,19 +312,36 @@ def restore_download_request(body: dict) -> dict:
                     or mapping["bangumi"]["subject_id"] not in allowed_bgm):
                     raise HTTPException(422, "invalid_resource_identity")
             selected_series = series
+            from ...domain.resource import resource_identity
+            base_identity = series.get("resource_identity")
+            file_identity = dict(base_identity) if base_identity else None
+            if mapping["bangumi"]["subject_id"] is not None:
+                if file_identity is None:
+                    file_identity = resource_identity(series.get("media_type", "tv"), series.get("display_name"),
+                        bangumi_subject_id=mapping["bangumi"]["subject_id"])
+                file_identity["bangumi_subject_id"] = mapping["bangumi"]["subject_id"]
+            if file_identity is not None and file_identity["media_type"] == "tv":
+                file_identity["tmdb_series_id"] = mapping["tmdb"]["series_id"] or file_identity["tmdb_series_id"]
+                file_identity["tvdb_series_id"] = mapping["tvdb"]["series_id"] or file_identity["tvdb_series_id"]
+            if file_identity is not None:
+                from ...domain.resource import validate_resource_identity
+                validate_resource_identity(file_identity)
             if series.get("media_type") != "movie" and source["kind"] != "subtitle" and not any(
                     mapping[p]["season_number"] is not None and mapping[p]["episode_number"] is not None
                     and int(mapping[p]["episode_number"]) == mapping[p]["episode_number"] for p in ("tmdb", "tvdb")):
                 raise HTTPException(422, "invalid_episode_mapping")
             bgm_series = next((s for s in snapshot["series_contexts"].values()
                                if s["bangumi_subject_id"] == mapping["bangumi"]["subject_id"]), {})
-            entry = {"identity_revision": selected_series.get("identity_revision"), "resource_identity": selected_series.get("resource_identity"), "episode_mapping": mapping, "torrent_path": source["torrent_path"],
+            entry = {"identity_revision": selected_series.get("identity_revision") if file_identity == base_identity else None, "resource_identity": file_identity, "episode_mapping": mapping, "torrent_path": source["torrent_path"],
                      "is_subtitle": source["kind"] == "subtitle", "tmdb_show_name": selected_series.get("display_name", ""),
                      "bangumi_show_name": snapshot["episode_catalog"]["bangumi"].get(str(mapping["bangumi"]["subject_id"]), {}).get("name", bgm_series.get("bangumi_display_name", "")),
                      **{k: item[k] for k in ("subtitle_suffix", "stored_filename", "original_filename") if k in item}}
             restored[collection].append(entry)
     selected_resources = [f.get("resource_identity") for f in restored["files"] if not f.get("is_subtitle")]
     movie_ids = {i["tmdb_movie_id"] for i in selected_resources if i and i["media_type"] == "movie"}
+    movie_subjects = {i["bangumi_subject_id"] for i in selected_resources if i and i["media_type"] == "movie"}
+    if movie_ids and len(movie_subjects) > 1:
+        raise HTTPException(422, "ambiguous_resource: movie_subject_download")
     if movie_ids and (len(movie_ids) > 1 or any(i and i["media_type"] == "tv" for i in selected_resources)):
         raise HTTPException(422, "ambiguous_resource: mixed_movie_download")
     restored.update(torrent_path=snapshot["torrent"]["source_path"], torrent_name=snapshot["torrent"]["name"],
@@ -352,6 +384,12 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
             context["resource_resolution"]["identity"] = identity
             if context["resource_resolution"]["status"] != "ambiguous":
                 context["resource_resolution"]["reason"] = "manual_provider_confirmation"
+            data = {}
+            await _augment_linked_catalogs(snapshot, context, provider, provider_id, data)
+            normalized = episode_catalog(data)
+            for key in normalized:
+                snapshot["episode_catalog"][key].update(normalized[key])
+            snapshot["episode_metadata"].update(normalize_metadata(data))
             updated = update_preview_session(row, snapshot)
             from .preview_view import build_preview_view
             return build_preview_view(snapshot, updated.id, updated.revision, updated.expires_at)
@@ -377,27 +415,34 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
     context = snapshot["series_contexts"][show_key]
     field = {"tmdb": "tmdb_series_id", "tvdb": "tvdb_series_id", "bangumi": "bangumi_subject_id"}[provider]
     current = context.get("resource_identity")
-    if current is None:
+    if current is None and provider != "bangumi":
         current = resource_identity(context["media_type"], context["display_name"], **{field: provider_id})
+    if current is None:
+        current = {}
     current = dict(current)
-    current[field] = provider_id
-    context[field] = provider_id
+    if provider != "bangumi":
+        current[field] = provider_id
+        context[field] = provider_id
     if provider == "bangumi":
         context["bangumi_subject_ids"] = sorted(set(context["bangumi_subject_ids"]) | {provider_id}
             | ({context["resource_identity"]["bangumi_subject_id"]} if context.get("resource_identity") and context["resource_identity"]["bangumi_subject_id"] else set()))
-        context["bangumi_display_name"] = data["bangumi"][str(provider_id)]["name"]
-    context["resource_identity"] = current
+        if context["bangumi_subject_id"] == provider_id:
+            context["bangumi_display_name"] = data["bangumi"][str(provider_id)]["name"]
+    context["resource_identity"] = current or None
     from .preview import _combine_preview_resolutions
     resolutions = context.setdefault("provider_resolutions", {})
-    resolutions[provider] = ResourceResolver().resolve([], known=resource_identity(
-        context["media_type"], context["display_name"], **{field: provider_id}))
-    resolutions[provider]["reason"] = "manual_provider_confirmation"
+    if provider != "bangumi":
+        resolutions[provider] = ResourceResolver().resolve([], known=resource_identity(
+            context["media_type"], context["display_name"], **{field: provider_id}))
+        resolutions[provider]["reason"] = "manual_provider_confirmation"
     context["resource_resolution"] = _combine_preview_resolutions(resolutions, context["display_name"], context["media_type"])
-    context["resource_resolution"]["identity"] = current
-    context["identity_revision"] = None
-    context["identity_source"] = "explicit_user_mapping"
+    context["resource_resolution"]["identity"] = current or None
+    if provider != "bangumi":
+        context["identity_revision"] = None
+        context["identity_source"] = "explicit_user_mapping"
     if context["resource_resolution"]["status"] != "ambiguous":
-        context["resource_resolution"]["reason"] = "manual_provider_confirmation"
+        context["resource_resolution"]["reason"] = "episode_directory_added" if provider == "bangumi" else "manual_provider_confirmation"
+    await _augment_linked_catalogs(snapshot, context, provider, provider_id, data)
     normalized = episode_catalog(data)
     for key in normalized:
         snapshot["episode_catalog"][key].update(normalized[key])
@@ -405,3 +450,53 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
     updated = update_preview_session(row, snapshot)
     from .preview_view import build_preview_view
     return build_preview_view(snapshot, updated.id, updated.revision, updated.expires_at)
+
+
+def set_preview_match_source(preview_id: str, revision: int, source: str):
+    if source not in ("tmdb", "tvdb"):
+        raise HTTPException(422, "invalid_episode_match_source")
+    row, snapshot = load_preview_session(preview_id, revision)
+    directories = snapshot["episode_catalog"].get(source, {})
+    if not any(season["episodes"] for directory in directories.values()
+               for season in (directory.get("seasons", {}) if source == "tvdb" else directory).values()):
+        raise HTTPException(422, "episode_index_unavailable")
+    snapshot["episode_match_source"] = source
+    updated = update_preview_session(row, snapshot)
+    from .preview_view import build_preview_view
+    return build_preview_view(snapshot, updated.id, updated.revision, updated.expires_at)
+
+
+async def _augment_linked_catalogs(snapshot, context, provider, provider_id, data):
+    """Load explicitly associated directories without confirming a primary Subject."""
+    from ... import data as data_store
+    from ...clients import bangumi
+    from ..tvdb import fetch_tvdb_series_episodes
+    if provider == "tmdb":
+        links = [e for e in data_store.get_map_entries_by_tmdb_id(provider_id)
+            if (e.get("tmdb_season") == -1 if context["media_type"] == "movie" else e.get("tmdb_season") != -1)]
+    elif provider == "bangumi":
+        hint = data_store.get_map_entry(provider_id)
+        links = [dict(hint, bangumi_id=provider_id)] if hint else []
+    else:
+        return
+    links = list({e["bangumi_id"]: e for e in links}.values())
+    for hint in links:
+        bid = hint["bangumi_id"]
+        context["bangumi_subject_ids"] = sorted(set(context["bangumi_subject_ids"]) | {bid})
+        if str(bid) not in snapshot["episode_catalog"]["bangumi"] and str(bid) not in data.get("bangumi", {}):
+            subject = await bangumi.get_subject(bid)
+            episodes = await bangumi.get_episodes(bid, ep_type=None)
+            data.setdefault("bangumi", {})[str(bid)] = {"name": subject.get("name_cn") or subject.get("name", ""),
+                "episodes": [dict(ep, raw_sort=ep.get("sort")) for ep in episodes if ep.get("type") in (0, 1)]}
+        tid = hint.get("tvdb_id") if context["media_type"] == "tv" else None
+        if context["tvdb_series_id"] is not None and tid != context["tvdb_series_id"]:
+            tid = None
+        context["mapping_hints"] = [h for h in context["mapping_hints"] if h.get("bangumi_subject_id") != bid]
+        context["mapping_hints"].append({"bangumi_subject_id": bid, "name": hint.get("name", ""),
+            "tvdb_series_id": tid, "tvdb_season_number": hint.get("tvdb_season"),
+            "tmdb_season_number": hint.get("tmdb_season")})
+        if tid and str(tid) not in snapshot["episode_catalog"]["tvdb"] and str(tid) not in data.get("tvdb", {}):
+            directory = await fetch_tvdb_series_episodes(tid)
+            if directory is None:
+                raise HTTPException(502, "preview_provider_fetch_failed")
+            data.setdefault("tvdb", {})[str(tid)] = directory

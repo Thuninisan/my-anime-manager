@@ -386,7 +386,6 @@ async def search_by_tmdb(
         "bangumi": {},
         "tvdb": {},
     }
-    any_movie = False
 
     for name in show_names:
         file_count = file_counts.get(name, 0)
@@ -398,7 +397,6 @@ async def search_by_tmdb(
 
         resolutions = {}
         if is_movie:
-            any_movie = True
             logger.debug(f'   🎬 搜索电影: "{name}"')
             tmdb_info = await _search_tmdb_movie(name, resolutions)
         else:
@@ -464,6 +462,11 @@ async def search_by_tmdb(
             for provider in ("tmdb", "bangumi", "tvdb"):
                 provider_catalogs[provider].update(all_data[provider])
         entry = search_results[name]
+        if is_movie:
+            from .preview import _fetch_provider_catalogs
+            directories = await _fetch_provider_catalogs({name: entry}, parsed_files)
+            for provider in ("tmdb", "bangumi", "tvdb"):
+                provider_catalogs[provider].update(directories[provider])
         entry["provider_resolutions"] = resolutions
         combined = _combine_preview_resolutions(resolutions, name, "movie" if is_movie else "tv")
         from ...domain.resource_adapters import search_entry_resolution
@@ -477,7 +480,7 @@ async def search_by_tmdb(
         entry["resource_identity"] = entry["resource_resolution"]["identity"]
 
     return {
-        "index": "movie" if any_movie else "tmdb",
+        "index": "tmdb" if provider_catalogs.get("tmdb") else "tvdb" if provider_catalogs.get("tvdb") else "tmdb",
         "torrent_name": torrent_name,
         "torrent_path": torrent_path,
         "total_files": len(file_list),

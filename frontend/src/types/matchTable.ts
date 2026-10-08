@@ -36,6 +36,8 @@ export type BgmEpisode = BangumiCatalogEpisode;
 export type BgmEntry = BangumiCatalogEntry;
 
 export interface MatchRow {
+  match_status?: Record<string, "matched" | "ambiguous" | "missing" | "manual">;
+  match_candidates?: Record<string, (CatalogEpisode | BangumiCatalogEpisode)[]>;
   file_name: string; torrent_path: string; show_name: string;
   mapping: EpisodeMapping;
   bgm_entry: string; bgm_ep_name: string; bgm_ep_name_cn: string; tmdb_ep_name: string;

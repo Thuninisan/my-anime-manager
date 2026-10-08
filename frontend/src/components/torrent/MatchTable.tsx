@@ -80,6 +80,13 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
   } = useSubtitleMatching(subtitles, torrentName, rows);
 
   useEffect(() => { onAssociationsChange?.(associations); }, [associations, onAssociationsChange]);
+  const optionsForRow = (row: MatchRow) => {
+    const entry = searchResults[row.show_name];
+    if (!entry && row.media_type === 'special') return bgmEntryOptions;
+    const allowed = new Set([entry?.bangumi_subject_id, ...(entry?.bangumi_subject_ids || []),
+      ...(entry?.mapping_hints || []).map(hint => hint.bangumi_subject_id)]);
+    return bgmEntryOptions.filter(option => allowed.has(option.id));
+  };
   const visible = (r: MatchRow) => subtitleFilter === 'all' || (r.matched && subtitleStatus(associations[r.torrent_path]) === subtitleFilter);
   // ── Notify parent ──
   useEffect(() => { onRowsComputed?.(rows); }, [rows, onRowsComputed]);
@@ -137,7 +144,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
                   torrentName={torrentName}
                   onSubtitleUploaded={(original, stored) => { handleSubtitleUploaded(original, stored); setAssociation(`upload:${stored}`, r.torrent_path); }}
                   {...subProps(r)}
-                  bgmEntryOptions={bgmEntryOptions}
+                  bgmEntryOptions={optionsForRow(r)}
                   currentEps={currentEps} currentEntryId={currentEntryId}
                   onBgmEntryChange={(v) => handleBgmEntryChange(i, v)}
                   onToggleMatched={() => handleToggleMatched(i, r.matched)}
@@ -203,11 +210,11 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
                   torrentName={torrentName}
                   onSubtitleUploaded={(original, stored) => { handleSubtitleUploaded(original, stored); setAssociation(`upload:${stored}`, r.torrent_path); }}
                   {...subProps(r)}
-                  bgmEntryOptions={bgmEntryOptions}
+                  bgmEntryOptions={optionsForRow(r)}
                   currentEps={currentEps} currentEntryId={currentEntryId}
                   tmdbSeasonOptions={tmdbSeasonOpts} tmdbSeasonValue={r.mapping.tmdb.season_number ?? ''}
                   tmdbEpOptions={tmdbEpOpts} tmdbEpValue={r.mapping.tmdb.episode_number ?? ''} tmdbEpTitle={r.tmdb_ep_name}
-                  tvdbSeasonOptions={tvdbSeasonOpts} tvdbSeasonValue={r.mapping.tvdb.season_number ?? ''}
+                  tvdbSeasonOptions={tvdbSeasonOpts} tvdbSeasonValue={r.mapping.tvdb.series_id != null && r.mapping.tvdb.season_number != null ? `${r.mapping.tvdb.series_id}:${r.mapping.tvdb.season_number}` : ''}
                   tvdbEpOptions={tvdbEpOpts} tvdbEpValue={r.mapping.tvdb.episode_number ?? ''} tvdbEpTitle={tvdbEpTitle}
                   onBgmEntryChange={(v) => handleBgmEntryChange(i, v)}
                   onBgmEpChange={(v) => handleBgmEpChange(i, currentEntryId, v)}
@@ -270,7 +277,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
                   torrentName={torrentName}
                   onSubtitleUploaded={(original, stored) => { handleSubtitleUploaded(original, stored); setAssociation(`upload:${stored}`, r.torrent_path); }}
                   {...subProps(r)}
-                  bgmEntryOptions={bgmEntryOptions}
+                  bgmEntryOptions={optionsForRow(r)}
                   currentEps={currentEps} currentEntryId={currentEntryId}
                   tmdbSeasonOptions={tmdbSeasonOpts} tmdbSeasonValue={tmdbSeasonVal}
                   tmdbEpOptions={tmdbEpOpts} tmdbEpValue={r.mapping.tmdb.episode_number ?? ''} tmdbEpTitle={r.tmdb_ep_name}

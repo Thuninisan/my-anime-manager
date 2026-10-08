@@ -702,6 +702,16 @@ async def _fetch_provider_catalogs(search_results: dict, parsed_files: list[dict
         t = entry.get("tmdb")
         b = entry.get("bangumi")
         mt = entry.get("media_type", "tv")
+        # Explicit series linkage supplies episode directories, not a primary Subject.
+        if t and t.get("id") and entry.get("identity_revision") is None:
+            linked = list({e["bangumi_id"]: e for e in data_store.get_map_entries_by_tmdb_id(t["id"])
+                if (e.get("tmdb_season") == -1 if mt == "movie" else e.get("tmdb_season") != -1)}.values())
+            if linked:
+                entry["bangumi_ids"] = sorted(set(entry.get("bangumi_ids", [])) | {e["bangumi_id"] for e in linked})
+                known_tvdb = (entry.get("resource_identity") or {}).get("tvdb_series_id")
+                entry["map_entries"] = [dict(h, tvdb_id=None) if known_tvdb is not None and h.get("tvdb_id") != known_tvdb
+                    else h for h in linked]
+        bangumi_ids.update(entry.get("bangumi_ids", []))
         if t and t.get("id"):
             tmdb_ids.add(t["id"])
             tmdb_media_types[t["id"]] = mt
@@ -905,7 +915,12 @@ async def _fetch_provider_catalogs(search_results: dict, parsed_files: list[dict
         if identity is not None:
             if identity["tvdb_series_id"] is not None:
                 tvdb_ids.add(identity["tvdb_series_id"])
-            continue
+                continue
+            if entry.get("identity_revision") is not None:
+                continue
+        for hint in entry.get("map_entries", []):
+            if hint.get("tvdb_id"):
+                tvdb_ids.add(hint["tvdb_id"])
         if bgm_id:
             map_entry = data_store.get_map_entry(bgm_id)
             if map_entry and map_entry.get("tvdb_id"):
@@ -1124,7 +1139,7 @@ async def parse_and_search(torrent_path: str) -> dict:
 
     # ── Add map_entries to each search result (for frontend BGM→TVDB lookup) ──
     for key, entry in search_results.items():
-        if entry.get("identity_revision") is not None:
+        if entry.get("identity_revision") is not None or entry.get("bangumi_ids"):
             continue
         bgm_id = entry.get("bangumi", {}).get("id") if entry.get("bangumi") else None
         if bgm_id:
@@ -1143,6 +1158,9 @@ async def parse_and_search(torrent_path: str) -> dict:
         else:
             entry["map_entries"] = []
 
+    # Default to an available index; explicit user switches remain strict.
+    available_index = "tvdb" if provider_catalogs.get("tvdb") else "tmdb"
+
     # ── Step 6: Collect SP/Extra files (no re-parsing) ──
     # Files in special directories were marked is_extra during Step 2.
     # Return them directly so the frontend can present them for manual mapping.
@@ -1159,7 +1177,7 @@ async def parse_and_search(torrent_path: str) -> dict:
     logger.debug(f"   → {len(specials)} 个特殊文件")
 
     return {
-        "index": "tvdb",
+        "index": available_index,
         "torrent_name": torrent_name,
         "torrent_path": torrent_path,
         "total_files": len(file_list),

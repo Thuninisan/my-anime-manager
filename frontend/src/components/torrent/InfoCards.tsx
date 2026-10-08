@@ -226,7 +226,7 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
                 <button key={candidate.provider_id} type="button"
                   className="block w-full text-left rounded-lg border border-border p-2 hover:bg-muted disabled:opacity-50"
                   disabled={tmdbLoading} onClick={() => handleAddTmdb(candidate.provider_id)}>
-                  确认 {candidate.title || candidate.original_title || 'TMDB'} ({candidate.provider_id})
+                  {searchResults[targetShowKey].bangumi_subject_ids?.includes(candidate.provider_id) ? '已加载' : '添加目录'} {candidate.title || candidate.original_title || 'TMDB'} ({candidate.provider_id})
                 </button>
               ))}
             </div>
@@ -238,7 +238,7 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
         <div className="space-y-3">
           <div className="flex items-center gap-2 mb-2">
             <span className="bg-primary w-2 h-6 rounded-full"></span>
-            <h4 className="font-bold text-sm tracking-tight text-primary">Bangumi Match</h4>
+            <h4 className="font-bold text-sm tracking-tight text-primary">Bangumi 剧集目录</h4>
           </div>
           <div className="text-xs space-y-1 text-slate-500 dark:text-slate-400 italic">
             {bangumiEntries.size === 0 && <p>No match</p>}
@@ -248,12 +248,12 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
           </div>
           {targetShowKey && searchResults[targetShowKey]?.provider_resolutions?.bangumi?.status === 'ambiguous' && (
             <div className="space-y-2 text-xs">
-              <p>{targetShowKey}: 需要确认 Bangumi 资源</p>
+              <p>{targetShowKey}: 可添加的 Bangumi 剧集目录</p>
               {searchResults[targetShowKey].provider_resolutions?.bangumi.candidates.map((candidate) => (
                 <button key={candidate.provider_id} type="button"
                   className="block w-full text-left rounded-lg border border-border p-2 hover:bg-muted disabled:opacity-50"
-                  disabled={bgmLoading} onClick={() => handleAddBangumi(candidate.provider_id)}>
-                  确认 {candidate.title || candidate.original_title || 'Bangumi'} ({candidate.provider_id})
+                  disabled={bgmLoading || searchResults[targetShowKey].bangumi_subject_ids?.includes(candidate.provider_id)} onClick={() => handleAddBangumi(candidate.provider_id)}>
+                  {searchResults[targetShowKey].bangumi_subject_ids?.includes(candidate.provider_id) ? '已加载' : '添加目录'} {candidate.title || candidate.original_title || 'Bangumi'} ({candidate.provider_id})
                 </button>
               ))}
             </div>

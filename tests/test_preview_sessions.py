@@ -108,8 +108,13 @@ class PreviewSessionTests(unittest.TestCase):
         self.assertFalse(Path(self.snapshot['torrent']['source_path']).exists())
 
     def test_multi_series(self):
+        self.result['search_results']['B']['bangumi_ids'] = [5]
+        self.result['provider_catalogs']['bangumi']['5'] = {'name': 'B', 'episodes': [
+            {'id': 51, 'sort': 1, 'ep': 1, 'name': 'B'}]}
+        self.row = service.create_preview_session(self.result, str(self.source))
         body = self.request()
-        mapping = create_episode_mapping({'season_number': 1, 'episode_number': 1}, tmdb={
+        mapping = create_episode_mapping({'season_number': 1, 'episode_number': 1},
+            bangumi={'subject_id': 5, 'episode_id': 51, 'episode_number': 1, 'episode_absolute': 1}, tmdb={
             'series_id': 3, 'episode_id': 31, 'season_number': 1, 'episode_number': 1})
         body['files'].append({'file_id': service.file_id('b.mkv'), 'mapping': mapping})
         restored = service.restore_download_request(body)
@@ -164,20 +169,111 @@ class PreviewSessionTests(unittest.TestCase):
                 self.assertEqual(view['revision'], revision + 1)
                 self.assertEqual(view['search_results']['B'], before['search_results']['B'])
             self.assertEqual(view['search_results']['A']['bangumi_subject_ids'], [2, 4])
-            self.assertEqual(view['search_results']['A']['resource_identity']['bangumi_subject_id'], 4)
-            self.assertEqual(view['search_results']['A']['provider_resolutions']['bangumi']['status'], 'resolved')
+            self.assertIsNone(view['search_results']['A']['resource_identity']['bangumi_subject_id'])
+            self.assertEqual(view['search_results']['A']['provider_resolutions']['bangumi']['status'], 'ambiguous')
             self.assertIn('2', view['episode_catalog']['bangumi'])
             self.assertIn('4', view['episode_catalog']['bangumi'])
             request = {'preview_id': row.id, 'preview_revision': 3, 'files': [
                 {'file_id': service.file_id('a.mkv'), 'mapping': self.mapping}]}
             restored = service.restore_download_request(request)
             self.assertEqual(restored['files'][0]['episode_mapping']['bangumi']['subject_id'], 2)
-            self.assertEqual(restored['files'][0]['resource_identity']['bangumi_subject_id'], 4)
+            self.assertEqual(restored['files'][0]['resource_identity']['bangumi_subject_id'], 2)
             request['files'][0]['file_id'] = service.file_id('b.mkv')
             with self.assertRaises(HTTPException) as error:
                 service.restore_download_request(request)
             self.assertEqual(error.exception.detail, 'invalid_resource_identity')
         asyncio.run(run())
+
+    def test_match_source_api_updates_revision_and_rejects_stale_requests(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        from backend.api.routes_torrent import router
+        app = FastAPI()
+        app.include_router(router)
+        url = f'/api/torrent/previews/{self.row.id}/match-source'
+        with TestClient(app) as client:
+            response = client.post(url, json={'preview_revision': 1, 'source': 'tmdb'})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()['revision'], 2)
+            self.assertEqual(response.json()['episode_match_source'], 'tmdb')
+            self.assertEqual(client.post(url, json={'preview_revision': 1, 'source': 'tmdb'}).status_code, 409)
+            self.assertEqual(client.post(url, json={'preview_revision': '2', 'source': 'tmdb'}).status_code, 422)
+            self.assertEqual(client.post(url, json={'preview_revision': 2, 'source': 'tvdb'}).status_code, 422)
+
+    def test_download_rejects_mapping_computed_for_another_index(self):
+        body = self.request()
+        body['files'][0]['mapping']['match_source'] = 'tmdb'
+        with self.assertRaises(HTTPException) as error:
+            service.restore_download_request(body)
+        self.assertEqual(error.exception.detail, 'episode_match_source_conflict')
+
+    def test_match_source_revision_availability_and_round_trip(self):
+        view = service.set_preview_match_source(self.row.id, 1, 'tmdb')
+        self.assertEqual(view['revision'], 2)
+        self.assertEqual(view['episode_match_source'], 'tmdb')
+        _, snapshot = service.load_preview_session(self.row.id, 2)
+        self.assertEqual(snapshot['episode_match_source'], 'tmdb')
+        self.assertEqual(snapshot['series_contexts'], self.snapshot['series_contexts'])
+        for revision, source, code in ((1, 'tmdb', 409), (2, 'tvdb', 422), (2, 'bangumi', 422)):
+            with self.assertRaises(HTTPException) as error:
+                service.set_preview_match_source(self.row.id, revision, source)
+            self.assertEqual(error.exception.status_code, code)
+
+    def test_download_subject_range_uses_selected_files_only(self):
+        snapshot = copy.deepcopy(self.snapshot)
+        a = snapshot['series_contexts']['A']
+        a['bangumi_subject_ids'] = [2, 4, 6]
+        snapshot['episode_catalog']['bangumi']['4'] = {'name': 'Season 2', 'episodes': [
+            {'subject_id': 4, 'episode_id': 41, 'episode_number': 1, 'episode_absolute': 1,
+             'matching_absolute': 1, 'name': 'Second', 'name_cn': ''}]}
+        snapshot['episode_catalog']['bangumi']['6'] = {'name': 'Season 3', 'episodes': []}
+        service.update_preview_session(self.row, snapshot)
+        body = self.request()
+        body['preview_revision'] = 2
+        body['files'][0]['mapping']['bangumi'] = {'subject_id': 4, 'episode_id': 41,
+                                                'episode_number': 1, 'episode_absolute': 1}
+        restored = service.restore_download_request(body)
+        self.assertEqual({f['resource_identity']['bangumi_subject_id'] for f in restored['files']}, {4})
+        self.assertEqual(restored['files'][0]['resource_identity']['tmdb_series_id'], 1)
+        self.assertEqual(restored['preview_snapshot']['series_contexts']['A']['bangumi_subject_id'], 2)
+        body['files'][0]['mapping']['bangumi']['subject_id'] = 2
+        with self.assertRaises(HTTPException) as error:
+            service.restore_download_request(body)
+        self.assertEqual(error.exception.detail, 'invalid_episode_mapping')
+
+    def test_missing_bangumi_episode_cannot_download_loaded_directories(self):
+        snapshot = copy.deepcopy(self.snapshot)
+        snapshot['series_contexts']['A']['bangumi_subject_ids'] = [2]
+        service.update_preview_session(self.row, snapshot)
+        body = self.request()
+        body['preview_revision'] = 2
+        body['files'][0]['mapping']['bangumi']['episode_id'] = None
+        with self.assertRaises(HTTPException) as error:
+            service.restore_download_request(body)
+        self.assertEqual(error.exception.detail, 'bangumi_episode_required')
+
+    def test_adding_subject_loads_tvdb_directory_without_confirming_primary(self):
+        import asyncio
+        hint = {'name': 'Season', 'tvdb_id': 8, 'tmdb_season': 1, 'tvdb_season': 2}
+        with patch('backend.data.get_map_entry', return_value=hint), \
+             patch('backend.clients.bangumi.get_subject', AsyncMock(return_value={'name': 'Season'})), \
+             patch('backend.clients.bangumi.get_episodes', AsyncMock(return_value=[])), \
+             patch('backend.services.tvdb.fetch_tvdb_series_episodes', AsyncMock(return_value={'name': 'TV', 'seasons': {}})) as fetch:
+            view = asyncio.run(service.augment_preview_session(self.row.id, 1, 'B', 'bangumi', 7))
+        self.assertIsNone(view['search_results']['B']['bangumi_subject_id'])
+        self.assertIsNone(view['search_results']['B']['tvdb_series_id'])
+        self.assertEqual(view['search_results']['B']['bangumi_subject_ids'], [7])
+        self.assertIn('8', view['episode_catalog']['tvdb'])
+        fetch.assert_awaited_once_with(8)
+        self.assertEqual(view['search_results']['B']['mapping_hints'][0]['tvdb_series_id'], 8)
+
+    def test_unmatched_subject_is_rejected_at_download(self):
+        body = self.request()
+        body['files'][0]['mapping']['bangumi'] = {'subject_id': None, 'episode_id': None,
+                                               'episode_number': None, 'episode_absolute': None}
+        with self.assertRaises(HTTPException) as error:
+            service.restore_download_request(body)
+        self.assertEqual(error.exception.detail, 'bangumi_subject_required')
 
     def test_augment_all_providers(self):
         import asyncio
@@ -345,6 +441,23 @@ class PreviewSessionTests(unittest.TestCase):
             'files': [{'file_id': service.file_id('a.mkv'), 'mapping': mapping}]})
         self.assertEqual(restored['files'][0]['bangumi_show_name'], 'A')
         self.assertEqual(restored['preview_snapshot']['series_contexts']['A']['resource_identity']['tmdb_movie_id'], 1)
+
+    def test_movie_download_requires_one_selected_subject_for_single_movie_nfo(self):
+        raw = copy.deepcopy(self.result)
+        raw['search_results'] = {'A': {'media_type': 'movie', 'tmdb': {'id': 1, 'name': 'Movie'},
+            'bangumi': None, 'bangumi_ids': [2, 4]}}
+        raw['parsed_files'][1]['show_name'] = 'A'
+        raw['provider_catalogs'] = {'bangumi': {'2': {'name': 'Movie A', 'episodes': []},
+                                               '4': {'name': 'Movie B', 'episodes': []}}}
+        row = service.create_preview_session(raw, str(self.source))
+        files = []
+        for path, bid in (('a.mkv', 2), ('b.mkv', 4)):
+            files.append({'file_id': service.file_id(path), 'mapping': create_episode_mapping(
+                {'season_number': None, 'episode_number': None}, {'subject_id': bid,
+                 'episode_id': None, 'episode_number': None, 'episode_absolute': None})})
+        with self.assertRaises(HTTPException) as error:
+            service.restore_download_request({'preview_id': row.id, 'preview_revision': 1, 'files': files})
+        self.assertEqual(error.exception.detail, 'ambiguous_resource: movie_subject_download')
 
     def test_failed_insert_and_augment_leave_no_partial_context(self):
         import asyncio

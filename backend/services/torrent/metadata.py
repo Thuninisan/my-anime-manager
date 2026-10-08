@@ -46,7 +46,7 @@ async def pre_generate_nfo(
             if len(movie_entries) != 1:
                 raise ValueError("ambiguous_resource: movie_nfo_context")
             movie_entry, = movie_entries
-            identity = movie_entry["resource_identity"]
+            identity = next(i for i in selected_resources if i["tmdb_movie_id"] == movie_entry["tmdb_movie_id"])
             tmdb_id = identity["tmdb_movie_id"]
             from ..nfo.generator import sanitize_path_name
             tmdb_name = sanitize_path_name(movie_entry["display_name"])

@@ -237,3 +237,13 @@ export async function augmentPreview(preview: TorrentPreviewResponse, provider: 
   if (!res.ok) { const body = await res.json(); throw new Error(body.detail || `HTTP ${res.status}`); }
   return normalizeTorrentPreview(await res.json());
 }
+
+
+export async function setPreviewMatchSource(preview: TorrentPreviewResponse, source: 'tmdb' | 'tvdb'): Promise<TorrentPreviewResponse> {
+  const res = await fetch(`${API_BASE}/torrent/previews/${encodeURIComponent(preview.preview_id)}/match-source`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preview_revision: preview.revision, source }),
+  });
+  if (!res.ok) { const body = await res.json(); throw new Error(body.detail || `HTTP ${res.status}`); }
+  return normalizeTorrentPreview(await res.json());
+}
