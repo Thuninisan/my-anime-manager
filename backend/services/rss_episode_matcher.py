@@ -66,7 +66,9 @@ def build_episode_mapping(ref: RssEpisodeRef, context: RssMappingContext,
 async def subscription_episode_mapping(ref: RssEpisodeRef, sub: dict, subject_id: int,
                                        metadata_ctx, *, sort=None, overrides=None, tvdb_episode_number=None) -> EpisodeMapping:
     """The poll context owns raw metadata and normalized catalogs until job completion."""
-    rules = {"bangumi_subject_id": subject_id, "bangumi_episode_sort": sort}
+    from ..domain.resource_adapters import subscription_identity
+    identity = subscription_identity(sub, subject_id)
+    rules = {"bangumi_subject_id": identity["bangumi_subject_id"], "bangumi_episode_sort": sort}
     legacy = {"bangumi": {}, "tmdb": {}, "tvdb": {}}
     for provider in ("bangumi", "tmdb", "tvdb"):
         try:
@@ -74,7 +76,7 @@ async def subscription_episode_mapping(ref: RssEpisodeRef, sub: dict, subject_id
                 legacy[provider][str(subject_id)] = {"episodes": await metadata_ctx.get_bgm_episodes(subject_id)}
                 continue
             settings = sub.get(provider, {})
-            series_id = settings.get("id") or None
+            series_id = identity[f"{provider}_series_id"]
             season = settings.get("season")
             if season is None:
                 season = sub.get("bgm", {}).get("season", 1)

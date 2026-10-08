@@ -299,3 +299,37 @@ class PreviewSessionTests(unittest.TestCase):
         self.assertEqual(snapshot, self.snapshot)
         repository.delete(row.id)
         self.assertIsNone(repository.get(row.id))
+
+    def test_canonical_resource_context_and_cross_series_rejection(self):
+        self.assertEqual(self.snapshot['series_contexts']['A']['resource_identity']['tmdb_series_id'], 1)
+        self.assertEqual(self.snapshot['series_contexts']['B']['resource_identity']['tmdb_series_id'], 3)
+        request = self.request()
+        request['files'][0]['mapping']['tmdb'].update(series_id=3, episode_id=31, season_number=1, episode_number=1)
+        with self.assertRaises(HTTPException) as error:
+            service.restore_download_request(request)
+        self.assertEqual(error.exception.detail, 'invalid_resource_identity')
+
+    def test_augment_updates_identity_and_only_target_context(self):
+        import asyncio
+        async def run():
+            with patch('backend.services.tmdb.build_season_episode_map', AsyncMock(return_value={1: {'episodes': []}})):
+                await service.augment_preview_session(self.row.id, 1, 'B', 'tmdb', 99)
+        asyncio.run(run())
+        _, snapshot = service.load_preview_session(self.row.id)
+        self.assertEqual(snapshot['series_contexts']['A']['resource_identity']['tmdb_series_id'], 1)
+        self.assertEqual(snapshot['series_contexts']['B']['resource_identity']['tmdb_series_id'], 99)
+        self.assertEqual(snapshot['series_contexts']['B']['resource_resolution']['reason'], 'manual_provider_confirmation')
+
+    def test_movie_identity_does_not_use_canonical_series_field(self):
+        result = copy.deepcopy(self.result)
+        result['search_results'] = {'A': {'tmdb': {'id': 99, 'name': 'Movie'}, 'media_type': 'movie'}}
+        snapshot = service.build_snapshot(result, self.source)
+        identity = snapshot['series_contexts']['A']['resource_identity']
+        self.assertIsNone(identity['tmdb_series_id'])
+        self.assertEqual(identity['tmdb_movie_id'], 99)
+
+    def test_conflicting_mapping_hints_do_not_pick_first(self):
+        result = copy.deepcopy(self.result)
+        result['search_results']['A']['map_entries'] = [{'tvdb_id': 10}, {'tvdb_id': 20}]
+        with self.assertRaisesRegex(ValueError, 'ambiguous_resource'):
+            service.build_snapshot(result, self.source)

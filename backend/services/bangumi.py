@@ -3,6 +3,8 @@
 import logging
 from ..clients import bangumi as bgm_client
 
+from .resource_resolver import unique_relation, select_provider_result
+
 logger = logging.getLogger(__name__)
 
 
@@ -75,9 +77,7 @@ async def find_first_in_chain(subject_id: int) -> int:
         relations = await bgm_client.get_relations(current_id)
 
         # Find prequel
-        prequel = next(
-            (r for r in relations if r.get("relation") == "前传"), None
-        )
+        prequel = unique_relation(relations, "前传")
 
         if not prequel or prequel["id"] in visited:
             break
@@ -196,9 +196,7 @@ async def build_bangumi_chain(first_subject_id: int) -> tuple[list[dict], list[d
 
         # Find sequel
         relations = await bgm_client.get_relations(current_id)
-        sequel = next(
-            (r for r in relations if r.get("relation") == "续集"), None
-        )
+        sequel = unique_relation(relations, "续集")
 
         if not sequel or sequel["id"] in visited:
             logger.debug("   🔚 已达末项" if sequel else "   🔚 无更多续集")

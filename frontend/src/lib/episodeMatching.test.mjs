@@ -161,3 +161,25 @@ assert.equal(submitted.mapping.bangumi.episode_number, 9);
 assert.equal(submitted.mapping.bangumi.episode_absolute, 16);
 assert.ok(!('title' in submitted.mapping));
 console.log('Episode matching: canonical coordinates, identity, overrides, compatibility and duplicate scenarios passed');
+
+// Multi-series catalogs with identical episode names cannot leak identities.
+for (const index of ['tmdb', 'tvdb', undefined]) {
+  data = fixture({ index });
+  data.search_results.Other = { tmdb: { id: 400, name: 'Other' }, bangumi: { id: 500, name: 'Other' },
+    map_entries: [{ bangumi_id: 500, name: 'Other', tvdb_id: 600 }] };
+  data.parsed_files.push({ ...data.parsed_files[0], file_name: 'Other.mkv', torrent_path: 'Other.mkv', show_name: 'Other' });
+  const otherCatalog = normalizeEpisodeCatalog({
+    tmdb: { 400: { 1: { name: 'Season', episodes: [{ epNum: 3, tmdbId: 401, name: 'First Day' }] } } },
+    bangumi: { 500: { name: 'Other', episodes: [{ id: 501, ep: 3, sort: 3, name: 'First Day' }] } },
+    tvdb: { 600: { name: 'Other', seasons: { 1: { episodes: [{ epNum: 3, tvdbId: 601, name: 'First Day', absoluteNumber: 3 }] } } } },
+  });
+  for (const provider of ['tmdb', 'bangumi', 'tvdb']) Object.assign(data.episode_data[provider], otherCatalog[provider]);
+  const matches = computeMatches(data);
+  assert.equal(matches[0].mapping.tmdb.series_id, 100);
+  assert.equal(matches[1].mapping.tmdb.series_id, 400);
+  assert.equal(matches[0].mapping.bangumi.subject_id, 200);
+  assert.equal(matches[1].mapping.bangumi.subject_id, 500);
+  assert.equal(matches[0].mapping.tvdb.series_id, 300);
+  assert.equal(matches[1].mapping.tvdb.series_id, 600);
+}
+console.log('Multi-series resource isolation: all matching modes passed');

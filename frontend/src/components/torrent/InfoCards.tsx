@@ -21,6 +21,9 @@ interface Candidate {
 
 export default function InfoCards({ searchResult, episodeDataOverride, onPreviewChange }: Props) {
   const searchResults = searchResult?.search_results || {};
+  const showKeys = Object.keys(searchResults);
+  const [selectedShowKey, setSelectedShowKey] = useState('');
+  const targetShowKey = showKeys.includes(selectedShowKey) ? selectedShowKey : (showKeys.length === 1 ? showKeys[0] : '');
   // Use the parent-merged data when available so the TMDB/Bangumi Match
   // display reflects the user's own additions immediately.
   const episodeData = episodeDataOverride ?? (searchResult?.episode_data || { tmdb: {}, bangumi: {} });
@@ -87,7 +90,7 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
     setTmdbLoading(true);
     setTmdbError('');
     try {
-      onPreviewChange(await augmentPreview(searchResult, 'tmdb', id));
+      onPreviewChange(await augmentPreview(searchResult, 'tmdb', id, targetShowKey));
       setTmdbInput('');
     } catch (e) {
       setTmdbError(e instanceof Error ? e.message : 'Failed');
@@ -100,7 +103,7 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
     setBgmLoading(true);
     setBgmError('');
     try {
-      onPreviewChange(await augmentPreview(searchResult, 'bangumi', id));
+      onPreviewChange(await augmentPreview(searchResult, 'bangumi', id, targetShowKey));
       setBgmInput('');
       setCandidates([]);
     } catch (e) {
@@ -175,6 +178,17 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
         <h3 className="font-bold text-sm">Metadata Source Overrides</h3>
         <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-bold uppercase">Manual Mapping</span>
       </div>
+
+      {showKeys.length > 1 && (
+        <label className="flex items-center gap-3 px-6 pt-4 text-sm">
+          Series to update
+          <select className="rounded border border-border bg-background px-3 py-2" value={targetShowKey}
+            onChange={(event) => setSelectedShowKey(event.target.value)}>
+            <option value="">Select series</option>
+            {showKeys.map((key) => <option key={key} value={key}>{key}</option>)}
+          </select>
+        </label>
+      )}
 
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8 relative z-20">
         {/* ── TMDB Match ── */}

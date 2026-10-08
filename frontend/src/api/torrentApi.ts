@@ -226,10 +226,13 @@ export async function updateConfig(changes: Partial<AppConfig>): Promise<AppConf
 }
 
 
-export async function augmentPreview(preview: TorrentPreviewResponse, provider: 'tmdb' | 'tvdb' | 'bangumi', id: number): Promise<TorrentPreviewResponse> {
+export async function augmentPreview(preview: TorrentPreviewResponse, provider: 'tmdb' | 'tvdb' | 'bangumi', id: number, showKey?: string): Promise<TorrentPreviewResponse> {
+  const keys = Object.keys(preview.search_results);
+  const target = showKey ?? (keys.length === 1 ? keys[0] : undefined);
+  if (!target || !keys.includes(target)) throw new Error('Select the series to update.');
   const res = await fetch(`${API_BASE}/torrent/previews/${encodeURIComponent(preview.preview_id)}/augment`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ preview_revision: preview.revision, show_key: Object.keys(preview.search_results)[0],
+    body: JSON.stringify({ preview_revision: preview.revision, show_key: target,
       provider, ...(provider === 'bangumi' ? { subject_id: id } : { series_id: id }) }),
   });
   if (!res.ok) { const body = await res.json(); throw new Error(body.detail || `HTTP ${res.status}`); }

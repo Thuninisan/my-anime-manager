@@ -60,7 +60,7 @@ async def search_tv_show(
     2. No animation results → return unmatched (no unfiltered fallback)
     3. Still multiple → if year known, filter by year
     4. Still multiple → exact title match (name / original_name)
-    5. Still multiple → highest popularity wins
+    5. Still multiple → ambiguous_resource; never choose by popularity
 
     Args:
         show_name: Show name to search for
@@ -83,82 +83,20 @@ async def search_tv_show(
     if not results:
         return None
 
-    # ── Step 1: only one confirmed animation result ──
-    if len(results) == 1:
-        show = results[0]
-        logger.debug(
-            f"   ✅ 唯一结果: {show['name']} "
-            f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
-        )
-        return _format_show(show)
-
-    _print_candidates("动画候选", results)
-
-    candidates = results
-
-    # ── Step 3: year match ──
-    if prefer_year:
-        year_matches = [
-            r for r in candidates
-            if (r.get("first_air_date", "") or "")[:4] == prefer_year
-        ]
-        if year_matches:
-            candidates = year_matches
-            _print_candidates(f"年份匹配 ({prefer_year})", candidates)
-        else:
-            logger.warning(f"   ⚠️ 无匹配年份 {prefer_year}，保留全部")
-
-    if len(candidates) == 1:
-        show = candidates[0]
-        logger.debug(
-            f"   ✅ 年份过滤后唯一: {show['name']} "
-            f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
-        )
-        return _format_show(show)
-
-    # ── Step 4: exact title match (including all aliases) ──
-    if len(candidates) > 1:
-        q = show_name.lower()
-        exact: list[dict] = []
-        for r in candidates:
-            # Check name and original_name from search results
-            names = [
-                (r.get("name") or "").lower(),
-                (r.get("original_name") or "").lower(),
-            ]
-            # Also fetch alternative titles (lightweight, cached by TMDB)
+    from .resource_resolver import select_provider_result
+    # Fetch aliases only when search title/year cannot disambiguate locally.
+    from ..domain.resource_adapters import provider_candidates
+    from .resource_resolver import ResourceResolver
+    initial = ResourceResolver().resolve(provider_candidates("tmdb", results), title=show_name, year=prefer_year)
+    if initial["status"] == "ambiguous":
+        for row in results:
             try:
-                alt_res = await tmdb_client.get_alternative_titles(r["id"])
-                for alt in alt_res.json().get("results", []):
-                    title = (alt.get("title") or "").lower()
-                    if title:
-                        names.append(title)
+                response = await tmdb_client.get_alternative_titles(row["id"])
+                row["alternative_titles"] = response.json().get("results", [])
             except Exception:
-                pass  # Non-critical, skip if API fails
-
-            if q in names:
-                exact.append(r)
-
-        if exact:
-            candidates = exact
-            _print_candidates("精确标题匹配(含别名)", candidates)
-
-    if len(candidates) == 1:
-        show = candidates[0]
-        logger.debug(
-            f"   ✅ 标题匹配唯一: {show['name']} "
-            f"({show.get('original_name', '无原名')}) [id: {show['id']}]"
-        )
-        return _format_show(show)
-
-    # ── Step 5: highest popularity ──
-    show = max(candidates, key=lambda r: r.get("popularity", 0) or 0)
-    logger.debug(
-        f"   ✅ 热度最高: {show['name']} "
-        f"({show.get('original_name', '无原名')}) "
-        f"[id: {show['id']}, pop={show.get('popularity', 0):.1f}]"
-    )
-    return _format_show(show)
+                pass
+    show = select_provider_result("tmdb", results, show_name, year=prefer_year)
+    return _format_show(show) if show is not None else None
 
 
 async def get_tv_show_detail(tv_id: int, language: str = "") -> dict:

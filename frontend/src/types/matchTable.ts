@@ -15,6 +15,8 @@ export interface ParsedFile {
 }
 
 export interface SearchEntry {
+  bangumi_ids?: number[];
+  tvdb_series_id?: number | null;
   tmdb: { id: number; name: string; original_title?: string; original_name?: string } | null;
   bangumi: { id: number; name: string; name_cn?: string } | null;
   media_type?: "tv" | "movie" | "special";

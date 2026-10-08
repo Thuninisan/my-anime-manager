@@ -357,11 +357,11 @@ export class DuplicateEpisodeError extends Error {
   }
 }
 
-/** Check for duplicate (season, episode) pairs across all parsed files. */
+/** Duplicate episode coordinates are scoped to a resource, not the whole torrent. */
 export function checkDuplicates(parsedFiles: ParsedFile[]): void {
   const seen = new Map<string, string>();
   for (const pf of parsedFiles) {
-    const key = `S${pf.parsed.season_number}E${pf.parsed.episode_number}`;
+    const key = `${pf.show_name.toLocaleLowerCase()}:S${pf.parsed.season_number}E${pf.parsed.episode_number}`;
     const existing = seen.get(key);
     if (existing) {
       throw new DuplicateEpisodeError(
@@ -510,9 +510,27 @@ export function fuzzyMatchTvdb(
  * TMDB-first matching:
  *   parsed_files S+E → TMDB direct → TMDB name → BGM + TVDB
  */
+function isolateSeries(data: TorrentPreviewResponse, file: ParsedFile): TorrentPreviewResponse {
+  const entry = data.search_results[file.show_name];
+  const catalog = data.episode_data;
+  const bgmIds = new Set([entry?.bangumi?.id, ...(entry?.bangumi_ids ?? []),
+    ...(entry?.map_entries ?? []).map(hint => hint.bangumi_id)]);
+  const tvdbIds = new Set([entry?.tvdb_series_id, ...(entry?.map_entries ?? []).map(hint => hint.tvdb_id)]);
+  return { ...data, parsed_files: [file], search_results: entry ? { [file.show_name]: entry } : {},
+    episode_data: { ...catalog,
+      tmdb: Object.fromEntries(Object.entries(catalog.tmdb ?? {}).filter(([id]) => Number(id) === entry?.tmdb?.id)),
+      bangumi: Object.fromEntries(Object.entries(catalog.bangumi ?? {}).filter(([id]) => bgmIds.has(Number(id)))),
+      tvdb: Object.fromEntries(Object.entries(catalog.tvdb ?? {}).filter(([id]) => tvdbIds.has(Number(id)))),
+    } };
+}
+
 export function computeMatchesTmdb(data: TorrentPreviewResponse): MatchRow[] {
   const parsedFiles: ParsedFile[] = data.parsed_files || [];
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
+  if (Object.keys(searchResults).length > 1) {
+    checkDuplicates(parsedFiles);
+    return parsedFiles.flatMap(file => computeMatchesTmdb(isolateSeries(data, file)));
+  }
   const episodeData = data.episode_data || { tmdb: {}, bangumi: {}, tvdb: {} };
 
   // Global duplicate check
@@ -580,6 +598,10 @@ export function computeMatchesTmdb(data: TorrentPreviewResponse): MatchRow[] {
 export function computeMatchesTvdb(data: TorrentPreviewResponse): MatchRow[] {
   const parsedFiles: ParsedFile[] = data.parsed_files || [];
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
+  if (Object.keys(searchResults).length > 1) {
+    checkDuplicates(parsedFiles);
+    return parsedFiles.flatMap(file => computeMatchesTvdb(isolateSeries(data, file)));
+  }
   const episodeData = data.episode_data || { tmdb: {}, bangumi: {}, tvdb: {} };
 
   // Global duplicate check
@@ -614,7 +636,7 @@ export function computeMatchesTvdb(data: TorrentPreviewResponse): MatchRow[] {
     const bgmId = searchEntry?.bangumi?.id;
     const mapEntries = searchEntry?.map_entries || [];
     const mapEntry = mapEntries.find((me) => me.bangumi_id === bgmId);
-    const tvdbId: number | undefined = mapEntry?.tvdb_id;
+    const tvdbId: number | undefined = searchEntry?.tvdb_series_id ?? mapEntry?.tvdb_id;
 
     // Use specific TVDB show if available, otherwise merge all TVDB entries
     let tvdbSeasons: Record<string, CatalogSeason>;
@@ -667,6 +689,10 @@ export function computeMatches(data: TorrentPreviewResponse): MatchRow[] {
 export function computeMatchesLegacy(data: TorrentPreviewResponse): MatchRow[] {
   const parsedFiles: ParsedFile[] = data.parsed_files || [];
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
+  if (Object.keys(searchResults).length > 1) {
+    checkDuplicates(parsedFiles);
+    return parsedFiles.flatMap(file => computeMatchesLegacy(isolateSeries(data, file)));
+  }
   const episodeData = data.episode_data || { tmdb: {}, bangumi: {} };
 
   return parsedFiles.map((pf) => {
@@ -746,7 +772,7 @@ export function computeMatchesLegacy(data: TorrentPreviewResponse): MatchRow[] {
     if (bgmEp && matchedBgmId != null) {
       const mapEntries = searchEntry?.map_entries || [];
       const mapEntry = mapEntries.find((me) => me.bangumi_id === matchedBgmId);
-      const tvdbId: number | undefined = mapEntry?.tvdb_id;
+      const tvdbId: number | undefined = searchEntry?.tvdb_series_id ?? mapEntry?.tvdb_id;
       if (tvdbId != null) {
         const tvdbSeries = episodeData?.tvdb?.[String(tvdbId)];
         const seasons: Record<string, CatalogSeason> = tvdbSeries?.seasons || {};

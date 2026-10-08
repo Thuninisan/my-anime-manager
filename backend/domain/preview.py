@@ -1,6 +1,7 @@
 """Canonical, JSON-serializable short-lived torrent preview context."""
 from typing import NotRequired
 from typing_extensions import TypedDict
+from .resource import ResourceIdentity, ResourceResolution
 from .episode import EpisodeCatalog, EpisodeMetadata, ParsedEpisodeRef, EpisodeMapping
 
 PREVIEW_SCHEMA_VERSION = 1
@@ -24,6 +25,8 @@ class PreviewParsedFile(TypedDict):
 
 
 class SeriesContext(TypedDict):
+    resource_identity: NotRequired[ResourceIdentity | None]
+    resource_resolution: NotRequired[ResourceResolution]
     show_key: str
     display_name: str
     bangumi_display_name: str
@@ -88,6 +91,7 @@ class PreviewSearchProvider(TypedDict):
 
 
 class PreviewSearchEntry(TypedDict):
+    tvdb_series_id: NotRequired[int | None]
     tmdb: PreviewSearchProvider | None
     bangumi: PreviewSearchProvider | None
     media_type: str

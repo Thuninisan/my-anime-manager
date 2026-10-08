@@ -238,7 +238,7 @@ def _deduplicate_show_names(parsed_files: list[dict]) -> list[str]:
 # ═══════════════════════════════════════════════════════════════════════
 
 async def _search_tmdb_for_name(show_name: str, search_as_movie: bool = False) -> dict:
-    """Search TMDB for a single show name — return first + rest.
+    """Resolve TMDB candidates for one show and project selected + alternatives.
 
     Calls the TMDB client directly to get raw, unfiltered results.
     The cleaned name (with year stripped) is used as the searchby key
@@ -257,7 +257,9 @@ async def _search_tmdb_for_name(show_name: str, search_as_movie: bool = False) -
     else:
         res = await tmdb_client.search_tv(cleaned_name, language="zh-CN")
     raw_results = res.json().get("results", [])
-    first = raw_results[0] if raw_results else None
+    from ..resource_resolver import select_provider_result
+    first = select_provider_result("tmdb", raw_results, cleaned_name, year=year,
+                                   media_type="movie" if search_as_movie else "tv")
     # Build first_clean: TMDB /search/movie uses "title", /search/tv uses "name".
     # Also preserve original_title / original_name for frontend movie matching.
     if first:
@@ -277,7 +279,7 @@ async def _search_tmdb_for_name(show_name: str, search_as_movie: bool = False) -
     # Rest: id + name (title for movies) only, deduped by id
     seen_ids = {first["id"]} if first else set()
     rest = []
-    for r in raw_results[1:]:
+    for r in raw_results:
         rid = r.get("id")
         if rid and rid not in seen_ids:
             seen_ids.add(rid)
@@ -341,7 +343,7 @@ def _alias_matches(subject: dict, target: str) -> bool:
 async def _search_bangumi_for_name(
     show_name: str, tmdb_id: int | None = None, tmdb_name: str | None = None,
 ) -> dict:
-    """Search Bangumi for a single show name — return first + rest.
+    """Resolve Bangumi candidates or a confirmed provider linkage for one show.
 
     For show names that do NOT contain "Season", alias-based matching
     is applied to pick the correct season-1 entry instead of blindly
@@ -350,7 +352,7 @@ async def _search_bangumi_for_name(
     Fallback chain when the primary search yields nothing:
       1. tmdb_id → map.json reverse lookup
       2. tmdb_name (original Japanese title) → re-search Bangumi,
-         taking the first result with NO map.json filter
+         applying the canonical title/year/single-candidate rules
 
     Args:
         show_name: Raw show name (year extracted internally).
@@ -360,7 +362,20 @@ async def _search_bangumi_for_name(
     Returns:
         dict with searchby, first (dict|None), rest (list[dict]).
     """
-    cleaned_name, _ = _extract_year(show_name)
+    cleaned_name, year = _extract_year(show_name)
+    # A confirmed TMDB identity uses explicit reverse linkage before title search.
+    # Several Bangumi seasons may link to one TV series; select by title/year,
+    # never pretend those related subjects are interchangeable identities.
+    if tmdb_id is not None:
+        from ..resource_resolver import select_provider_result
+        linked = [dict(e, id=e["bangumi_id"]) for e in data_store.get_map_entries_by_tmdb_id(tmdb_id)
+                  if e.get("tmdb_season") != -1]
+        if linked:
+            selected = select_provider_result("bangumi", linked, cleaned_name, year=year, source="existing_mapping")
+            if selected is not None:
+                return {"searchby": cleaned_name, "first": {
+                    "id": selected["bangumi_id"], "name": selected.get("name_original") or selected.get("name", ""),
+                    "name_cn": selected.get("name", ""), "eps": 0}, "rest": []}
     results = await bangumi_service.search_bangumi(cleaned_name)
 
     # ── Filter: keep only results whose Bangumi ID exists in map.json ──
@@ -374,41 +389,9 @@ async def _search_bangumi_for_name(
     # is often Season 2/3 instead of Season 1.  Match against infobox
     # aliases to find the real Season 1 entry.
     if "season" not in cleaned_name.lower() and len(results) > 1:
-        target = cleaned_name.lower().strip()
-        best_idx = None
-        for i, r in enumerate(results):
-            if _alias_matches(r, target):
-                best_idx = i
-                break
-        if best_idx is not None and best_idx > 0:
-            matched = results.pop(best_idx)
-            results.insert(0, matched)
-            logger.debug(
-                f"   🔀 别名匹配: "
-                f"{matched.get('name_cn') or matched['name']} "
-                f"[id: {matched['id']}] → 提升为首选"
-            )
-
-    # ── Fallback 1: tmdb_id → map.json reverse lookup ──
-    if not results and tmdb_id is not None:
-        bgm_id = data_store.get_bangumi_id_by_tmdb_id(tmdb_id)
-        if bgm_id is not None:
-            logger.debug(f"   🔄 Bangumi 搜索无结果，用 TMDB {tmdb_id} → map → Bangumi {bgm_id}")
-            try:
-                subject = await bgm_client.get_subject(bgm_id)
-                name = subject.get("name", "")
-                name_cn = subject.get("name_cn", "")
-                eps = subject.get("eps") or subject.get("total_episodes") or 0
-                return {
-                    "searchby": cleaned_name,
-                    "first": {
-                        "id": bgm_id, "name": name, "eps": eps,
-                        **({"name_cn": name_cn} if name_cn else {}),
-                    },
-                    "rest": [],
-                }
-            except Exception as exc:
-                logger.warning(f"   ⚠️ Bangumi subject 获取失败 (id={bgm_id}): {exc}")
+        alias_matches = [r for r in results if _alias_matches(r, cleaned_name.lower().strip())]
+        if alias_matches:
+            results = alias_matches
 
     # ── Fallback 2: re-search Bangumi with TMDB original name ──
     if not results and tmdb_name and tmdb_name.lower() != cleaned_name.lower():
@@ -418,14 +401,10 @@ async def _search_bangumi_for_name(
         except Exception:
             retry_results = []
         if retry_results:
-            r = retry_results[0]
-            logger.debug(
-                f"   ✅ 重搜命中: "
-                f"{r.get('name_cn') or r['name']} [id: {r['id']}]"
-            )
-            results = [r]  # take first result, no map.json filter
+            results = retry_results
 
-    first = results[0] if results else None
+    from ..resource_resolver import select_provider_result
+    first = select_provider_result("bangumi", results, cleaned_name, year=year)
     # Pick only id + name + name_cn + eps for first entry
     first_clean = None
     if first:
@@ -439,7 +418,7 @@ async def _search_bangumi_for_name(
     # Rest: id + name + name_cn, deduped by id
     seen_ids = {first["id"]} if first else set()
     rest = []
-    for r in results[1:]:
+    for r in results:
         rid = r.get("id")
         if rid and rid not in seen_ids:
             seen_ids.add(rid)
@@ -508,7 +487,8 @@ async def _parallel_search(show_names: list[str], parsed_files: list[dict] | Non
                     r for r in bgm_raw
                     if r.get("platform", "") != "TV"
                 ]
-                first = bgm_raw[0] if bgm_raw else None
+                from ..resource_resolver import select_provider_result
+                first = select_provider_result("bangumi", bgm_raw, original_title, media_type="movie")
                 if first:
                     bangumi_result: dict = {
                         "searchby": original_title,
@@ -556,14 +536,9 @@ async def _parallel_search(show_names: list[str], parsed_files: list[dict] | Non
     for i, result in enumerate(raw):
         if isinstance(result, BaseException):
             logger.warning(f"   ⚠️ 搜索 '{show_names[i]}' 异常: {result}")
-            # Synthesise a failed pair so downstream logic stays simple
-            name = show_names[i]
-            cleaned, _ = _extract_year(name)
-            pairs.append({
-                "show_name": name,
-                "tmdb": {"searchby": cleaned, "first": None, "rest": [], "media_type": "tv"},
-                "bangumi": {"searchby": cleaned, "first": None, "rest": []},
-            })
+            if isinstance(result, ValueError):
+                raise result
+            raise RuntimeError("resource_provider_request_failed") from result
         else:
             pairs.append(result)
 
@@ -798,10 +773,11 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
         try:
             async with bgm_sem:
                 relations = await bgm_client.get_relations(primary_bid)
-            for rel in relations:
-                if rel.get("relation") == "续集":
-                    sequel_bid = rel.get("id")
-                    break
+            from ..resource_resolver import unique_relation
+            sequel = unique_relation(relations, "续集")
+            sequel_bid = sequel["id"] if sequel else None
+        except ValueError:
+            raise
         except Exception as exc:
             logger.warning(f"   ⚠️ Bangumi {primary_bid} 关系获取失败: {exc}")
 
@@ -815,6 +791,8 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
         try:
             bid_str, data = await _fetch_one_bgm(sequel_bid)
             bangumi_data[bid_str] = data
+            for show_key in show_keys:
+                search_results[show_key].setdefault("bangumi_ids", []).append(sequel_bid)
             logger.debug(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
         except Exception as exc:
             logger.warning(f"   ⚠️ 续集 {sequel_bid} 剧集获取失败: {exc}")
@@ -859,6 +837,8 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                 try:
                     bid_str, data = await _fetch_one_bgm(special_bid)
                     bangumi_data[bid_str] = data
+                    for show_key in show_keys:
+                        search_results[show_key].setdefault("bangumi_ids", []).append(special_bid)
                     logger.debug(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
                 except Exception as exc:
                     logger.warning(f"   ⚠️ 番外篇 {special_bid} 剧集获取失败: {exc}")
@@ -1033,7 +1013,7 @@ async def parse_and_search(torrent_path: str) -> dict:
         if entry["tmdb"] is None and entry["bangumi"] is not None:
             bgm_id = entry["bangumi"]["id"]
             mapped_tmdb_id = data_store.get_tmdb_id(bgm_id)
-            if mapped_tmdb_id:
+            if mapped_tmdb_id and entry.get("media_type") != "movie":
                 entry["tmdb"] = {
                     "id": mapped_tmdb_id,
                     "name": f"TMDB {mapped_tmdb_id}",
@@ -1049,6 +1029,16 @@ async def parse_and_search(torrent_path: str) -> dict:
         b_info = f"Bangumi id={b['id']} ({b.get('name_cn') or b['name']})" if b else "Bangumi 无结果"
         logger.debug(f"   [{key}] {t_info}")
         logger.debug(f"            {b_info}")
+
+    from ...domain.resource_adapters import search_entry_resolution, legacy_resource_context
+    for key, entry in search_results.items():
+        bgm_id = (entry.get("bangumi") or {}).get("id")
+        mapped = data_store.get_map_entry(bgm_id) if bgm_id else None
+        entry["map_entries"] = [dict(mapped, bangumi_id=bgm_id)] if mapped else []
+        entry["resource_resolution"] = search_entry_resolution(entry, key)
+        entry["resource_identity"] = entry["resource_resolution"]["identity"]
+        if entry["resource_identity"] is not None:
+            entry.update(legacy_resource_context(entry["resource_identity"], entry))
 
     # ── Step 5.5: Fetch episode listings ──
     logger.info("📡 获取剧集数据...")

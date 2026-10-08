@@ -78,16 +78,26 @@ def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
                           "season_number": None, "episode_number": None}, "kind": "subtitle"})
     series = {}
     for key, entry in result.get("search_results", {}).items():
+        from ...domain.resource_adapters import search_entry_resolution
+        resolution = search_entry_resolution(entry, key)
+        identity = resolution["identity"]
         tmdb = entry.get("tmdb") or {}
         bgm = entry.get("bangumi") or {}
         hints = entry.get("map_entries", [])
-        series[key] = {"show_key": key, "display_name": tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or key,
+        series[key] = {"resource_identity": identity, "resource_resolution": resolution, "show_key": key, "display_name": tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or key,
                        "bangumi_display_name": bgm.get("name_cn") or bgm.get("name") or "",
-                       "media_type": entry.get("media_type") or "tv", "tmdb_series_id": tmdb.get("id"),
-                       "tvdb_series_id": next((h["tvdb_id"] for h in hints if h.get("tvdb_id") is not None), None),
-                       "bangumi_subject_id": bgm.get("id"), "bangumi_subject_ids": entry.get("bangumi_ids", []),
+                       "media_type": identity["media_type"] if identity else entry.get("media_type") or "tv",
+                       "tmdb_series_id": (identity["tmdb_series_id"] or identity["tmdb_movie_id"]) if identity else None,
+                       "tvdb_series_id": identity["tvdb_series_id"] if identity else None,
+                       "bangumi_subject_id": identity["bangumi_subject_id"] if identity else None, "bangumi_subject_ids": entry.get("bangumi_ids", []),
                        "mapping_hints": [{k: v for k, v in h.items() if k in {
                            "bangumi_id", "name", "name_original", "tvdb_id", "tvdb_season", "tmdb_season"}} for h in hints]}
+    from .preview import _extract_year
+    for item in files:
+        if item["show_key"] and item["show_key"] not in series:
+            cleaned, _ = _extract_year(item["show_key"])
+            if cleaned in series:
+                item["show_key"] = cleaned
     return {"schema_version": PREVIEW_SCHEMA_VERSION,
             "torrent": {"name": result["torrent_name"], "source_path": str(source),
                         "sha256": hashlib.sha256(source.read_bytes()).hexdigest(), "resource_id": result.get("resource_id")},
@@ -99,12 +109,27 @@ def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
             "episode_match_source": result.get("index", "tvdb")}
 
 
+def validate_resource_contexts(snapshot: PreviewContextSnapshot) -> None:
+    from ...domain.resource import validate_resource_identity
+    for context in snapshot["series_contexts"].values():
+        identity = context.get("resource_identity")
+        if identity is None:
+            continue  # Existing v1 sessions use the explicit legacy context.
+        validate_resource_identity(identity)
+        tmdb_id = identity["tmdb_series_id"] if identity["media_type"] == "tv" else identity["tmdb_movie_id"]
+        if (context["media_type"] != identity["media_type"] or context["tmdb_series_id"] != tmdb_id
+            or context["tvdb_series_id"] != identity["tvdb_series_id"]
+            or context["bangumi_subject_id"] != identity["bangumi_subject_id"]):
+            raise ValueError("invalid_resource_identity: preview context conflict")
+
+
 def create_preview_session(result: dict, source_path: str) -> TorrentPreviewSession:
     cleanup_expired_preview_sessions()
     if result.get("provider_fetch_errors"):
         raise HTTPException(502, "preview_provider_fetch_failed")
     snapshot = build_snapshot(result, Path(source_path))
     _SNAPSHOT_ADAPTER.validate_python(snapshot, strict=True)
+    validate_resource_contexts(snapshot)
     preview_id = str(uuid4())
     directory = PREVIEW_DIR / preview_id
     directory.mkdir(parents=True)
@@ -137,7 +162,8 @@ def load_preview_session(preview_id: str, revision: int | None = None) -> tuple[
         raise HTTPException(409, "preview_schema_outdated")
     try:
         _SNAPSHOT_ADAPTER.validate_python(snapshot, strict=True)
-    except ValidationError:
+        validate_resource_contexts(snapshot)
+    except (ValidationError, ValueError):
         raise HTTPException(409, "preview_context_invalid")
     if revision is not None and row.revision != revision:
         raise HTTPException(409, "preview_revision_conflict")
@@ -152,6 +178,7 @@ def touch_preview_session(row: TorrentPreviewSession) -> TorrentPreviewSession:
 
 def update_preview_session(row: TorrentPreviewSession, snapshot: PreviewContextSnapshot) -> TorrentPreviewSession:
     _SNAPSHOT_ADAPTER.validate_python(snapshot, strict=True)
+    validate_resource_contexts(snapshot)
     if not repository.update(row.id, row.revision, revision=row.revision + 1,
                              context_json=json.dumps(snapshot, ensure_ascii=False), updated_at=now(),
                              last_used_at=now(), expires_at=expiry()):
@@ -246,21 +273,36 @@ def restore_download_request(body: dict) -> dict:
                 raise HTTPException(422, "invalid_episode_mapping")
             validate_mapping(snapshot, mapping)
             series = snapshot["series_contexts"].get(source["show_key"], {})
-            selected_series = next((s for s in snapshot["series_contexts"].values()
-                                    if s["tmdb_series_id"] == mapping["tmdb"]["series_id"]
-                                    and mapping["tmdb"]["series_id"] is not None), series)
+            if not series:
+                matching = [s for s in snapshot["series_contexts"].values() if
+                            mapping["tmdb"]["series_id"] is not None and s["tmdb_series_id"] == mapping["tmdb"]["series_id"]]
+                if len(matching) == 1:
+                    series = matching[0]
+            if series and source["kind"] != "subtitle":
+                allowed_bgm = {series["bangumi_subject_id"], *series["bangumi_subject_ids"],
+                               *(h.get("bangumi_id") for h in series["mapping_hints"])}
+                allowed_tvdb = {series["tvdb_series_id"], *(h.get("tvdb_id") for h in series["mapping_hints"])}
+                if (mapping["tmdb"]["series_id"] not in (None, series["tmdb_series_id"])
+                    or mapping["tvdb"]["series_id"] not in allowed_tvdb
+                    or mapping["bangumi"]["subject_id"] not in allowed_bgm):
+                    raise HTTPException(422, "invalid_resource_identity")
+            selected_series = series
             if series.get("media_type") != "movie" and source["kind"] != "subtitle" and not any(
                     mapping[p]["season_number"] is not None and mapping[p]["episode_number"] is not None
                     and int(mapping[p]["episode_number"]) == mapping[p]["episode_number"] for p in ("tmdb", "tvdb")):
                 raise HTTPException(422, "invalid_episode_mapping")
             bgm_series = next((s for s in snapshot["series_contexts"].values()
                                if s["bangumi_subject_id"] == mapping["bangumi"]["subject_id"]), {})
-            entry = {"episode_mapping": mapping, "torrent_path": source["torrent_path"],
+            entry = {"resource_identity": selected_series.get("resource_identity"), "episode_mapping": mapping, "torrent_path": source["torrent_path"],
                      "is_subtitle": source["kind"] == "subtitle", "tmdb_show_name": selected_series.get("display_name", ""),
                      "bangumi_show_name": snapshot["episode_catalog"]["bangumi"].get(str(mapping["bangumi"]["subject_id"]), {}).get("name", bgm_series.get("bangumi_display_name", "")),
                      "bangumi_sort": mapping["bangumi"]["episode_absolute"] if mapping["bangumi"]["episode_absolute"] is not None else mapping["parsed"]["episode_number"],
                      **{k: item[k] for k in ("subtitle_suffix", "stored_filename", "original_filename") if k in item}}
             restored[collection].append(download_entry_with_mapping(entry))
+    selected_resources = [f.get("resource_identity") for f in restored["files"] if not f.get("is_subtitle")]
+    movie_ids = {i["tmdb_movie_id"] for i in selected_resources if i and i["media_type"] == "movie"}
+    if movie_ids and (len(movie_ids) > 1 or any(i and i["media_type"] == "tv" for i in selected_resources)):
+        raise HTTPException(422, "ambiguous_resource: mixed_movie_download")
     restored.update(torrent_path=snapshot["torrent"]["source_path"], torrent_name=snapshot["torrent"]["name"],
                     resource_id=None, preview_data=private_nfo_context(snapshot))
     source = Path(snapshot["torrent"]["source_path"])
@@ -283,6 +325,25 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
     row, snapshot = load_preview_session(preview_id, revision)
     if show_key not in snapshot["series_contexts"]:
         raise HTTPException(422, "invalid_show_key")
+    if type(provider_id) is not int or provider_id <= 0:
+        raise HTTPException(422, "invalid_resource_identity")
+    context = snapshot["series_contexts"][show_key]
+    if context["media_type"] == "movie":
+        if provider == "tvdb":
+            raise HTTPException(422, "invalid_resource_identity: unsupported_tvdb_movie")
+        if provider == "tmdb":
+            from ...clients import tmdb
+            detail = (await tmdb.get_movie_detail(provider_id)).json()
+            from ...domain.resource_adapters import identity_from_legacy
+            from ..resource_resolver import ResourceResolver
+            identity = identity_from_legacy(title=detail.get("title") or context["display_name"], media_type="movie",
+                                            tmdb_id=provider_id, bangumi_id=context["bangumi_subject_id"])
+            context.update(tmdb_series_id=provider_id, display_name=identity["canonical_title"],
+                           resource_identity=identity, resource_resolution=ResourceResolver().resolve([], known=identity))
+            context["resource_resolution"]["reason"] = "manual_provider_confirmation"
+            updated = update_preview_session(row, snapshot)
+            from .preview_view import build_preview_view
+            return build_preview_view(snapshot, updated.id, updated.revision, updated.expires_at)
     if provider == "tmdb":
         from ..tmdb import build_season_episode_map
         data = {"tmdb": {str(provider_id): await build_season_episode_map(provider_id, strict=True)}}
@@ -300,6 +361,23 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
                   "episodes": [dict(ep, raw_sort=ep.get("sort")) for ep in episodes if ep.get("type") in (0, 1)]}}}
     else:
         raise HTTPException(422, "invalid_preview_provider")
+    from ...domain.resource import resource_identity
+    from ..resource_resolver import ResourceResolver
+    context = snapshot["series_contexts"][show_key]
+    field = {"tmdb": "tmdb_series_id", "tvdb": "tvdb_series_id", "bangumi": "bangumi_subject_id"}[provider]
+    current = context.get("resource_identity")
+    if current is None:
+        current = resource_identity(context["media_type"], context["display_name"], **{field: provider_id})
+    current = dict(current)
+    current[field] = provider_id
+    context[field] = provider_id
+    if provider == "bangumi":
+        context["bangumi_subject_ids"] = [provider_id]
+        context["mapping_hints"] = []
+        context["bangumi_display_name"] = data["bangumi"][str(provider_id)]["name"]
+    context["resource_identity"] = current
+    context["resource_resolution"] = ResourceResolver().resolve([], known=current)
+    context["resource_resolution"]["reason"] = "manual_provider_confirmation"
     normalized = episode_catalog(data)
     for key in normalized:
         snapshot["episode_catalog"][key].update(normalized[key])

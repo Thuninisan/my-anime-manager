@@ -17,6 +17,8 @@ from ..utils.episode_name_match import fuzzy_match_episode
 from ..logging.logging_config import safe_url
 from ..utils.rss_dates import published_before_air_date
 
+from .resource_resolver import unique_relation, select_provider_result
+
 logger = logging.getLogger(__name__)
 
 
@@ -90,9 +92,7 @@ async def _build_chain_ids(root_id: int) -> list[int]:
             relations = await _get_bangumi_relations(current_id)
         except Exception:
             break
-        sequel = next(
-            (r for r in relations if r.get("relation") == "续集"), None
-        )
+        sequel = unique_relation(relations, "续集")
         if not sequel or sequel["id"] in visited:
             break
         visited.add(sequel["id"])
@@ -155,7 +155,9 @@ async def _auto_infer_tmdb(
             _emit("   ❌ TMDB 搜索无结果")
             return None
 
-        best = results[0]
+        best = select_provider_result("tmdb", results, original_name)
+        if best is None:
+            return None
         _emit(
             f"   ✅ 匹配到: {best['name']} "
             f"({best.get('original_name', '')}) [id={best['id']}]"
@@ -180,8 +182,8 @@ async def _auto_infer_tmdb(
             unique_candidates.append(c)
 
     if not unique_candidates:
-        # Fall back to searching TMDB with chain[0]'s name
-        _emit("   🔍 链中无已知 TMDB ID，用 chain[0] 名称搜索...")
+        # Fall back to searching TMDB with the explicitly backtracked root name
+        _emit("   🔍 链中无已知 TMDB ID，用已回溯的根条目名称搜索...")
         root_name = ""
         try:
             if root_subject:
@@ -193,7 +195,7 @@ async def _auto_infer_tmdb(
             pass
 
         if not root_name:
-            _emit("   ⚠️ 无法获取 chain[0] 名称")
+            _emit("   ⚠️ 无法获取已回溯的根条目名称")
             return None
 
         try:
@@ -207,11 +209,10 @@ async def _auto_infer_tmdb(
             _emit("   ❌ TMDB 搜索无结果")
             return None
 
-        unique_candidates = [results[0]["id"]]
-        _emit(
-            f"   ✅ TMDB 搜索命中: {results[0]['name']} "
-            f"(id={results[0]['id']})"
-        )
+        selected = select_provider_result("tmdb", results, root_name)
+        if selected is None:
+            return None
+        unique_candidates = [selected["id"]]
 
     if not unique_candidates:
         return None
@@ -237,6 +238,7 @@ async def _auto_infer_tmdb(
     _emit(f"   📺 Bangumi 首个剧集: {first_bgm_ep_name}")
 
     # ── Step 3: Fetch TMDB seasons & match ──
+    identity_scores = {}
     best_result: tuple[int, int, float, int, str] | None = None  # (tmdb_id, season, score, ep_number, ep_name)
 
     for ctid in unique_candidates:
@@ -268,6 +270,7 @@ async def _auto_infer_tmdb(
                 if not tmdb_name:
                     continue
                 score = fuzzy_match_episode(first_bgm_ep_name, tmdb_name)
+                identity_scores[ctid] = max(identity_scores.get(ctid, 0), score)
                 if score >= 0.6:
                     _emit(
                         f"   📺 tmdb={ctid} S{season_num:02d}E{ep.get('epNum', '?')} "
@@ -285,6 +288,11 @@ async def _auto_infer_tmdb(
         f"   ✅ 最佳匹配: tmdb_id={best_result[0]} S{best_result[1]:02d}E{best_result[3]} "
         f"\"{best_result[4]}\" ↔ \"{first_bgm_ep_name}\" score={best_result[2]:.3f}"
     )
+    from .resource_resolver import resolve_episode_link_scores
+    identity_resolution = resolve_episode_link_scores("tmdb", identity_scores)
+    if identity_resolution["status"] != "resolved":
+        _emit(identity_resolution["reason"])
+        return None
     return {"tmdb_id": best_result[0], "tmdb_season": best_result[1], "tmdb_ep_number": best_result[3]}
 
 
@@ -341,7 +349,9 @@ async def _auto_infer_tvdb(
             _emit("   ❌ TVDB 搜索无结果")
             return None
 
-        best = results[0]
+        best = select_provider_result("tvdb", results, original_name)
+        if best is None:
+            return None
         candidate_id = int(best.get("tvdb_id") or best.get("id", 0))
         if not candidate_id:
             _emit("   ⚠️ TVDB 搜索结果缺少 ID")
@@ -368,8 +378,8 @@ async def _auto_infer_tvdb(
         if unique_candidates:
             _emit(f"   🔗 从链中兄弟条目收集到 {len(unique_candidates)} 个 TVDB ID: {unique_candidates}")
         else:
-            # Fall back to searching TVDB with chain[0]'s name
-            _emit("   🔍 链中无已知 TVDB ID，用 chain[0] 名称搜索...")
+            # Fall back to searching TVDB with the explicitly backtracked root name
+            _emit("   🔍 链中无已知 TVDB ID，用已回溯的根条目名称搜索...")
             root_name = ""
             try:
                 if root_subject:
@@ -381,7 +391,7 @@ async def _auto_infer_tvdb(
                 pass
 
             if not root_name:
-                _emit("   ⚠️ 无法获取 chain[0] 名称")
+                _emit("   ⚠️ 无法获取已回溯的根条目名称")
                 return None
 
             try:
@@ -395,11 +405,14 @@ async def _auto_infer_tvdb(
                 _emit("   ❌ TVDB 搜索无结果")
                 return None
 
-            candidate_id = int(results[0].get("tvdb_id") or results[0].get("id", 0))
+            selected = select_provider_result("tvdb", results, root_name)
+            if selected is None:
+                return None
+            candidate_id = int(selected.get("tvdb_id") or selected.get("id", 0))
             if not candidate_id:
                 _emit("   ⚠️ TVDB 搜索结果缺少 ID")
                 return None
-            _emit(f"   ✅ TVDB 搜索命中: {results[0].get('name', '?')} (id={candidate_id})")
+            _emit(f"   ✅ TVDB 搜索命中: {selected.get('name', '?')} (id={candidate_id})")
             unique_candidates = [candidate_id]
 
     if not unique_candidates:
@@ -426,6 +439,7 @@ async def _auto_infer_tvdb(
     _emit(f"   📺 Bangumi 首个剧集: {first_bgm_ep_name}")
 
     # ── Step 3: Fetch TVDB episodes flat list & match ──
+    identity_scores = {}
     best_result: tuple[int, int, float, str, int] | None = None  # (tvdb_id, season, score, ep_name, ep_number)
 
     for ctid in unique_candidates:
@@ -443,6 +457,7 @@ async def _auto_infer_tvdb(
             if not tvdb_name:
                 continue
             score = fuzzy_match_episode(first_bgm_ep_name, tvdb_name)
+            identity_scores[ctid] = max(identity_scores.get(ctid, 0), score)
             if score >= 0.6:
                 _emit(
                     f"   📺 tvdb={ctid} S{season_num:02d}E{ep.get('number', '?')} "
@@ -460,6 +475,11 @@ async def _auto_infer_tvdb(
         f"   ✅ 最佳匹配: tvdb_id={best_result[0]} S{best_result[1]:02d}E{best_result[4]} "
         f"\"{best_result[3]}\" ↔ \"{first_bgm_ep_name}\" score={best_result[2]:.3f}"
     )
+    from .resource_resolver import resolve_episode_link_scores
+    identity_resolution = resolve_episode_link_scores("tvdb", identity_scores)
+    if identity_resolution["status"] != "resolved":
+        _emit(identity_resolution["reason"])
+        return None
     return {"tvdb_id": best_result[0], "tvdb_season": best_result[1], "tvdb_ep_number": best_result[4]}
 
 
@@ -647,9 +667,7 @@ async def enrich_subscription(
                 _emit("⚠️ 获取 Bangumi 关系失败")
                 return None
 
-            prequel = next(
-                (r for r in relations if r.get("relation") == "前传"), None
-            )
+            prequel = unique_relation(relations, "前传")
             if not prequel or prequel["id"] in visited:
                 # Reached root — fetch its name for series_name
                 root_id = current_id
@@ -715,6 +733,24 @@ async def enrich_subscription(
         # 4a. TVDB info from bangumi_mikan_map.json
         tvdb_id = get_tvdb_id(bangumi_id)
         tvdb_season = get_tvdb_season(bangumi_id)
+
+        special_resolution = None
+        if not tmdb_id or not tvdb_id:
+            from .resource_resolver import resolve_primary_series_relation, resolve_special_binding
+            from ..domain.resource_adapters import identity_from_legacy
+            main = resolve_primary_series_relation(await _get_bangumi_relations(bangumi_id))
+            if main is not None:
+                main_tmdb = get_tmdb_id(main["id"])
+                main_tvdb = get_tvdb_id(main["id"])
+                if main_tmdb or main_tvdb:
+                    main_identity = identity_from_legacy(title=series_name, bangumi_id=main["id"],
+                                                         tmdb_id=main_tmdb, tvdb_id=main_tvdb)
+                    special_resolution = resolve_special_binding(bangumi_id, main_identity)
+                    if not tmdb_id and main_tmdb:
+                        tmdb_id, tmdb_season = main_tmdb, 0
+                    if not tvdb_id and main_tvdb:
+                        tvdb_id, tvdb_season = main_tvdb, 0
+                    _emit("bangumi_special_main_series_mapping")
 
         # ── Tier-1 fallback: auto-infer missing TVDB ID ──
         tvdb_auto_ep_number: int | None = None
@@ -867,7 +903,16 @@ async def enrich_subscription(
                     _emit(f"   📐 backup rss_offset={backup_offset} "
                           f"(first_sort={first_sort} - first_rss_ep={smallest})")
 
+        from ..domain.resource_adapters import identity_from_legacy
+        from .resource_resolver import ResourceResolver
+        identity = identity_from_legacy(title=series_name, bangumi_id=bangumi_id,
+                                        tmdb_id=tmdb_id, tvdb_id=tvdb_id)
+        resolution = ResourceResolver().resolve([], known=identity)
+        if special_resolution is not None:
+            resolution["reason"] = special_resolution["reason"]
         return {
+            "resource_identity": identity,
+            "resource_resolution": resolution,
             "series_name": series_name,
             "bgm": {
                 "season": bgm_season,

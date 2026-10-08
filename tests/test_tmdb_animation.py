@@ -23,7 +23,8 @@ path = ROOT / "backend/services/torrent/search.py"
 tree = ast.parse(path.read_text())
 helpers = [n for n in tree.body if isinstance(n, ast.AsyncFunctionDef)
            and n.name in ("_search_tmdb_single", "_search_tmdb_movie")]
-scope = dict(tmdb_client=client, tmdb_service=tmdb, logger=logging.getLogger("test.search"))
+from backend.services.resource_resolver import select_provider_result
+scope = dict(select_provider_result=select_provider_result, tmdb_client=client, tmdb_service=tmdb, logger=logging.getLogger("test.search"))
 exec(compile(ast.Module(body=helpers, type_ignores=[]), str(path), "exec"), scope)
 
 

@@ -56,23 +56,11 @@ def _pick_show_name(file_list: list[dict]) -> tuple[str, str | None]:
 
 def _find_entry_in_chain(target_title: str, chain: list[dict]) -> int:
     """Find the chain entry whose name best matches the target title."""
-    target_lower = target_title.lower()
-    best_id = chain[0]["id"]
-    best_score = 0
-    for entry in chain:
-        name = (entry.get("name") or "").lower()
-        name_cn = (entry.get("name_cn") or "").lower()
-        score = 0
-        if name == target_lower or name_cn == target_lower:
-            score = 100
-        elif target_lower in name or name in target_lower:
-            score = 50
-        elif target_lower in name_cn or name_cn in target_lower:
-            score = 40
-        if score > best_score:
-            best_score = score
-            best_id = entry["id"]
-    return best_id
+    from ..resource_resolver import select_provider_result
+    selected = select_provider_result("bangumi", chain, target_title, source="bangumi_relation")
+    if selected is None:
+        raise ValueError("unresolved_resource")
+    return selected["id"]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -117,6 +105,11 @@ async def build_preview(torrent_path: str) -> dict:
     extras = result["extras"]
     if not episodes:
         raise RuntimeError("没有找到可处理的剧集文件")
+
+    from ..resource_resolver import normalized_title
+    show_keys = {normalized_title(e.get("showName")) for e in episodes if e.get("showName")}
+    if len(show_keys) > 1:
+        raise ValueError("ambiguous_resource: batch_multiple_series; split torrents by series")
 
     episodes.sort(key=lambda e: (e["season"], e["episode"]))
 
@@ -169,7 +162,11 @@ async def build_preview(torrent_path: str) -> dict:
         raise RuntimeError("Bangumi 未找到该节目")
 
     logger.debug("🔗 遍历 Bangumi 条目链...")
-    first_result_id = bgm_results[0]["id"]
+    from ..resource_resolver import select_provider_result
+    selected_subject = select_provider_result("bangumi", bgm_results, jp_name)
+    if selected_subject is None:
+        raise ValueError("unresolved_resource")
+    first_result_id = selected_subject["id"]
     initial_subject = await bgm_client.get_subject(first_result_id)
     init_name = initial_subject.get("name_cn") or initial_subject["name"]
     logger.debug(f"   搜索命中: {init_name} [id: {initial_subject['id']}]")
@@ -202,26 +199,14 @@ async def build_preview(torrent_path: str) -> dict:
     show_dir_name = _sanitize_dir_name(earliest.get("name_cn") or earliest["name"])
     output_root = str(Path(config.QBITTORRENT_SAVE_PATH) / show_dir_name)
 
-    # ── Step 6: Re-search TMDB with Bangumi-derived name ──
-    logger.debug("📡 用 Bangumi 名称重新查找 TMDB 节目级数据...")
-    tvshow_search_name = earliest.get("name_cn") or earliest["name"]
-    tvshow_result = await tmdb_service.search_tv_show(tvshow_search_name)
-    if tvshow_result:
-        tvshow_detail = await tmdb_service.get_tv_show_detail(tvshow_result["id"])
-        tvshow_title = tvshow_result["name"]
-        tvshow_original = (
-            tvshow_detail.get("original_name")
-            or tvshow_result.get("original_name")
-            or tvshow_result["name"]
-        )
-        tvshow_tmdb_id = tvshow_result["id"]
-        logger.debug(f"   ✅ 命中: {tvshow_title} [TMDB id: {tvshow_tmdb_id}]")
-    else:
-        logger.warning(f"   ⚠️ 未命中，使用原始搜索结果")
-        tvshow_detail = detail
-        tvshow_title = tv_show["name"]
-        tvshow_original = original_name
-        tvshow_tmdb_id = tv_show["id"]
+    # Resource identity is already determined. Detail labels cannot change it.
+    tvshow_detail = detail
+    tvshow_title = tv_show["name"]
+    tvshow_original = original_name
+    tvshow_tmdb_id = tv_show["id"]
+    from ...domain.resource_adapters import identity_from_legacy
+    resource_identity = identity_from_legacy(title=tvshow_title, tmdb_id=tvshow_tmdb_id,
+                                             bangumi_id=start_entry_id)
 
     # ── Step 7: Preload Bangumi episode lists for ALL chain entries ──
     logger.debug("📡 预加载 Bangumi 剧集列表...")
@@ -253,6 +238,18 @@ async def build_preview(torrent_path: str) -> dict:
                     ename = entry.get("name_cn") or entry["name"]
                     logger.warning(f"   ⚠️ 获取 {ename} 剧集失败: {exc}")
 
+    from ... import data as data_store
+    special_entries = [e for e in data_store.get_map_entries_by_tmdb_id(tvshow_tmdb_id)
+                       if e.get("tmdb_season") == 0]
+    special_subject = None
+    if special_entries:
+        selected = select_provider_result("bangumi", [dict(e, id=e["bangumi_id"]) for e in special_entries],
+                                          show_name, source="existing_special_mapping")
+        if selected is not None:
+            special_subject = dict(selected, id=selected["bangumi_id"])
+            if special_subject["id"] not in bgm_episode_cache:
+                bgm_episode_cache[special_subject["id"]] = await bgm_client.get_episodes(special_subject["id"])
+
     # ── Step 8: Build episode mappings + planned rename paths ──
     logger.debug(f"📊 构建剧集映射与重命名计划 (共 {len(episodes)} 个)...")
 
@@ -273,8 +270,8 @@ async def build_preview(torrent_path: str) -> dict:
 
         if tmdb_season == 0:
             # ── Specials (S00) ──
-            # Use first Bangumi entry for subject name; don't run the mapper
-            target_subject = chain[0] if chain else None
+            # Only an explicit S00 provider mapping can bind a special subject
+            target_subject = special_subject
             within_ep_num = tmdb_ep_num
             season_number = 0
         else:
@@ -364,8 +361,8 @@ async def build_preview(torrent_path: str) -> dict:
     logger.debug(f"📡 获取季信息...")
     for sn in sorted(used_season_numbers):
         if sn == 0:
-            # Specials season — use first Bangumi entry for metadata
-            entry = chain[0] if chain else None
+            # Specials season — require an explicit S00 subject binding
+            entry = special_subject
             if entry is None:
                 continue
             try:
@@ -544,6 +541,7 @@ async def build_preview(torrent_path: str) -> dict:
         "torrent_name": torrent_name,
         "save_path": config.QBITTORRENT_SAVE_PATH,
         "output_root": output_root,
+        "resource_identity": resource_identity,
         "tvshow": tvshow_block,
         "seasons": seasons_block,
         "episodes": episodes_block,

@@ -8,6 +8,7 @@ def search_views(snapshot: PreviewContextSnapshot) -> dict[str, PreviewSearchEnt
         "tmdb": {"id": series["tmdb_series_id"], "name": series["display_name"]} if series["tmdb_series_id"] is not None else None,
         "bangumi": {"id": series["bangumi_subject_id"], "name": snapshot["episode_catalog"]["bangumi"].get(
             str(series["bangumi_subject_id"]), {}).get("name", series["bangumi_display_name"])} if series["bangumi_subject_id"] is not None else None,
+        "tvdb_series_id": series["tvdb_series_id"],
         "media_type": series["media_type"], "bangumi_ids": series["bangumi_subject_ids"],
         "map_entries": copy.deepcopy(series["mapping_hints"]),
     } for key, series in snapshot["series_contexts"].items()}

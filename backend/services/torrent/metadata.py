@@ -32,24 +32,30 @@ async def pre_generate_nfo(
         return is_movie, nfo_generated, movie_meta
 
     search_results = preview_data.get("search_results", {})
-    for entry in search_results.values():
-        if isinstance(entry, dict) and entry.get("media_type") == "movie":
-            is_movie = True
-            break
+    selected_resources = [f.get("resource_identity") for f in files if not f.get("is_subtitle") and f.get("resource_identity")]
+    if selected_resources:
+        is_movie = all(i["media_type"] == "movie" for i in selected_resources)
+    else:
+        is_movie = any(isinstance(entry, dict) and entry.get("media_type") == "movie" for entry in search_results.values())
 
     try:
         if is_movie:
             # ── Movie mode: extract metadata + generate movie.nfo ──
-            movie_entry = next(
-                v for v in search_results.values()
-                if isinstance(v, dict) and v.get("media_type") == "movie"
-            )
+            selected_movie_ids = {f["resource_identity"]["tmdb_movie_id"] for f in files
+                                  if f.get("resource_identity") and f["resource_identity"]["media_type"] == "movie"}
+            movie_entries = [v for v in search_results.values() if isinstance(v, dict)
+                             and v.get("media_type") == "movie"
+                             and (not selected_movie_ids or (v.get("tmdb") or {}).get("id") in selected_movie_ids)]
+            if len(movie_entries) != 1:
+                raise ValueError("ambiguous_resource: movie_nfo_context")
+            movie_entry, = movie_entries
             tmdb_info = movie_entry.get("tmdb", {})
             tmdb_id = tmdb_info.get("id", 0)
             from ..nfo.generator import sanitize_path_name
             tmdb_name = sanitize_path_name(tmdb_info.get("name", "Unknown"))
             bangumi_ids = movie_entry.get("bangumi_ids", [])
-            bangumi_id = bangumi_ids[0] if bangumi_ids else 0
+            from ..resource_resolver import unique_provider_id
+            bangumi_id = (movie_entry.get("bangumi") or {}).get("id") or unique_provider_id(bangumi_ids) or 0
             # Movie output path: {MOVIE_HARDLINK_PATH}/{tmdb_name}/
             movie_output_dir = Path(config.MOVIE_HARDLINK_PATH) / tmdb_name
             movie_output_dir.mkdir(parents=True, exist_ok=True)

@@ -130,6 +130,7 @@ async def recognize_resource(
             save("complete")
             return {"title_snapshot": snapshot, "status": "complete", "candidates": candidates}
         show = None
+        mapped_candidates = []
         names = snapshot["name_candidates"]
         for name in names:
             key = (record["index_type"], "search", name)
@@ -159,10 +160,21 @@ async def recognize_resource(
                           if record["index_type"] == "tmdb" else
                           data.get_map_entries_by_tvdb_id(int(candidate_id)))
                 if mapped:
-                    show = candidate
-                    break
-            if show is not None:
-                break
+                    mapped_candidates.append(candidate)
+            if mapped_candidates:
+                break  # Try another title alias only when this query has no mapped candidates.
+        from ..resource_resolver import select_provider_result, ResourceResolver
+        from ...domain.resource_adapters import provider_candidates
+        # Mapping existence is a filter, not permission to select its first row.
+        title = names[0] if names else None
+        normalized = provider_candidates(record["index_type"], mapped_candidates, source="existing_mapping")
+        resolution = ResourceResolver().resolve(normalized, title=title)
+        if resolution["status"] == "ambiguous":
+            emit("ambiguous", resolution=resolution)
+            save("unresolved", error="ambiguous_resource")
+            return {"title_snapshot": snapshot, "status": "unresolved", "reason": "ambiguous_resource",
+                    "resource_resolution": resolution, "candidates": []}
+        show = select_provider_result(record["index_type"], mapped_candidates, title, source="existing_mapping")
         if show is None:
             reason = "搜索结果中没有关联映射表的索引作品"
             emit("unresolved", reason=reason)
@@ -248,7 +260,8 @@ async def recognize_resource(
                                    "match_count": 0})
         emit("candidates", candidates=candidates)
         save("complete")
-        return {"title_snapshot": snapshot, "status": "complete", "candidates": candidates}
+        return {"title_snapshot": snapshot, "status": "complete", "candidates": candidates,
+                "resource_resolution": resolution, "resource_identity": resolution["identity"]}
     except Exception as exc:
         if persist:
             logger.exception("Resource recognition failed: id=%s", record["id"])

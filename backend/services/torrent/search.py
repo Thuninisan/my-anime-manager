@@ -6,6 +6,7 @@ entries discovered through the mapping table.
 """
 
 from ...domain.episode_adapters import episode_catalog, parsed_episode_ref
+from ..resource_resolver import select_provider_result
 
 import asyncio
 import logging
@@ -29,7 +30,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════════
 
 async def _search_tmdb_single(name: str) -> dict | None:
-    """Search in Chinese and return the first confirmed Animation TV result.
+    """Search in Chinese and resolve confirmed Animation TV candidates.
 
     Args:
         name: Show name to search for.
@@ -47,7 +48,9 @@ async def _search_tmdb_single(name: str) -> dict | None:
         logger.warning("TMDB 未找到可确认的动画作品: %r", name)
         return None
 
-    first = results[0]
+    first = select_provider_result("tmdb", results, name, media_type="tv")
+    if first is None:
+        return None
     return {
         "id": first["id"],
         "name": first.get("name", ""),
@@ -79,7 +82,9 @@ async def _search_tmdb_movie(name: str) -> dict | None:
         logger.warning("TMDB 未找到可确认的动画电影: %r", name)
         return None
 
-    first = results[0]
+    first = select_provider_result("tmdb", results, name, media_type="movie")
+    if first is None:
+        return None
     return {
         "id": first["id"],
         "name": first.get("title", ""),
@@ -404,7 +409,9 @@ async def search_by_tmdb(
             }
             continue
 
-        tmdb_id = tmdb_info["id"]
+        from ...domain.resource_adapters import identity_from_legacy
+        identity = identity_from_legacy(title=tmdb_info["name"], media_type="movie" if is_movie else "tv", tmdb_id=tmdb_info["id"])
+        tmdb_id = identity["tmdb_movie_id"] if is_movie else identity["tmdb_series_id"]
         logger.info(
             "torrent.tmdb_first selected torrent=%r query=%r tmdb_id=%s title=%r original_name=%r",
             torrent_name, name, tmdb_id, tmdb_info["name"], tmdb_info.get("original_name"),
@@ -412,14 +419,15 @@ async def search_by_tmdb(
 
         if is_movie:
             # Movie: reverse lookup map.json for Bangumi ID + name
-            map_entries = data_store.get_map_entries_by_tmdb_id(tmdb_id)
+            map_entries = [e for e in data_store.get_map_entries_by_tmdb_id(tmdb_id) if e.get("tmdb_season") == -1]
             logger.info(
                 "torrent.tmdb_first movie_episode_fetch_skipped tmdb_id=%s map_entries=%d; movie branch only resolves mapping",
                 tmdb_id, len(map_entries),
             )
             bangumi_ids = sorted({me["bangumi_id"] for me in map_entries})
-            bangumi_id = bangumi_ids[0] if bangumi_ids else 0
-            bangumi_name = map_entries[0]["name"] if map_entries else ""
+            from ..resource_resolver import unique_provider_id
+            bangumi_id = unique_provider_id(bangumi_ids)
+            bangumi_name = next((e["name"] for e in map_entries if e["bangumi_id"] == bangumi_id), "")
 
             logger.debug(f"   ✅ TMDB 电影 {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
             if map_entries:
@@ -461,6 +469,11 @@ async def search_by_tmdb(
                 "map_entries": map_entries,
             }
 
+
+    from ...domain.resource_adapters import search_entry_resolution
+    for key, entry in search_results.items():
+        entry["resource_resolution"] = search_entry_resolution(entry, key)
+        entry["resource_identity"] = entry["resource_resolution"]["identity"]
 
     return {
         "index": "movie" if any_movie else "tmdb",
