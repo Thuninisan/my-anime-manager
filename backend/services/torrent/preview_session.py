@@ -67,8 +67,13 @@ def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
     for key, kind in (("parsed_files", "video"), ("specials", "special")):
         for item in result.get(key, []):
             path = item["torrent_path"]
+            # Files skipped before title parsing have no show affiliation.
+            # Preserve that state without weakening the canonical string contract.
+            show_key = item.get("show_name")
+            if show_key is None:
+                show_key = ""
             files.append({"file_id": file_id(path), "file_name": item["file_name"],
-                          "torrent_path": path, "show_key": item.get("show_name", ""),
+                          "torrent_path": path, "show_key": show_key,
                           "parsed": item.get("parsed_episode", {"season_number": item.get("season"),
                                                                 "episode_number": item.get("episode")}),
                           "kind": kind})
@@ -96,7 +101,7 @@ def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
                            "tmdb_season_number": h.get("tmdb_season")} for h in hints]}
     from .preview import _extract_year
     for item in files:
-        if item["show_key"] and item["show_key"] not in series:
+        if isinstance(item["show_key"], str) and item["show_key"] and item["show_key"] not in series:
             cleaned, _ = _extract_year(item["show_key"])
             if cleaned in series:
                 item["show_key"] = cleaned

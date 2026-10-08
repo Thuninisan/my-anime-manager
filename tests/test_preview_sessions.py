@@ -115,6 +115,34 @@ class PreviewSessionTests(unittest.TestCase):
         restored = service.restore_download_request(body)
         self.assertEqual([f['tmdb_show_name'] for f in restored['files']], ['A', 'B'])
 
+    def test_unparsed_special_directories_create_valid_session(self):
+        from backend.services.torrent.preview import _parse_file
+        from backend.domain.episode_adapters import parsed_episode_ref
+        # Reproduce the 34 files skipped before anitopy assigns a show name.
+        skipped = [_parse_file({'name': f'Show/SPs/extra-{i}.mkv'}) for i in range(34)]
+        self.assertTrue(all(item['show_name'] is None for item in skipped))
+        self.result['specials'] = [{
+            'file_name': item['file_name'], 'torrent_path': item['torrent_path'],
+            'show_name': item['show_name'], 'parsed_episode': parsed_episode_ref(item),
+        } for item in skipped]
+        row = service.create_preview_session(self.result, str(self.source))
+        _, snapshot = service.load_preview_session(row.id)
+        view = session_view(row)
+        specials = [item for item in snapshot['parsed_files'] if item['kind'] == 'special']
+        self.assertEqual(len(specials), 34)
+        self.assertTrue(all(item['show_key'] == '' for item in specials))
+        self.assertEqual(len(view['specials']), 34)
+        self.assertTrue(all(item['show_name'] == '' for item in view['specials']))
+        self.assertEqual(snapshot['series_contexts'], self.snapshot['series_contexts'])
+        self.assertEqual([item['show_name'] for item in view['parsed_files']], ['A', 'B'])
+
+    def test_unknown_show_name_does_not_mask_invalid_types(self):
+        from pydantic import ValidationError
+        self.result['specials'] = [{'file_name': 'bad.mkv', 'torrent_path': 'SPs/bad.mkv',
+                                   'show_name': 123}]
+        with self.assertRaises(ValidationError):
+            service.create_preview_session(self.result, str(self.source))
+
     def test_ambiguity_round_trip_and_manual_multiseason_confirmation(self):
         import asyncio
         from backend.services.torrent.preview import _preview_provider_result, _combine_preview_resolutions
