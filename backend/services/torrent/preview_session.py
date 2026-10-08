@@ -84,7 +84,7 @@ def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
         tmdb = entry.get("tmdb") or {}
         bgm = entry.get("bangumi") or {}
         hints = entry.get("map_entries", [])
-        series[key] = {"identity_revision": entry.get("identity_revision"), "identity_source": entry.get("identity_source", resolution["reason"]), "resource_identity": identity, "resource_resolution": resolution, "show_key": key, "display_name": tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or key,
+        series[key] = {"provider_resolutions": copy.deepcopy(entry.get("provider_resolutions", {})), "identity_revision": entry.get("identity_revision"), "identity_source": entry.get("identity_source", resolution["reason"]), "resource_identity": identity, "resource_resolution": resolution, "show_key": key, "display_name": tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or key,
                        "bangumi_display_name": bgm.get("name_cn") or bgm.get("name") or "",
                        "media_type": identity["media_type"] if identity else entry.get("media_type") or "tv",
                        "tmdb_series_id": identity["tmdb_series_id"] if identity else None,
@@ -339,7 +339,14 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
                            resource_identity=identity, resource_resolution=ResourceResolver().resolve([], known=identity))
             context["identity_revision"] = None
             context["identity_source"] = "explicit_user_mapping"
-            context["resource_resolution"]["reason"] = "manual_provider_confirmation"
+            from .preview import _combine_preview_resolutions
+            resolutions = context.setdefault("provider_resolutions", {})
+            resolutions["tmdb"] = ResourceResolver().resolve([], known=provider_binding_identity(
+                title=detail.get("title"), media_type="movie", tmdb_id=provider_id))
+            context["resource_resolution"] = _combine_preview_resolutions(resolutions, context["display_name"], "movie")
+            context["resource_resolution"]["identity"] = identity
+            if context["resource_resolution"]["status"] != "ambiguous":
+                context["resource_resolution"]["reason"] = "manual_provider_confirmation"
             updated = update_preview_session(row, snapshot)
             from .preview_view import build_preview_view
             return build_preview_view(snapshot, updated.id, updated.revision, updated.expires_at)
@@ -371,14 +378,21 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
     current[field] = provider_id
     context[field] = provider_id
     if provider == "bangumi":
-        context["bangumi_subject_ids"] = [provider_id]
-        context["mapping_hints"] = []
+        context["bangumi_subject_ids"] = sorted(set(context["bangumi_subject_ids"]) | {provider_id}
+            | ({context["resource_identity"]["bangumi_subject_id"]} if context.get("resource_identity") and context["resource_identity"]["bangumi_subject_id"] else set()))
         context["bangumi_display_name"] = data["bangumi"][str(provider_id)]["name"]
     context["resource_identity"] = current
-    context["resource_resolution"] = ResourceResolver().resolve([], known=current)
+    from .preview import _combine_preview_resolutions
+    resolutions = context.setdefault("provider_resolutions", {})
+    resolutions[provider] = ResourceResolver().resolve([], known=resource_identity(
+        context["media_type"], context["display_name"], **{field: provider_id}))
+    resolutions[provider]["reason"] = "manual_provider_confirmation"
+    context["resource_resolution"] = _combine_preview_resolutions(resolutions, context["display_name"], context["media_type"])
+    context["resource_resolution"]["identity"] = current
     context["identity_revision"] = None
     context["identity_source"] = "explicit_user_mapping"
-    context["resource_resolution"]["reason"] = "manual_provider_confirmation"
+    if context["resource_resolution"]["status"] != "ambiguous":
+        context["resource_resolution"]["reason"] = "manual_provider_confirmation"
     normalized = episode_catalog(data)
     for key in normalized:
         snapshot["episode_catalog"][key].update(normalized[key])

@@ -6,7 +6,7 @@ entries discovered through the mapping table.
 """
 
 from ...domain.episode_adapters import episode_catalog, parsed_episode_ref
-from ..resource_resolver import select_provider_result
+from .preview import _preview_provider_result, _combine_preview_resolutions
 
 import asyncio
 import logging
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # TMDB search helper
 # ═══════════════════════════════════════════════════════════════════════
 
-async def _search_tmdb_single(name: str) -> dict | None:
+async def _search_tmdb_single(name: str, resolutions: dict | None = None) -> dict | None:
     """Search in Chinese and resolve confirmed Animation TV candidates.
 
     Args:
@@ -48,7 +48,9 @@ async def _search_tmdb_single(name: str) -> dict | None:
         logger.warning("TMDB 未找到可确认的动画作品: %r", name)
         return None
 
-    first = select_provider_result("tmdb", results, name, media_type="tv")
+    first, resolution = _preview_provider_result("tmdb", results, name, media_type="tv")
+    if resolutions is not None:
+        resolutions["tmdb"] = resolution
     if first is None:
         return None
     return {
@@ -60,7 +62,7 @@ async def _search_tmdb_single(name: str) -> dict | None:
     }
 
 
-async def _search_tmdb_movie(name: str) -> dict | None:
+async def _search_tmdb_movie(name: str, resolutions: dict | None = None) -> dict | None:
     """Search TMDB for an Animation movie with Chinese-language results.
 
     Uses ``language="zh-CN"`` directly so the returned title is the
@@ -82,7 +84,9 @@ async def _search_tmdb_movie(name: str) -> dict | None:
         logger.warning("TMDB 未找到可确认的动画电影: %r", name)
         return None
 
-    first = select_provider_result("tmdb", results, name, media_type="movie")
+    first, resolution = _preview_provider_result("tmdb", results, name, media_type="movie")
+    if resolutions is not None:
+        resolutions["tmdb"] = resolution
     if first is None:
         return None
     return {
@@ -392,13 +396,14 @@ async def search_by_tmdb(
             torrent_name, name, file_count, "movie" if is_movie else "tv",
         )
 
+        resolutions = {}
         if is_movie:
             any_movie = True
             logger.debug(f'   🎬 搜索电影: "{name}"')
-            tmdb_info = await _search_tmdb_movie(name)
+            tmdb_info = await _search_tmdb_movie(name, resolutions)
         else:
             logger.debug(f'   🔎 搜索: "{name}"')
-            tmdb_info = await _search_tmdb_single(name)
+            tmdb_info = await _search_tmdb_single(name, resolutions)
 
         if tmdb_info is None:
             search_results[name] = {
@@ -406,6 +411,8 @@ async def search_by_tmdb(
                 "bangumi": None,
                 "media_type": "movie" if is_movie else None,
                 "map_entries": [],
+                "provider_resolutions": resolutions,
+                "resource_resolution": _combine_preview_resolutions(resolutions, name, "movie" if is_movie else "tv"),
             }
             continue
 
@@ -424,9 +431,9 @@ async def search_by_tmdb(
                 "torrent.tmdb_first movie_episode_fetch_skipped tmdb_id=%s map_entries=%d; movie branch only resolves mapping",
                 tmdb_id, len(map_entries),
             )
-            bangumi_ids = sorted({me["bangumi_id"] for me in map_entries})
-            from ..resource_resolver import unique_provider_id
-            bangumi_id = unique_provider_id(bangumi_ids)
+            selected, resolutions["bangumi"] = _preview_provider_result("bangumi",
+                [dict(e, id=e["bangumi_id"]) for e in map_entries], name, media_type="movie", source="existing_mapping")
+            bangumi_id = selected["id"] if selected else None
             bangumi_name = next((e["name"] for e in map_entries if e["bangumi_id"] == bangumi_id), "")
 
             logger.debug(f"   ✅ TMDB 电影 {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
@@ -439,35 +446,29 @@ async def search_by_tmdb(
                 "tmdb": tmdb_info,
                 "media_type": "movie",
                 "bangumi": {"id": bangumi_id, "name": bangumi_name} if bangumi_id else None,
-                "map_entries": map_entries,
+                "map_entries": [e for e in map_entries if e["bangumi_id"] == bangumi_id],
             }
         else:
             # TV: existing episode data fetch
             logger.debug(f"   ✅ TMDB {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
 
-            # Fetch episode data from all sources
-            all_data = await _fetch_all_provider_catalogs(tmdb_id)
-            if all_data.get("provider_fetch_errors"):
-                raise RuntimeError("preview_provider_fetch_failed")
-
-            # Merge into provider_catalogs
-            provider_catalogs["tmdb"].update(all_data["tmdb"])
-            provider_catalogs["bangumi"].update(all_data["bangumi"])
-            provider_catalogs["tvdb"].update(all_data["tvdb"])
-
-            map_entries = all_data["map_entries"]
-            bangumi_ids = sorted({me["bangumi_id"] for me in map_entries})
-            tvdb_ids = sorted({
-                me["tvdb_id"] for me in map_entries
-                if me.get("tvdb_id") is not None
-            })
-
-            search_results[name] = {
-                "tmdb": tmdb_info,
-                "bangumi_ids": bangumi_ids,
-                "tvdb_ids": tvdb_ids,
-                "map_entries": map_entries,
-            }
+            from .preview import _search_bangumi_for_name, _fetch_provider_catalogs
+            bgm = await _search_bangumi_for_name(name, tmdb_id, tmdb_info.get("original_name"))
+            resolutions["bangumi"] = bgm["resolution"]
+            entry = {"tmdb": tmdb_info, "bangumi": bgm["first"], "media_type": "tv"}
+            bid = (bgm["first"] or {}).get("id")
+            mapping = data_store.get_map_entry(bid) if bid else None
+            entry["map_entries"] = [dict(mapping, bangumi_id=bid)] if mapping else []
+            search_results[name] = entry
+            all_data = await _fetch_provider_catalogs({name: entry}, parsed_files)
+            for provider in ("tmdb", "bangumi", "tvdb"):
+                provider_catalogs[provider].update(all_data[provider])
+        entry = search_results[name]
+        entry["provider_resolutions"] = resolutions
+        combined = _combine_preview_resolutions(resolutions, name, "movie" if is_movie else "tv")
+        from ...domain.resource_adapters import search_entry_resolution
+        combined["identity"] = search_entry_resolution(entry, name)["identity"]
+        entry["resource_resolution"] = combined
 
 
     from ...domain.resource_adapters import search_entry_resolution

@@ -15,6 +15,7 @@ export interface ParsedFile {
 }
 
 export interface SearchEntry {
+  provider_resolutions?: Record<string, import("./episode").ResourceResolution>;
   resource_resolution: import("./episode").ResourceResolution;
   resource_identity: import('./episode').ResourceIdentity | null;
   display_name: string;

@@ -84,8 +84,8 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
 
   // ── Handlers ──
 
-  const handleAddTmdb = async () => {
-    const id = Number(tmdbInput.trim());
+  const handleAddTmdb = async (candidateId?: number) => {
+    const id = candidateId ?? Number(tmdbInput.trim());
     if (!id || isNaN(id)) { setTmdbError('Invalid ID'); return; }
     setTmdbLoading(true);
     setTmdbError('');
@@ -213,12 +213,24 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
             />
             <button
               className="px-4 bg-primary text-white text-sm font-bold rounded-lg hover:brightness-105 transition-all cursor-pointer disabled:opacity-50"
-              onClick={handleAddTmdb}
+              onClick={() => handleAddTmdb()}
               disabled={tmdbLoading}
             >
               {tmdbLoading ? '...' : 'Add'}
             </button>
           </div>
+          {targetShowKey && searchResults[targetShowKey]?.provider_resolutions?.tmdb?.status === 'ambiguous' && (
+            <div className="space-y-2 text-xs">
+              <p>{targetShowKey}: 需要确认 TMDB 资源</p>
+              {searchResults[targetShowKey].provider_resolutions?.tmdb.candidates.map((candidate) => (
+                <button key={candidate.provider_id} type="button"
+                  className="block w-full text-left rounded-lg border border-border p-2 hover:bg-muted disabled:opacity-50"
+                  disabled={tmdbLoading} onClick={() => handleAddTmdb(candidate.provider_id)}>
+                  确认 {candidate.title || candidate.original_title || 'TMDB'} ({candidate.provider_id})
+                </button>
+              ))}
+            </div>
+          )}
           {tmdbError && <div className="text-xs text-destructive mt-1">{tmdbError}</div>}
         </div>
 
@@ -234,6 +246,18 @@ export default function InfoCards({ searchResult, episodeDataOverride, onPreview
               <p key={id}>{name} ({id})</p>
             ))}
           </div>
+          {targetShowKey && searchResults[targetShowKey]?.provider_resolutions?.bangumi?.status === 'ambiguous' && (
+            <div className="space-y-2 text-xs">
+              <p>{targetShowKey}: 需要确认 Bangumi 资源</p>
+              {searchResults[targetShowKey].provider_resolutions?.bangumi.candidates.map((candidate) => (
+                <button key={candidate.provider_id} type="button"
+                  className="block w-full text-left rounded-lg border border-border p-2 hover:bg-muted disabled:opacity-50"
+                  disabled={bgmLoading} onClick={() => handleAddBangumi(candidate.provider_id)}>
+                  确认 {candidate.title || candidate.original_title || 'Bangumi'} ({candidate.provider_id})
+                </button>
+              ))}
+            </div>
+          )}
           <div className="relative flex gap-2" ref={bgmContainerRef}>
             <input
               type="text"

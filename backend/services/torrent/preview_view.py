@@ -5,6 +5,7 @@ from ...domain.preview import PreviewContextSnapshot, TorrentPreviewResponse, Pr
 
 def search_views(snapshot: PreviewContextSnapshot) -> dict[str, PreviewSearchEntry]:
     return {key: {
+        "provider_resolutions": copy.deepcopy(series.get("provider_resolutions", {})),
         "resource_identity": copy.deepcopy(series["resource_identity"]),
         "resource_resolution": copy.deepcopy(series["resource_resolution"]),
         "display_name": series["display_name"], "bangumi_display_name": series["bangumi_display_name"],

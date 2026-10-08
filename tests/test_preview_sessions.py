@@ -115,6 +115,42 @@ class PreviewSessionTests(unittest.TestCase):
         restored = service.restore_download_request(body)
         self.assertEqual([f['tmdb_show_name'] for f in restored['files']], ['A', 'B'])
 
+    def test_ambiguity_round_trip_and_manual_multiseason_confirmation(self):
+        import asyncio
+        from backend.services.torrent.preview import _preview_provider_result, _combine_preview_resolutions
+        _, tmdb = _preview_provider_result('tmdb', [{'id': 1, 'name': 'A'}], 'A')
+        _, bgm = _preview_provider_result('bangumi', [{'id': 2, 'name': 'Season 1'}, {'id': 4, 'name': 'Season 2'}], 'A')
+        resolutions = {'tmdb': tmdb, 'bangumi': bgm}
+        self.result['search_results']['A'].update(bangumi=None, provider_resolutions=resolutions,
+            resource_resolution=_combine_preview_resolutions(resolutions, 'A', 'tv'))
+        row = service.create_preview_session(self.result, str(self.source))
+        before = session_view(row)
+        self.assertEqual(before['search_results']['A']['provider_resolutions']['bangumi']['status'], 'ambiguous')
+        self.assertEqual(before['search_results']['A']['resource_identity']['tmdb_series_id'], 1)
+        self.assertIsNone(before['search_results']['A']['bangumi_subject_id'])
+        async def run():
+            for revision, bid in ((1, 2), (2, 4)):
+                with patch('backend.clients.bangumi.get_subject', AsyncMock(return_value={'name': str(bid)})), \
+                     patch('backend.clients.bangumi.get_episodes', AsyncMock(return_value=[{'id': bid * 10 + 1, 'sort': 0, 'ep': 0, 'type': 0}])):
+                    view = await service.augment_preview_session(row.id, revision, 'A', 'bangumi', bid)
+                self.assertEqual(view['revision'], revision + 1)
+                self.assertEqual(view['search_results']['B'], before['search_results']['B'])
+            self.assertEqual(view['search_results']['A']['bangumi_subject_ids'], [2, 4])
+            self.assertEqual(view['search_results']['A']['resource_identity']['bangumi_subject_id'], 4)
+            self.assertEqual(view['search_results']['A']['provider_resolutions']['bangumi']['status'], 'resolved')
+            self.assertIn('2', view['episode_catalog']['bangumi'])
+            self.assertIn('4', view['episode_catalog']['bangumi'])
+            request = {'preview_id': row.id, 'preview_revision': 3, 'files': [
+                {'file_id': service.file_id('a.mkv'), 'mapping': self.mapping}]}
+            restored = service.restore_download_request(request)
+            self.assertEqual(restored['files'][0]['episode_mapping']['bangumi']['subject_id'], 2)
+            self.assertEqual(restored['files'][0]['resource_identity']['bangumi_subject_id'], 4)
+            request['files'][0]['file_id'] = service.file_id('b.mkv')
+            with self.assertRaises(HTTPException) as error:
+                service.restore_download_request(request)
+            self.assertEqual(error.exception.detail, 'invalid_resource_identity')
+        asyncio.run(run())
+
     def test_augment_all_providers(self):
         import asyncio
         async def run():

@@ -26,6 +26,8 @@ class PreviewParsedFile(TypedDict):
 
 
 class SeriesContext(TypedDict):
+    # Each provider owns its unresolved evidence; aggregate identity keeps confirmed IDs.
+    provider_resolutions: NotRequired[dict[str, ResourceResolution]]
     identity_revision: NotRequired[int | None]
     identity_source: NotRequired[str]
     resource_identity: ResourceIdentity | None
@@ -94,6 +96,7 @@ class PreviewParsedFileView(TypedDict):
 
 
 class PreviewSearchEntry(TypedDict):
+    provider_resolutions: NotRequired[dict[str, ResourceResolution]]
     resource_identity: ResourceIdentity | None
     resource_resolution: ResourceResolution
     display_name: str
