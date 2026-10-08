@@ -8,7 +8,7 @@ import { createEpisodeMapping } from '@/lib/episodeAdapters';
  * (applies overrides on top of auto-computed matches).
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import type { MatchRow, SearchEntry, BgmEpisode, BgmEntry, TmdbSeason } from '@/types/matchTable';
 import { computeMatches, DuplicateEpisodeError, matchEpisodeTitles } from '@/lib/matchUtils';
 
@@ -99,9 +99,13 @@ export function useMatchOverrides(
 
   // ── Per-row overrides ──
   const [overridesByFile, setOverridesByFile] = useState<Record<string, MatchOverrides>>({});
-  const rowKey = (row: MatchRow) => [...data.parsed_files, ...(data.specials || [])]
-    .find(file => file.torrent_path === row.torrent_path)?.file_id || row.torrent_path;
-  const overrides = Object.fromEntries(initialRows.map((row, index) => [index, overridesByFile[rowKey(row)] ?? {}]));
+  const rowKey = useCallback((row: MatchRow) => [...data.parsed_files, ...(data.specials || [])]
+    .find(file => file.torrent_path === row.torrent_path)?.file_id || row.torrent_path,
+  [data.parsed_files, data.specials]);
+  // MatchTable reports rows to its parent in an effect. Keep this projection
+  // stable so a parent render does not trigger another rows notification.
+  const overrides = useMemo(() => Object.fromEntries(initialRows.map((row, index) =>
+    [index, overridesByFile[rowKey(row)] ?? {}])), [initialRows, overridesByFile, rowKey]);
   const setOverrides = (update: (previous: Record<number, MatchOverrides>) => Record<number, MatchOverrides>) => {
     setOverridesByFile(previous => {
       const indexed = Object.fromEntries(initialRows.map((row, index) => [index, previous[rowKey(row)] ?? {}]));

@@ -45,9 +45,9 @@ export default function TorrentPreview({
 }: TorrentPreviewProps) {
   const [sessionView, setSessionView] = useState(initialSearchResult);
   const searchResult = sessionView.preview_id === initialSearchResult.preview_id ? sessionView : initialSearchResult;
-  const mergedResult = augmentedEpData && searchResult
+  const mergedResult = useMemo(() => augmentedEpData && searchResult
     ? { ...searchResult, episode_catalog: augmentedEpData }
-    : searchResult;
+    : searchResult, [augmentedEpData, searchResult]);
 
   const [indexLoading, setIndexLoading] = useState(false);
   const [indexError, setIndexError] = useState('');

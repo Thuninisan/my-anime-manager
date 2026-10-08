@@ -39,6 +39,28 @@ function fixture({ parsedSeason = 1, parsedEpisode = 3, tmdbSeason = 1, tmdbEpis
     },
   });
 }
+// Parent notifications must settle: unchanged inputs retain the same rows reference.
+for (const manual of [false, true]) {
+  const stableData = fixture();
+  let previousRows;
+  let previousOverrides;
+  function StableRowsHarness() {
+    const [phase, setPhase] = React.useState(0);
+    const state = useMatchOverrides(stableData, stableData.search_results, stableData.episode_catalog);
+    if (phase === 0 && manual) state.handleBgmEpChange(0, 200, '201');
+    if (phase === 1) {
+      previousRows = state.rows;
+      previousOverrides = state.overrides;
+    }
+    if (phase === 2) {
+      assert.strictEqual(state.rows, previousRows);
+      assert.strictEqual(state.overrides, previousOverrides);
+    }
+    if (phase < 2) setPhase(phase + 1);
+    return null;
+  }
+  renderToString(React.createElement(StableRowsHarness));
+}
 // 1. Ordinary coordinates; identity belongs to selected episodes.
 let data = fixture();
 let row = computeMatches(data)[0];
