@@ -5,6 +5,8 @@ directly, then pull episode data from TMDB + related Bangumi + TVDB
 entries discovered through the mapping table.
 """
 
+from ...domain.episode_adapters import episode_catalog, parsed_episode_ref
+
 import asyncio
 import logging
 from collections import Counter
@@ -122,12 +124,16 @@ async def _fetch_bangumi_episodes(bgm_id: int) -> dict | None:
             logger.warning("torrent.tmdb_first bangumi_episodes_empty bangumi_id=%s", bgm_id)
     except Exception:
         logger.exception("torrent.tmdb_first bangumi_episodes_failed bangumi_id=%s", bgm_id)
-        eps = []
+        raise RuntimeError("preview_provider_fetch_failed: bangumi")
 
     clean_eps = []
     for ep in eps:
         entry = {
             "sort": ep.get("sort") or ep.get("ep", 0),
+            "ep": ep.get("ep"),
+            "raw_sort": ep.get("sort"),
+            "desc": ep.get("desc"),
+            "airDate": ep.get("airdate"),
             "id": ep["id"],
             "name": ep.get("name", ""),
         }
@@ -160,7 +166,7 @@ async def _fetch_all_episode_data(tmdb_id: int) -> dict:
     """
     # ── TMDB season map (kick off first — no dependency) ──
     tmdb_task = asyncio.create_task(
-        tmdb_service.build_season_episode_map(tmdb_id)
+        tmdb_service.build_season_episode_map(tmdb_id, strict=True)
     )
 
     # ── Map lookup (sync, fast) ──
@@ -241,7 +247,7 @@ async def _fetch_all_episode_data(tmdb_id: int) -> dict:
         tmdb_season_map = await tmdb_task
     except Exception as exc:
         logger.warning(f"   ⚠️ TMDB {tmdb_id} season map 获取失败: {exc}")
-        tmdb_season_map = {}
+        raise RuntimeError("preview_provider_fetch_failed: tmdb") from exc
 
     # ── Convert TMDB int keys → str for JSON compatibility ──
     tmdb_data: dict[str, dict] = {
@@ -249,6 +255,7 @@ async def _fetch_all_episode_data(tmdb_id: int) -> dict:
     }
 
     return {
+        "provider_fetch_errors": ["bangumi"] if len(bangumi_data) != len(bangumi_ids) else ["tvdb"] if len(tvdb_data) != len(tvdb_ids) else [],
         "tmdb": {str(tmdb_id): tmdb_data},
         "bangumi": bangumi_data,
         "tvdb": tvdb_data,
@@ -432,6 +439,8 @@ async def search_by_tmdb(
 
             # Fetch episode data from all sources
             all_data = await _fetch_all_episode_data(tmdb_id)
+            if all_data.get("provider_fetch_errors"):
+                raise RuntimeError("preview_provider_fetch_failed")
 
             # Merge into episode_data
             episode_data["tmdb"].update(all_data["tmdb"])
@@ -467,6 +476,7 @@ async def search_by_tmdb(
                 "season": p["season"],
                 "episode": p["episode"],
                 "parsed": p["parsed"],
+                "parsed_episode": parsed_episode_ref(p),
             }
             for p in parsed_files
         ],
@@ -475,4 +485,5 @@ async def search_by_tmdb(
         "show_names": show_names,
         "search_results": search_results,
         "episode_data": episode_data,
+        "episode_catalog": episode_catalog(episode_data),
     }

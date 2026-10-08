@@ -72,6 +72,6 @@ RSS 排除词、RSS 下载轮询间隔和资源采集轮询间隔也保存在同
 
 ## 日志与版本
 
-日志输出到终端和 `MAM_DATA_DIR/logs/YYYY-MM-DD.log`。`TZ` 控制日期时区；`MAM_LOG_RETENTION_DAYS`、`MAM_LOG_DIR`、`MAM_LOG_LEVEL` 可调整保留期、位置与级别。网页的 Updates 页可在 Docker 部署中检查并应用源码更新。
+日志输出到终端和 `MAM_DATA_DIR/logs/YYYY-MM-DD.log`，默认级别为 `DEBUG`。`INFO` 记录任务开始、文件处理结果和汇总；`DEBUG` 记录字幕复制/恢复分支、请求耗时与状态、排队、验证、替换和持久化检查点；`WARNING` 记录重试、业务失败和文件冲突；`ERROR` 记录文件系统、数据库或未预期的异常。FontInAss 日志统一包含 `fontinass.*` 事件名，并通过 `[task=...]` 和 `torrent=...` 关联复制、请求、重试及恢复流程，不记录字幕正文或服务/代理凭据。`httpx` 和 `httpcore` 保持 `WARNING`，避免第三方网络细节输出敏感地址。`TZ` 控制日期时区；`MAM_LOG_RETENTION_DAYS`、`MAM_LOG_DIR`、`MAM_LOG_LEVEL` 可调整保留期、位置与级别，例如 `MAM_LOG_LEVEL=INFO` 可减少诊断输出。级别在应用启动时读取，调整后需重启。网页的 Updates 页可在 Docker 部署中检查并应用源码更新。
 
 版本由 `python scripts/bump_version.py X.Y.Z` 同步到后端、Python 包、前端和 Docker 镜像标签。项目在 `pyproject.toml` 中声明 ISC 许可。

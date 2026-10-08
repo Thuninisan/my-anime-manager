@@ -1,3 +1,4 @@
+import { normalizeTorrentPreview } from '@/lib/episodeAdapters';
 import { apiFetch } from './client';
 
 export interface Resource {
@@ -55,7 +56,7 @@ export const setResourcePollInterval = async (minutes: number) => {
   });
   return collectionStatus();
 };
-export const previewResourceTorrent = (id: number) => apiFetch<any>(`/api/resources/${id}/torrent-preview`, { method: 'POST' });
+export const previewResourceTorrent = async (id: number) => normalizeTorrentPreview(await apiFetch<unknown>(`/api/resources/${id}/torrent-preview`, { method: 'POST' }));
 export interface ResourceSource { name: string; rss_url: string; downloadtag: { tag: string; attribute: string | null }; index_type: 'tmdb' | 'tvdb' }
 export const listResourceSources = () => apiFetch<ResourceSource[]>('/api/resources/sources');
 export const addResourceSource = (source: ResourceSource) => apiFetch<ResourceSource>('/api/resources/sources', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(source) });

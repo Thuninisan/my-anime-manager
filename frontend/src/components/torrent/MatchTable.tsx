@@ -1,10 +1,11 @@
+import type { TorrentPreviewResponse } from '@/types/preview';
 /** Matching logic: parsed_files → search_results → episode_data → table.
 
    1. parsed_file.show_name → search_results[key]
-   2. bangumi.id → episode_data.bangumi[id].episodes (sorted by sort)
-   3. parsed_file.episode → positional index → bangumi episode
-   4. bangumi ep .name → fuzzy match TMDB episodes across all seasons
-   5. Return TMDB season + episode
+   2. parsed_file.parsed → provider candidates from EpisodeCatalog
+   3. Selected matching strategy preserves provider numbering and identity
+   4. All file coordinates live in MatchRow.mapping
+   5. Manual dropdown overrides update the same canonical mapping
 
    BGM Entry / BGM Name columns have dropdowns populated from
    search_results + episode_data so the user can override the
@@ -37,7 +38,7 @@ export type { MatchRow, BgmEpisode } from '@/types/matchTable';
 export { computeMatches } from '@/lib/matchUtils';
 
 export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, onAssociationsChange, subtitleFilter = 'all' }: {
-  data: any;
+  data: TorrentPreviewResponse;
   subtitleFilter?: SubtitleFilter;
   onAssociationsChange?: (value: SubtitleAssociations) => void;
   onRowsComputed?: (rows: MatchRow[]) => void;
@@ -127,9 +128,9 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
           </div>
           <div className="space-y-3">
             {movieRows.filter(visible).map((r) => {
-              const i = (r as any)._idx as number;
-              const currentEntryId = r.bgm_entry_id ?? 0;
-              const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
+              const i = r._idx;
+              const currentEntryId = r.mapping.bangumi.subject_id ?? 0;
+              const currentEps = r.mapping.bangumi.subject_id ? getBgmEpisodes(r.mapping.bangumi.subject_id) : [];
               return (
                 <MappingCard
                   key={i} row={r} rowIndex={i} variant="movie"
@@ -181,20 +182,20 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
           {batchProgress && <p className="text-xs text-slate-500 mb-3 -mt-1">{batchProgress}</p>}
           <div className="space-y-3">
             {tvRows.filter(visible).map((r) => {
-              const i = (r as any)._idx as number;
-              const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
-              const currentEntryId = r.bgm_entry_id ?? 0;
+              const i = r._idx;
+              const currentEps = r.mapping.bangumi.subject_id ? getBgmEpisodes(r.mapping.bangumi.subject_id) : [];
+              const currentEntryId = r.mapping.bangumi.subject_id ?? 0;
 
               // TMDB options
               const { seasons: tmdbSeasons, opts: tmdbSeasonOpts } =
                 buildTmdbSeasonOptions(r.show_name, searchResults, episodeData);
-              const tmdbEpOpts = buildTmdbEpOptions(r.tmdb_season, tmdbSeasons);
+              const tmdbEpOpts = buildTmdbEpOptions(r.mapping.tmdb.season_number, tmdbSeasons);
 
               // TVDB options
               const { seasons: tvdbSeasons, opts: tvdbSeasonOpts } =
                 buildTvdbSeasonOptions(currentEntryId, r.show_name, searchResults, episodeData, overrides[i]?.tvdbShowId);
               const { opts: tvdbEpOpts, title: tvdbEpTitle } =
-                buildTvdbEpOptions(r.tvdb_season, tvdbSeasons);
+                buildTvdbEpOptions(r.mapping.tvdb.season_number, tvdbSeasons);
 
               return (
                 <MappingCard
@@ -204,10 +205,10 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
                   {...subProps(r)}
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps} currentEntryId={currentEntryId}
-                  tmdbSeasonOptions={tmdbSeasonOpts} tmdbSeasonValue={r.tmdb_season ?? ''}
-                  tmdbEpOptions={tmdbEpOpts} tmdbEpValue={r.tmdb_ep ?? ''} tmdbEpTitle={r.tmdb_ep_name}
-                  tvdbSeasonOptions={tvdbSeasonOpts} tvdbSeasonValue={r.tvdb_season ?? ''}
-                  tvdbEpOptions={tvdbEpOpts} tvdbEpValue={r.tvdb_ep ?? ''} tvdbEpTitle={tvdbEpTitle}
+                  tmdbSeasonOptions={tmdbSeasonOpts} tmdbSeasonValue={r.mapping.tmdb.season_number ?? ''}
+                  tmdbEpOptions={tmdbEpOpts} tmdbEpValue={r.mapping.tmdb.episode_number ?? ''} tmdbEpTitle={r.tmdb_ep_name}
+                  tvdbSeasonOptions={tvdbSeasonOpts} tvdbSeasonValue={r.mapping.tvdb.season_number ?? ''}
+                  tvdbEpOptions={tvdbEpOpts} tvdbEpValue={r.mapping.tvdb.episode_number ?? ''} tvdbEpTitle={tvdbEpTitle}
                   onBgmEntryChange={(v) => handleBgmEntryChange(i, v)}
                   onBgmEpChange={(v) => handleBgmEpChange(i, currentEntryId, v)}
                   onTmdbSeasonChange={(v) => handleTmdbSeasonChange(i, r.show_name, v)}
@@ -236,32 +237,32 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
           </div>
           <div className="space-y-3">
             {spRows.filter(visible).map((r) => {
-              const i = (r as any)._idx as number;
-              const currentEps = r.bgm_entry_id ? getBgmEpisodes(r.bgm_entry_id) : [];
-              const currentEntryId = r.bgm_entry_id ?? 0;
+              const i = r._idx;
+              const currentEps = r.mapping.bangumi.subject_id ? getBgmEpisodes(r.mapping.bangumi.subject_id) : [];
+              const currentEntryId = r.mapping.bangumi.subject_id ?? 0;
               const ov = overrides[i];
 
               // SP TMDB options (aggregate all shows)
               const tmdbSeasonOpts = buildSpSeasonOptions(episodeData, searchResults, 'tmdb');
               const tmdbSeasonVal = ov?.tmdbShowId && ov.tmdbSeason != null
-                ? `${ov.tmdbShowId}:${ov.tmdbSeason}` : (r.tmdb_season ?? '');
+                ? `${ov.tmdbShowId}:${ov.tmdbSeason}` : (r.mapping.tmdb.season_number ?? '');
 
               const lookupTmdbId = ov?.tmdbShowId ?? searchResults[r.show_name]?.tmdb?.id;
               const lookupSeasons: Record<string, TmdbSeason> =
                 (lookupTmdbId && episodeData.tmdb?.[String(lookupTmdbId)]) || {};
               const spTmdbSeasons: Record<string, TmdbSeason> =
                 Object.keys(lookupSeasons).length > 0 ? lookupSeasons : mergeAllTmdbSeasons(episodeData);
-              const tmdbEpOpts = buildTmdbEpOptions(r.tmdb_season, spTmdbSeasons);
+              const tmdbEpOpts = buildTmdbEpOptions(r.mapping.tmdb.season_number, spTmdbSeasons);
 
               // SP TVDB options (aggregate all shows)
               const tvdbSeasonOpts = buildSpSeasonOptions(episodeData, searchResults, 'tvdb');
               const tvdbSeasonVal = ov?.tvdbShowId && ov.tvdbSeason != null
-                ? `${ov.tvdbShowId}:${ov.tvdbSeason}` : (r.tvdb_season ?? '');
+                ? `${ov.tvdbShowId}:${ov.tvdbSeason}` : (r.mapping.tvdb.season_number ?? '');
 
               const { seasons: spTvdbSeasons, opts: _tvdbSOpts } =
                 buildTvdbSeasonOptions(currentEntryId, r.show_name, searchResults, episodeData, ov?.tvdbShowId);
               const { opts: tvdbEpOpts, title: tvdbEpTitle } =
-                buildTvdbEpOptions(r.tvdb_season, spTvdbSeasons);
+                buildTvdbEpOptions(r.mapping.tvdb.season_number, spTvdbSeasons);
 
               return (
                 <MappingCard
@@ -272,9 +273,9 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
                   bgmEntryOptions={bgmEntryOptions}
                   currentEps={currentEps} currentEntryId={currentEntryId}
                   tmdbSeasonOptions={tmdbSeasonOpts} tmdbSeasonValue={tmdbSeasonVal}
-                  tmdbEpOptions={tmdbEpOpts} tmdbEpValue={r.tmdb_ep ?? ''} tmdbEpTitle={r.tmdb_ep_name}
+                  tmdbEpOptions={tmdbEpOpts} tmdbEpValue={r.mapping.tmdb.episode_number ?? ''} tmdbEpTitle={r.tmdb_ep_name}
                   tvdbSeasonOptions={tvdbSeasonOpts} tvdbSeasonValue={tvdbSeasonVal}
-                  tvdbEpOptions={tvdbEpOpts} tvdbEpValue={r.tvdb_ep ?? ''} tvdbEpTitle={tvdbEpTitle}
+                  tvdbEpOptions={tvdbEpOpts} tvdbEpValue={r.mapping.tvdb.episode_number ?? ''} tvdbEpTitle={tvdbEpTitle}
                   onBgmEntryChange={(v) => handleBgmEntryChange(i, v)}
                   onBgmEpChange={(v) => handleBgmEpChange(i, currentEntryId, v)}
                   onTmdbSeasonChange={(v) => handleTmdbSeasonChange(i, r.show_name, v)}

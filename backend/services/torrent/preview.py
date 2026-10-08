@@ -11,6 +11,8 @@ Flow:
   5. Organise into {default, backup} per source
 """
 
+from ...domain.episode_adapters import episode_catalog, parsed_episode_ref
+
 import logging
 import asyncio
 import re
@@ -701,7 +703,7 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                 logger.debug(f"   TMDB movie {tid}: 跳过章节获取（前端名称匹配）")
                 continue
             else:
-                season_map = await tmdb_service.build_season_episode_map(tid)
+                season_map = await tmdb_service.build_season_episode_map(tid, strict=True)
                 # TMDB now uses language=ja as the base, so episode names are
                 # already Japanese originals — no second fetch needed.
                 # Include all fields needed for downstream NFO generation.
@@ -718,6 +720,7 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                             "runtime": ep.get("runtime", 0),
                             "stillPath": ep.get("stillPath", ""),
                             "voteAverage": ep.get("voteAverage", 0),
+                            "voteCount": ep.get("voteCount"),
                             "directors": ep.get("directors", []),
                             "writers": ep.get("writers", []),
                             "guestStars": ep.get("guestStars", []),
@@ -731,7 +734,7 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                 logger.debug(f"   TMDB {tid}: {len(season_map)} 季, {total_eps} 集")
         except Exception as exc:
             logger.warning(f"   ⚠️ TMDB {tid} 剧集获取失败: {exc}")
-            tmdb_data[str(tid)] = {}
+            raise RuntimeError("preview_provider_fetch_failed: tmdb") from exc
 
     # ── Fetch Bangumi episode lists (serial via semaphore) ──
     bangumi_data: dict = {}
@@ -756,14 +759,18 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                 ]
             except Exception as exc:
                 logger.warning(f"   ⚠️ Bangumi {bid} 剧集获取失败: {exc}")
-                eps = []
+                raise RuntimeError("preview_provider_fetch_failed: bangumi") from exc
 
         # Pick only sort + id + name + name_cn for each episode
         clean_eps = []
         for ep in eps:
             entry = {
                 "sort": ep.get("sort") or ep.get("ep", 0),
-                "id": ep["id"],
+                "ep": ep.get("ep"),
+                "raw_sort": ep.get("sort"),
+                "desc": ep.get("desc"),
+                "airDate": ep.get("airdate"),
+                    "id": ep["id"],
                 "name": ep.get("name", ""),
             }
             cn = ep.get("name_cn")
@@ -778,7 +785,7 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
     results = await asyncio.gather(*tasks, return_exceptions=True)
     for r in results:
         if isinstance(r, BaseException):
-            logger.warning(f"   ⚠️ Bangumi fetch 异常: {r}")
+            raise RuntimeError("preview_provider_fetch_failed: bangumi") from r
         else:
             bid_str, data = r
             bangumi_data[bid_str] = data
@@ -811,6 +818,7 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
             logger.debug(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
         except Exception as exc:
             logger.warning(f"   ⚠️ 续集 {sequel_bid} 剧集获取失败: {exc}")
+            raise RuntimeError("preview_provider_fetch_failed: bangumi") from exc
 
     # ── OVA/OAD special expansion: fetch 番外篇 episodes ──
     # When torrent contains OVA/OAD files, automatically pull episode data
@@ -854,6 +862,7 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
                     logger.debug(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
                 except Exception as exc:
                     logger.warning(f"   ⚠️ 番外篇 {special_bid} 剧集获取失败: {exc}")
+                    raise RuntimeError("preview_provider_fetch_failed: bangumi") from exc
 
     # ── Fetch TVDB episode data (via map entries from Bangumi IDs) ──
     tvdb_data: dict = {}
@@ -877,10 +886,12 @@ async def _fetch_episode_data(search_results: dict, parsed_files: list[dict]) ->
         tvdb_results = await asyncio.gather(*tvdb_tasks, return_exceptions=True)
         for r in tvdb_results:
             if isinstance(r, BaseException):
-                logger.warning(f"   ⚠️ TVDB fetch 异常: {r}")
+                raise RuntimeError("preview_provider_fetch_failed: tvdb") from r
             elif r[1] is not None:
                 tid_str, data = r
                 tvdb_data[tid_str] = data
+            else:
+                raise RuntimeError("preview_provider_fetch_failed: tvdb")
 
     return {
         "tmdb": tmdb_data,
@@ -1070,6 +1081,8 @@ async def parse_and_search(torrent_path: str) -> dict:
         {
             "file_name": r["file_name"],
             "torrent_path": r["torrent_path"],
+            "show_name": r.get("show_name", ""),
+            "parsed_episode": parsed_episode_ref(r),
         }
         for r in parsed_results if r["is_extra"]
     ]
@@ -1089,6 +1102,7 @@ async def parse_and_search(torrent_path: str) -> dict:
                 "season": p["season"],
                 "episode": p["episode"],
                 "parsed": p["parsed"],
+                "parsed_episode": parsed_episode_ref(p),
             }
             for p in parsed_files
         ],
@@ -1098,6 +1112,7 @@ async def parse_and_search(torrent_path: str) -> dict:
         "search_results": search_results,
         "search_results_backup": search_results_backup,
         "episode_data": episode_data,
+        "episode_catalog": episode_catalog(episode_data),
     }
 
 

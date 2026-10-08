@@ -1,3 +1,5 @@
+import type { TorrentPreviewResponse } from '@/types/preview';
+import type { EpisodeCatalog } from '@/types/episode';
 import { useMemo, useState, useCallback } from 'react';
 import MatchTable, { type MatchRow } from '@/components/torrent/MatchTable';
 import { subtitleStatus, subtitleDestinationSuffix, type SubtitleAssociations, type SubtitleFilter } from '@/lib/subtitleMatching';
@@ -6,15 +8,15 @@ import { submitDownload, type DownloadFileEntry, type UploadedSubEntry } from '@
 
 interface TorrentPreviewProps {
   replaceBangumiId?: number;
-  searchResult: any;
-  augmentedEpData: any;
-  onEpisodeDataChange: (data: any) => void;
+  searchResult: TorrentPreviewResponse;
+  augmentedEpData: EpisodeCatalog | null;
+  onEpisodeDataChange: (data: EpisodeCatalog) => void;
   onClose: () => void;
   onTorrentAdded?: () => void;
 }
 
 /** Compute stats from the parsed + matched data. */
-function computeStats(searchResult: any) {
+function computeStats(searchResult: TorrentPreviewResponse) {
   const parsedFiles = searchResult?.parsed_files || [];
   const skippedFiles = searchResult?.skipped_files || [];
   const total = parsedFiles.length;
@@ -33,38 +35,16 @@ function computeStats(searchResult: any) {
   };
 }
 
-/** Extract tmdb show name from search results for a given show_name. */
-function getTmdbShowName(searchResult: any, showName: string): string {
-  const entry = searchResult?.search_results?.[showName];
-  return entry?.tmdb?.name || showName;
-}
-
-/** Extract bangumi show name — prefer Chinese (name_cn), fall back to Japanese (name), then row label. */
-function getBangumiShowName(searchResult: any, row: MatchRow): string {
-  // 1. search_results (initial search hits)
-  for (const entry of Object.values(searchResult?.search_results || {}) as any[]) {
-    if (entry?.bangumi?.id === row.bgm_entry_id) {
-      return entry.bangumi.name_cn || entry.bangumi.name || row.bgm_entry;
-    }
-  }
-  // 2. episode_data.bangumi (sequel chain / side stories — augmented by InfoCards)
-  const bgmData: Record<string, any> = searchResult?.episode_data?.bangumi || {};
-  const bgmEntry = bgmData[String(row.bgm_entry_id)];
-  if (bgmEntry?.name) {
-    return bgmEntry.name;  // already Chinese (episode_data uses name_cn as name)
-  }
-  // 3. Fallback: row label
-  return row.bgm_entry || 'Unknown';
-}
-
 export default function TorrentPreview({
   replaceBangumiId,
-  searchResult,
+  searchResult: initialSearchResult,
   augmentedEpData,
   onEpisodeDataChange,
   onClose,
   onTorrentAdded,
 }: TorrentPreviewProps) {
+  const [sessionView, setSessionView] = useState(initialSearchResult);
+  const searchResult = sessionView.preview_id === initialSearchResult.preview_id ? sessionView : initialSearchResult;
   const mergedResult = augmentedEpData && searchResult
     ? { ...searchResult, episode_data: augmentedEpData }
     : searchResult;
@@ -74,7 +54,7 @@ export default function TorrentPreview({
   const parsedFiles = searchResult?.parsed_files || [];
   const skippedFiles = searchResult?.skipped_files || [];
   const movieCount = useMemo(
-    () => parsedFiles.filter((pf: any) => {
+    () => parsedFiles.filter((pf) => {
       const entry = searchResult?.search_results?.[pf.show_name];
       return entry?.media_type === 'movie';
     }).length,
@@ -122,34 +102,17 @@ export default function TorrentPreview({
         const selected = associations[row.torrent_path]?.selected || [];
         return subtitleDestinationSuffix(selected.find(s => s.id === id)!, selected);
       };
+      const requiredFileId = (path: string): string => {
+        const file = [...searchResult.parsed_files, ...(searchResult.specials || []), ...(searchResult.subtitle_files || [])]
+          .find(file => file.torrent_path === path);
+        if (!file?.file_id) throw new Error('Preview file identity missing; please preview again.');
+        return file.file_id;
+      };
       for (const row of matchedRows) {
-        const tmdbName = getTmdbShowName(searchResult, row.show_name);
-        const bgmName = getBangumiShowName(searchResult, row);
-
-        // Common NFO metadata for this row
-        const nfoMeta = {
-          bangumi_id: row.bgm_entry_id ?? 0,
-          bangumi_ep_id: row.bgm_ep_id,
-          tmdb_season: row.tmdb_season ?? 0,
-          tmdb_episode: row.tmdb_ep ?? 0,
-          tvdb_season: row.tvdb_season,
-          tvdb_episode: row.tvdb_ep,
-        };
-
-        // Video file
-        files.push({
-          torrent_path: row.torrent_path,
-          is_subtitle: false,
-          tmdb_show_name: tmdbName,
-          bangumi_show_name: bgmName,
-          bangumi_sort: row.bgm_sort ?? row.src_episode,
-          ...nfoMeta,
-        });
-
+        files.push({ file_id: requiredFileId(row.torrent_path), mapping: row.mapping });
         for (const sub of associations[row.torrent_path]?.selected || []) {
           if (sub.source !== 'torrent') continue;
-          files.push({ torrent_path: sub.path, is_subtitle: true, subtitle_suffix: subtitleSuffix(row, sub.id), tmdb_show_name: tmdbName,
-            bangumi_show_name: bgmName, bangumi_sort: row.bgm_sort ?? row.src_episode, ...nfoMeta });
+          files.push({ file_id: requiredFileId(sub.path), mapping: row.mapping, subtitle_suffix: subtitleSuffix(row, sub.id) });
         }
       }
 
@@ -161,40 +124,28 @@ export default function TorrentPreview({
         if (matchingRow) {
           uploadedSubs.push({
             subtitle_suffix: subtitleSuffix(matchingRow, `upload:${usub.storedFilename}`),
+            file_id: requiredFileId(matchingRow.torrent_path),
             stored_filename: usub.storedFilename,
             original_filename: usub.originalFilename,
-            tmdb_show_name: getTmdbShowName(searchResult, matchingRow.show_name),
-            bangumi_show_name: getBangumiShowName(searchResult, matchingRow),
-            bangumi_sort: matchingRow.bgm_sort ?? matchingRow.src_episode,
-            bangumi_id: matchingRow.bgm_entry_id ?? 0,
-            bangumi_ep_id: matchingRow.bgm_ep_id,
-            tmdb_season: matchingRow.tmdb_season ?? 0,
-            tmdb_episode: matchingRow.tmdb_ep ?? 0,
-            tvdb_season: matchingRow.tvdb_season,
-            tvdb_episode: matchingRow.tvdb_ep,
+            mapping: matchingRow.mapping,
           });
         }
       }
 
       const result = await submitDownload({
+        preview_id: searchResult.preview_id,
+        preview_revision: searchResult.revision,
         replace_bangumi_id: replaceBangumiId,
         resource_id: searchResult.resource_id,
-        torrent_path: searchResult.resource_id ? '' : searchResult.torrent_path,
-        torrent_name: searchResult.torrent_name,
         files,
         uploaded_subtitles: uploadedSubs,
-        // Pass through the parse-and-search metadata so the backend
-        // can generate full NFO + images before resuming the torrent.
-        preview_data: {
-          search_results: searchResult.search_results,
-          episode_data: searchResult.episode_data,
-        },
+
       });
 
       setDownloadResult(result.message);
       onTorrentAdded?.();
-    } catch (err: any) {
-      setDownloadError(err.message || 'Download failed');
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : 'Download failed');
     } finally {
       setDownloading(false);
     }
@@ -278,7 +229,7 @@ export default function TorrentPreview({
             <p className="font-semibold">资源预识别的 Bangumi 候选</p>
             <p className="mt-1 text-muted-foreground">请在下方逐文件确认剧集对应关系。</p>
             <ul className="mt-2 flex flex-wrap gap-2">
-              {searchResult.preprocessed_candidates.map((candidate: any) => (
+              {searchResult.preprocessed_candidates?.map((candidate) => (
                 <li key={`${candidate.bangumi_id}-${candidate.index_season}-${candidate.media_type}`} className="rounded-md border border-border px-2 py-1">
                   Bangumi {candidate.bangumi_id} · {candidate.media_type === 'MOVIE' ? '电影' : `第 ${candidate.index_season} 季`} · {candidate.reason}
                 </li>
@@ -289,12 +240,13 @@ export default function TorrentPreview({
         <InfoCards
           searchResult={searchResult}
           episodeDataOverride={mergedResult.episode_data}
+          onPreviewChange={view => { setSessionView(view); onEpisodeDataChange(view.episode_data); }}
           onEpisodeDataChange={onEpisodeDataChange}
         />
 
         {/* ── Match tables ── */}
         <MatchTable
-          key={searchResult.resource_id ?? searchResult.torrent_path ?? searchResult.torrent_name}
+          key={searchResult.preview_id}
           data={mergedResult}
           subtitleFilter={subtitleFilter}
           onAssociationsChange={setAssociations}

@@ -5,7 +5,7 @@ Fallback order
   2. TVDB  — flat episode list in ``zho``
   3. Bangumi → DeepSeek  — Japanese ``desc`` field translated to Chinese
 
-All tiers make a fresh API call on every invocation (no in-process caches).
+MetadataContext reuses previously acquired provider data within a batch.
 """
 
 import logging
@@ -32,9 +32,11 @@ async def resolve_episode_plot(
     tmdb_ep_num: int = 0,
     bangumi_id: int = 0,
     bangumi_sort: int = 0,
+    bangumi_episode_id: int | None = None,
     context: str = "episode.nfo",
     selected_source: list[str] | None = None,
     metadata_ctx=None,
+    episode_mapping=None,
 ) -> str:
     """Return the best available Chinese episode plot.
 
@@ -44,13 +46,20 @@ async def resolve_episode_plot(
     Returns ``""`` when no tier provides a Chinese plot.
     """
     foreign_plots: list[tuple[str, str]] = []
+    preview_candidates = None
+    if metadata_ctx is not None and metadata_ctx.preview_snapshot is not None and episode_mapping is not None:
+        from ..torrent.preview_session import metadata_candidates
+        preview_candidates = metadata_candidates(metadata_ctx.preview_snapshot, episode_mapping)
 
     def step(message: str) -> None:
         logger.info("NFO [%s 简介] %s", context, message)
 
     # ── Tier 1: TMDB zh-CN ─────────────────────────────────────────
-    if tmdb_id and tmdb_season is not None and tmdb_ep_num:
-        if metadata_ctx is None:
+    if tmdb_id and tmdb_season is not None and tmdb_ep_num is not None:
+        if preview_candidates is not None:
+            candidate = preview_candidates["tmdb"]
+            plot = (candidate["plot"] or "").strip() if candidate else ""
+        elif metadata_ctx is None:
             plot = await _try_tmdb_zh(tmdb_id, tmdb_season, tmdb_ep_num)
         else:
             plot = ""
@@ -75,8 +84,17 @@ async def resolve_episode_plot(
         step("TMDB zh-CN：缺少映射，跳过")
 
     # ── Tier 2: TVDB Chinese ───────────────────────────────────────
-    if tvdb_id and tvdb_season is not None and tvdb_ep:
-        if metadata_ctx is None:
+    if tvdb_id and tvdb_season is not None and tvdb_ep is not None:
+        if preview_candidates is not None:
+            plot = ""
+            candidate = preview_candidates["tvdb"]
+            if candidate is not None and candidate["provider_episode_id"] is not None:
+                try:
+                    translated = await metadata_ctx.get_tvdb_episode_translation(candidate["provider_episode_id"])
+                    plot = (translated.get("overview") or "").strip()
+                except Exception:
+                    logger.warning("TVDB selected episode translation failed", exc_info=True)
+        elif metadata_ctx is None:
             plot = await _try_tvdb_zh(tvdb_id, tvdb_season, tvdb_ep)
         else:
             plot = ""
@@ -100,8 +118,12 @@ async def resolve_episode_plot(
         step("TVDB zho：缺少映射，跳过")
 
     # ── Tier 3: Bangumi → DeepSeek translate ───────────────────────
-    if bangumi_id and bangumi_sort:
-        plot = await _try_bangumi_translate(bangumi_id, bangumi_sort, metadata_ctx=metadata_ctx)
+    if bangumi_id and (bangumi_sort is not None or bangumi_episode_id is not None):
+        if preview_candidates is not None:
+            candidate = preview_candidates["bangumi"]
+            plot = await translate_ja_to_zh(candidate["plot"]) if candidate and candidate["plot"] else ""
+        else:
+            plot = await _try_bangumi_translate(bangumi_id, bangumi_sort, metadata_ctx=metadata_ctx, episode_id=bangumi_episode_id)
         if plot:
             if selected_source is not None:
                 selected_source.append("Bangumi → DeepSeek")
@@ -212,7 +234,7 @@ async def _try_tvdb_zh(series_id: int, season: int, ep_num: int) -> str:
     return ""
 
 
-async def _try_bangumi_translate(bangumi_id: int, sort: int, metadata_ctx=None) -> str:
+async def _try_bangumi_translate(bangumi_id: int, sort: int, metadata_ctx=None, episode_id: int | None = None) -> str:
     """Extract the Japanese ``desc`` from a cached Bangumi episode and
     translate it to Chinese via DeepSeek."""
     try:
@@ -224,7 +246,7 @@ async def _try_bangumi_translate(bangumi_id: int, sort: int, metadata_ctx=None) 
         return ""
 
     for ep in eps:
-        if (ep.get("sort") or ep.get("ep", 0)) == sort:
+        if (ep.get("id") == episode_id if episode_id is not None else ep.get("raw_sort", ep.get("sort")) == sort):
             desc = (ep.get("desc") or "").strip()
             if desc:
                 return await translate_ja_to_zh(desc)

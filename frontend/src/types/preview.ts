@@ -179,6 +179,7 @@ export interface DownloadHistoryResponse {
 
 /* Config */
 export interface AppConfig {
+  PREVIEW_SESSION_TTL_HOURS: number;
   RSS_EXCLUDE_PATTERNS: string[];
   RSS_POLL_INTERVAL_MIN: number;
   RESOURCE_POLL_INTERVAL_MIN: number;
@@ -204,4 +205,24 @@ export interface AppConfig {
   FONTINASS_URL: string;
   FONTINASS_TIMEOUT: number;
   RSS_PATH_TEMPLATE: string;
+}
+
+/** Normalized preview used by the torrent UI; raw wire payloads stop in adapters. */
+export interface TorrentPreviewResponse {
+  series?: { show_key: string; display_name: string; tmdb_series_id: number | null;
+    tvdb_series_id: number | null; bangumi_subject_id: number | null }[];
+  preview_id: string;
+  revision: number;
+  expires_at: string;
+  subtitle_files?: import('./matchTable').ParsedFile[];
+  parsed_files: import('./matchTable').ParsedFile[];
+  search_results: Record<string, import('./matchTable').SearchEntry>;
+  episode_data: import('./episode').EpisodeCatalog;
+  index?: 'tmdb' | 'tvdb';
+  specials?: import('./matchTable').ParsedFile[];
+  skipped_files?: { file_name: string; reason?: string; torrent_path?: string }[];
+  subtitles?: string[]; torrent_name: string; torrent_path: string;
+  error?: string;
+  resource_id?: number;
+  preprocessed_candidates?: { bangumi_id: number; index_season: number; media_type: string; reason: string }[];
 }

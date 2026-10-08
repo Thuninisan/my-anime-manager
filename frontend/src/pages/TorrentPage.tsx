@@ -1,3 +1,5 @@
+import type { TorrentPreviewResponse } from '@/types/preview';
+import type { EpisodeCatalog } from '@/types/episode';
 import { useCallback, useEffect, useState } from 'react';
 import TorrentUpload from '@/components/torrent/TorrentUpload';
 import TorrentPreview from '@/components/torrent/TorrentPreview';
@@ -11,8 +13,8 @@ export default function TorrentPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const replacement = location.state as { replaceBangumiId?: number; replaceName?: string; resourceId?: number } | null;
-  const [searchResult, setSearchResult] = useState<any>(null);
-  const [augmentedEpData, setAugmentedEpData] = useState<any>(null);
+  const [searchResult, setSearchResult] = useState<TorrentPreviewResponse | null>(null);
+  const [augmentedEpData, setAugmentedEpData] = useState<EpisodeCatalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resourceLoading, setResourceLoading] = useState(false);
   const [collections, setCollections] = useState<TorrentCollection[]>([]);
@@ -62,8 +64,8 @@ export default function TorrentPage() {
       const result = await parseAndSearchTorrent(file);
       setSearchResult(result);
       setAugmentedEpData(null);
-    } catch (err: any) {
-      setError(err.message || 'Unknown error');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unknown error');
       setSearchResult(null);
     }
   };

@@ -4,6 +4,7 @@ import re
 import hashlib
 import logging
 from pathlib import Path
+from ...domain.episode import ResolvedEpisode
 
 logger = logging.getLogger(__name__)
 
@@ -72,64 +73,30 @@ def _sanitize_filename(name: str | None) -> str:
 
 
 def generate_episode_nfo(
+    episode: ResolvedEpisode,
+    *,
     show_name: str,
-    episode_name: str,
-    plot: str,
-    air_date: str,
-    runtime: int,
-    season_number: int,
-    episode_number: int,
-    bangumi_ep_id: int | None,
-    original_name: str,
     bangumi_subject_name: str,
-    directors: list[str] | None = None,
-    writers: list[str] | None = None,
-    actors: list[dict] | None = None,
     thumb_path: str = "",
-    studios: list[str] | None = None,
-    rating: float = 0.0,
     output_dir: str = ".",
-    tvdb_ep_id: int = 0,
     file_stem: str = "",
     overwrite: bool = False,
 ) -> str:
-    """Generate an episode NFO file.
-
-    Args:
-        show_name: Show title
-        episode_name: Episode title
-        plot: Episode overview / plot
-        air_date: Air date (YYYY-MM-DD)
-        runtime: Runtime in minutes
-        season_number: Season number
-        episode_number: Episode number
-        bangumi_ep_id: Bangumi episode ID
-        original_name: Original show name (Japanese)
-        bangumi_subject_name: Bangumi subject name (for NFO filename fallback)
-        directors: List of director names
-        writers: List of writer names
-        actors: List of {name, character} dicts
-        thumb_path: Local thumbnail filename
-        studios: List of studio/network names
-        rating: Episode rating
-        output_dir: Output directory
-        tvdb_ep_id: TVDB episode ID
-        file_stem: Base filename (without extension), from path template.
-            If empty, falls back to ``{bangumi_subject_name} {ep:02d}``.
-        overwrite: Rewrite the NFO even if it already exists (regen).
-
-    Returns:
-        Path to the generated NFO file
-    """
-    if directors is None:
-        directors = []
-    if writers is None:
-        writers = []
-    if actors is None:
-        actors = []
-    if studios is None:
-        studios = []
-
+    """Serialize resolved episode metadata; no provider queries or fallback."""
+    metadata = episode["metadata"]
+    episode_name = metadata["title"]
+    original_name = metadata["original_title"] or ""
+    plot = metadata["plot"] or ""
+    air_date = metadata["air_date"] or ""
+    runtime = metadata["runtime_minutes"]
+    # Preserve the legacy XML representation of unknown/zero runtime. The
+    # canonical value remains zero; serialization does not choose metadata.
+    runtime_text = runtime if runtime is not None and runtime != 0 else ""
+    season_number = episode["season_number"]
+    episode_number = episode["episode_number"]
+    bangumi_ep_id = episode["mapping"]["bangumi"]["episode_id"]
+    tvdb_ep_id = episode["mapping"]["tvdb"]["episode_id"]
+    rating = metadata["rating"] if metadata["rating"] is not None else 0.0
     # Filename: use template-derived stem if provided, else legacy pattern
     if file_stem:
         file_base = _sanitize_filename(file_stem)
@@ -165,11 +132,11 @@ def generate_episode_nfo(
   <season>{season_number}</season>
   <episode>{episode_number}</episode>
   <year>{year}</year>
-  <bangumiid>{bangumi_ep_id or ''}</bangumiid>
+  <bangumiid>{bangumi_ep_id if bangumi_ep_id is not None else ''}</bangumiid>
   <plot>{_escape_xml(plot)}</plot>
   <aired>{air_date or ''}</aired>
   <premiered>{air_date or ''}</premiered>
-  <runtime>{runtime or ''}</runtime>
+  <runtime>{runtime_text}</runtime>
 {rating_tag + chr(10) if rating_tag else ''}{thumb_tag + chr(10) if thumb_tag else ''}{tvdbid_tag + chr(10) if tvdbid_tag else ''}</episodedetails>
 """
     _write_nfo(file_path, xml)

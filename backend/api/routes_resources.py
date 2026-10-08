@@ -126,7 +126,7 @@ async def preview_cached_torrent(resource_id: int):
     from ..services.torrent.preview import parse_and_search
     result = await parse_and_search(str(path))
     result["resource_id"] = resource_id
-    result.pop("torrent_path", None)
+
     recognition = resource_recognitions.get(resource_id)
     result["preprocessed_candidates"] = [candidate for candidate in
                                            (recognition or {}).get("candidates", [])
@@ -144,4 +144,9 @@ async def preview_cached_torrent(resource_id: int):
             episodes = []
         bangumi_data[str(bgm_id)] = {"name": entry.get("name") or str(bgm_id),
                                      "episodes": episodes}
-    return result
+    from ..services.torrent.preview_session import create_preview_session
+    from ..services.torrent.preview_view import session_view
+    row = create_preview_session(result, str(path))
+    view = session_view(row)
+    view["preprocessed_candidates"] = result["preprocessed_candidates"]
+    return view

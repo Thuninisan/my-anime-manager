@@ -106,8 +106,8 @@ export function useSubtitleMatching(
     const epToRow = new Map<number, typeof tvRows[0]>();
     const ambiguous = new Set<number>();
     for (const row of tvRows) {
-      const ep = row.src_episode;
-      if (epToRow.has(ep)) ambiguous.add(ep);
+      const ep = row.mapping.parsed.episode_number;
+      if (ep != null && epToRow.has(ep)) ambiguous.add(ep);
       if (ep != null && ep > 0 && !epToRow.has(ep)) {
         epToRow.set(ep, row);
       }

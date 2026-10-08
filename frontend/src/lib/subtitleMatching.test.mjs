@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 const source = readFileSync(new URL('./subtitleMatching.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 } }).outputText;
 const { associateSubtitles, subtitleStatus, subtitleLanguage, preferenceSelects, selectSubtitles, subtitlePeers, subtitleDestinationSuffix } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
-const rows = ['A', 'B'].map(dir => ({ torrent_path: `${dir}/Show - 01.mkv`, file_name: 'Show - 01.mkv', show_name: 'Show', src_season: 1, src_episode: 1 }));
+const rows = ['A', 'B'].map(dir => ({ torrent_path: `${dir}/Show - 01.mkv`, file_name: 'Show - 01.mkv', show_name: 'Show', mapping: { parsed: { season_number: 1, episode_number: 1 } } }));
 const file = path => ({ id: `torrent:${path}`, path, name: path.split('/').pop(), source: 'torrent' });
 const same = file('A/Show - 01.chs.ass');
 let result = associateSubtitles(rows, [same], {});

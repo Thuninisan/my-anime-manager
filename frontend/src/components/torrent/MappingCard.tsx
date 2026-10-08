@@ -8,7 +8,7 @@ export interface TmdbSeasonOption {
 }
 
 export interface TmdbEpOption {
-  epNum: number;
+  episode_number: number;
   name: string;
   name_cn?: string;
 }
@@ -111,8 +111,8 @@ export default function MappingCard({
     try {
       const result = await uploadSubtitle(file, torrentName);
       onSubtitleUploaded(file.name, result.filename);
-    } catch (err: any) {
-      setUploadError(err.message || '上传失败');
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : '上传失败');
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -178,7 +178,7 @@ export default function MappingCard({
           {!isMovie && (
             <div className="flex items-center gap-1 ml-1">
               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">#</span>
-              <span className="text-[11px] font-mono text-slate-500">{row.bgm_sort ?? '-'}</span>
+              <span className="text-[11px] font-mono text-slate-500">{row.mapping.bangumi.episode_absolute ?? '-'}</span>
             </div>
           )}
         </div>
@@ -187,7 +187,7 @@ export default function MappingCard({
             <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Name</span>
             <select
               className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[220px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
-              value={row.bgm_ep_id ?? ''}
+              value={row.mapping.bangumi.episode_id ?? ''}
               onChange={(e) => onBgmEpChange?.(e.target.value)}
               title={`${row.bgm_ep_name}${row.bgm_ep_name_cn ? ` / ${row.bgm_ep_name_cn}` : ''}`}
             >
@@ -195,8 +195,8 @@ export default function MappingCard({
                 <option value="" disabled>{row.bgm_ep_name || '-'}</option>
               )}
               {currentEps.map((ep) => (
-                <option key={`${i}-bgm-${ep.id}`} value={ep.id}>
-                  E{ep.sort} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                <option key={`${i}-bgm-${ep.episode_id}`} value={ep.episode_id}>
+                  E{ep.episode_absolute} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
                 </option>
               ))}
             </select>
@@ -235,8 +235,8 @@ export default function MappingCard({
                 <option value="" disabled>{tmdbEpTitle || '-'}</option>
               )}
               {(tmdbEpOptions || []).map((ep) => (
-                <option key={`${i}-tmdb-${ep.epNum}`} value={ep.epNum}>
-                  E{ep.epNum} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                <option key={`${i}-tmdb-${ep.episode_number}`} value={ep.episode_number}>
+                  E{ep.episode_number} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
                 </option>
               ))}
             </select>
@@ -269,8 +269,8 @@ export default function MappingCard({
                   <option value="" disabled>{tvdbEpTitle || '-'}</option>
                 )}
                 {(tvdbEpOptions || []).map((ep) => (
-                  <option key={`${i}-tvdb-${ep.epNum}`} value={ep.epNum}>
-                    E{ep.epNum} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
+                  <option key={`${i}-tvdb-${ep.episode_number}`} value={ep.episode_number}>
+                    E{ep.episode_number} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
                   </option>
                 ))}
               </select>

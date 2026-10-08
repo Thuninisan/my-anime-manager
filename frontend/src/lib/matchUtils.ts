@@ -1,3 +1,6 @@
+import type { EpisodeCatalog, CatalogSeason } from '@/types/episode';
+import type { TorrentPreviewResponse } from '@/types/preview';
+import { createEpisodeMapping, legacyBangumiAbsolute, catalogSeriesTitle } from './episodeAdapters';
 /** Pure matching utilities — extracted from MatchTable.tsx.
  *
  * All functions in this module have zero React dependencies and can be
@@ -77,7 +80,7 @@ export function fuzzyMatchTmdb(
   bgmName: string,
   bgmNameCn: string,
   tmdbSeasons: Record<string, TmdbSeason>,
-): { season: number; epNum: number; name: string; score?: number } | null {
+): { season: number; episode_number: number; name: string; reference: TmdbEpisode; score?: number } | null {
   const bgmNorm = normalise(bgmName);
   const bgmCnNorm = normalise(bgmNameCn);
 
@@ -96,7 +99,7 @@ export function fuzzyMatchTmdb(
     for (const n of names) {
       const nn = normalise(n);
       if (nn === bgmNorm || (bgmCnNorm && nn === bgmCnNorm)) {
-        return { season, epNum: ep.epNum, name: ep.name };
+        return { season, episode_number: ep.episode_number, name: ep.name, reference: ep };
       }
     }
   }
@@ -104,8 +107,8 @@ export function fuzzyMatchTmdb(
   // Round 2 & 3 combined: collect substring matches + Dice similarity
   // No short-circuit — always compare both and pick the highest-scoring match.
   const MIN_SIMILARITY = 0.55;
-  let bestSubstr: { season: number; epNum: number; name: string; score: number } | null = null;
-  let bestDice: { season: number; epNum: number; name: string; score: number } | null = null;
+  let bestSubstr: { season: number; episode_number: number; name: string; reference: TmdbEpisode; score: number } | null = null;
+  let bestDice: { season: number; episode_number: number; name: string; reference: TmdbEpisode; score: number } | null = null;
   for (const { season, ep } of allEps) {
     const names = [ep.name];
     if (ep.name_cn) names.push(ep.name_cn);
@@ -117,14 +120,14 @@ export function fuzzyMatchTmdb(
 
       // Track best Dice candidate regardless
       if (score > (bestDice?.score ?? 0)) {
-        bestDice = { season, epNum: ep.epNum, name: ep.name, score };
+        bestDice = { season, episode_number: ep.episode_number, name: ep.name, reference: ep, score };
       }
 
       // Also track best substring candidate (with same Dice score for fair comparison)
       if ((nn && bgmNorm && (nn.includes(bgmNorm) || bgmNorm.includes(nn))) ||
           (nn && bgmCnNorm && (nn.includes(bgmCnNorm) || bgmCnNorm.includes(nn)))) {
         if (score > (bestSubstr?.score ?? -1)) {
-          bestSubstr = { season, epNum: ep.epNum, name: ep.name, score };
+          bestSubstr = { season, episode_number: ep.episode_number, name: ep.name, reference: ep, score };
         }
       }
     }
@@ -135,10 +138,10 @@ export function fuzzyMatchTmdb(
   // This handles cases like "解答篇" vs "解答編" — one-char difference has higher
   // Dice than a shorter substring match, so the non-substring candidate wins.
   if (bestSubstr && (!bestDice || bestSubstr.score >= bestDice.score)) {
-    return { season: bestSubstr.season, epNum: bestSubstr.epNum, name: bestSubstr.name };
+    return { season: bestSubstr.season, episode_number: bestSubstr.episode_number, name: bestSubstr.name, reference: bestSubstr.reference };
   }
   if (bestDice && bestDice.score >= MIN_SIMILARITY) {
-    return { season: bestDice.season, epNum: bestDice.epNum, name: bestDice.name };
+    return { season: bestDice.season, episode_number: bestDice.episode_number, name: bestDice.name, reference: bestDice.reference };
   }
 
   return null;
@@ -150,18 +153,18 @@ export function fuzzyMatchTmdb(
 
 /** Merge seasons from every loaded TMDB entry into one flat map.
  *  Episodes from different entries that share the same season number are
- *  combined (deduplicated by epNum).  Sentinel keys like `_name` are skipped. */
-export function mergeAllTmdbSeasons(episodeData: any): Record<string, TmdbSeason> {
+ *  combined (deduplicated by episode_number).  Sentinel keys like `_name` are skipped. */
+export function mergeAllTmdbSeasons(episodeData: EpisodeCatalog): Record<string, TmdbSeason> {
   const merged: Record<string, TmdbSeason> = {};
   for (const seasons of Object.values(episodeData.tmdb || {})) {
-    for (const [skey, sdata] of Object.entries(seasons as Record<string, any>)) {
+    for (const [skey, sdata] of Object.entries(seasons)) {
       if (!sdata?.episodes) continue;
       if (!merged[skey]) {
         merged[skey] = { name: sdata.name, episodes: [...sdata.episodes] };
       } else {
-        const seen = new Set(merged[skey].episodes.map((e: any) => e.epNum));
+        const seen = new Set(merged[skey].episodes.map((e) => e.episode_number));
         for (const ep of sdata.episodes || []) {
-          if (!seen.has(ep.epNum)) merged[skey].episodes.push({ ...ep });
+          if (!seen.has(ep.episode_number)) merged[skey].episodes.push({ ...ep });
         }
       }
     }
@@ -171,21 +174,21 @@ export function mergeAllTmdbSeasons(episodeData: any): Record<string, TmdbSeason
 
 /** Merge seasons from every loaded TVDB entry into one flat map.
  *  TVDB analog of ``mergeAllTmdbSeasons`` — deduplicates per season and
- *  per epNum.  Used as fallback when no specific TVDB show ID is resolved. */
-export function mergeAllTvdbSeasons(tvdbData: Record<string, any>): Record<string, any> {
-  const merged: Record<string, any> = {};
+ *  per episode_number.  Used as fallback when no specific TVDB show ID is resolved. */
+export function mergeAllTvdbSeasons(tvdbData: EpisodeCatalog["tvdb"]): Record<string, CatalogSeason> {
+  const merged: Record<string, CatalogSeason> = {};
   for (const [, seriesData] of Object.entries(tvdbData)) {
     const seasons = seriesData?.seasons || {};
     for (const [skey, sdata] of Object.entries(seasons)) {
-      if (!(sdata as any)?.episodes) continue;
+      if (!sdata?.episodes) continue;
       if (!merged[skey]) {
-        merged[skey] = { ...(sdata as any), episodes: [...(sdata as any).episodes] };
+        merged[skey] = { ...sdata, episodes: [...sdata.episodes] };
       } else {
-        const seen = new Set(merged[skey].episodes.map((e: any) => e.epNum));
-        for (const ep of (sdata as any).episodes || []) {
-          if (!seen.has(ep.epNum)) {
+        const seen = new Set(merged[skey].episodes.map((e) => e.episode_number));
+        for (const ep of sdata.episodes || []) {
+          if (!seen.has(ep.episode_number)) {
             merged[skey].episodes.push({ ...ep });
-            seen.add(ep.epNum);
+            seen.add(ep.episode_number);
           }
         }
       }
@@ -198,17 +201,17 @@ export function mergeAllTvdbSeasons(tvdbData: Record<string, any>): Record<strin
  *  Used when no specific season is selected — shows all episodes as a
  *  single flat list so the user can manually pick. */
 export function buildFlattenedEpisodes(
-  seasons: Record<string, any>,
+  seasons: Record<string, CatalogSeason>,
 ): TmdbEpOption[] {
   const result: TmdbEpOption[] = [];
   for (const sdata of Object.values(seasons)) {
-    if ((sdata as any)?.episodes) {
-      for (const ep of (sdata as any).episodes) {
+    if (sdata?.episodes) {
+      for (const ep of sdata.episodes) {
         result.push(ep);
       }
     }
   }
-  result.sort((a: any, b: any) => a.epNum - b.epNum);
+  result.sort((a, b) => a.episode_number - b.episode_number);
   return result;
 }
 
@@ -220,7 +223,7 @@ export function buildFlattenedEpisodes(
 export function buildTmdbSeasonOptions(
   showName: string,
   searchResults: Record<string, SearchEntry>,
-  episodeData: any,
+  episodeData: EpisodeCatalog,
 ): { seasons: Record<string, TmdbSeason>; opts: TmdbSeasonOption[] } {
   const tmdbId = searchResults[showName]?.tmdb?.id;
   const autoSeasons: Record<string, TmdbSeason> =
@@ -246,7 +249,7 @@ export function buildTmdbEpOptions(
   const key = season != null ? String(season) : '';
   const seasonData = key ? seasons[key] : null;
   let opts: TmdbEpOption[] = (seasonData?.episodes || [])
-    .sort((a, b) => a.epNum - b.epNum);
+    .sort((a, b) => a.episode_number - b.episode_number);
   if (opts.length === 0) {
     opts = buildFlattenedEpisodes(seasons);
   }
@@ -259,15 +262,15 @@ export function buildTvdbSeasonOptions(
   currentEntryId: number,
   showName: string,
   searchResults: Record<string, SearchEntry>,
-  episodeData: any,
+  episodeData: EpisodeCatalog,
   overrideTvdbShowId?: number,
-): { seasons: Record<string, any>; opts: TmdbSeasonOption[]; tvdbShowId: number | undefined } {
-  const mapEntries: any[] = searchResults[showName]?.map_entries || [];
-  const mapEntry = mapEntries.find((me: any) => me.bangumi_id === currentEntryId);
+): { seasons: Record<string, CatalogSeason>; opts: TmdbSeasonOption[]; tvdbShowId: number | undefined } {
+  const mapEntries = searchResults[showName]?.map_entries || [];
+  const mapEntry = mapEntries.find((me) => me.bangumi_id === currentEntryId);
   const effectiveTvdbId: number | undefined = overrideTvdbShowId ?? mapEntry?.tvdb_id;
   const tvdbData = episodeData?.tvdb || {};
 
-  let seasons: Record<string, any> = {};
+  let seasons: Record<string, CatalogSeason> = {};
   if (effectiveTvdbId != null && tvdbData[String(effectiveTvdbId)]) {
     seasons = tvdbData[String(effectiveTvdbId)].seasons || {};
   } else {
@@ -275,10 +278,10 @@ export function buildTvdbSeasonOptions(
   }
 
   const opts: TmdbSeasonOption[] = Object.entries(seasons)
-    .filter(([, sdata]) => (sdata as any)?.episodes)
+    .filter(([, sdata]) => sdata?.episodes)
     .map(([skey, sdata]) => ({
       value: String(Number(skey)),
-      label: (sdata as any).name || `Season ${skey}`,
+      label: sdata.name || `Season ${skey}`,
     }));
 
   return { seasons, opts, tvdbShowId: effectiveTvdbId };
@@ -287,12 +290,12 @@ export function buildTvdbSeasonOptions(
 /** Build TVDB episode options for a given season. */
 export function buildTvdbEpOptions(
   season: number | null,
-  seasons: Record<string, any>,
+  seasons: Record<string, CatalogSeason>,
 ): { opts: TmdbEpOption[]; title: string } {
   const key = season != null ? String(season) : '';
   const seasonData = key ? seasons[key] : null;
   let opts: TmdbEpOption[] = (seasonData?.episodes || [])
-    .sort((a: any, b: any) => a.epNum - b.epNum);
+    .sort((a, b) => a.episode_number - b.episode_number);
   if (opts.length === 0) {
     opts = buildFlattenedEpisodes(seasons);
   }
@@ -302,14 +305,14 @@ export function buildTvdbEpOptions(
 
 /** Build cross-show season options for SP rows (TMDB or TVDB source). */
 export function buildSpSeasonOptions(
-  episodeData: any,
+  episodeData: EpisodeCatalog,
   searchResults: Record<string, SearchEntry>,
   source: 'tmdb' | 'tvdb',
 ): TmdbSeasonOption[] {
   const opts: TmdbSeasonOption[] = [];
-  const dataMap: Record<string, any> = episodeData?.[source] || {};
+  const dataMap = episodeData?.[source] || {};
 
-  for (const [idStr, entryData] of Object.entries(dataMap)) {
+  for (const idStr of Object.keys(dataMap)) {
     const showId = Number(idStr);
     let showLabel = '';
     if (source === 'tmdb') {
@@ -321,18 +324,18 @@ export function buildSpSeasonOptions(
       }
     }
     if (!showLabel) {
-      showLabel = (entryData as any).name || `${source.toUpperCase()} ${showId}`;
+      showLabel = (source === 'tmdb' ? catalogSeriesTitle(episodeData, idStr) : episodeData.tvdb[idStr]?.name) || `${source.toUpperCase()} ${showId}`;
     }
 
-    const seasons = source === 'tmdb'
-      ? (entryData as Record<string, any>)
-      : (entryData as any)?.seasons || {};
+    const seasons: Record<string, CatalogSeason> = source === 'tmdb'
+      ? episodeData.tmdb[idStr] || {}
+      : episodeData.tvdb[idStr]?.seasons || {};
 
     for (const [skey, sdata] of Object.entries(seasons)) {
-      if (!(sdata as any)?.episodes) continue;
+      if (!sdata?.episodes) continue;
       opts.push({
         value: `${showId}:${skey}`,
-        label: `${showLabel}  ${(sdata as any).name || `Season ${skey}`}`,
+        label: `${showLabel}  ${sdata.name || `Season ${skey}`}`,
       });
     }
   }
@@ -358,11 +361,11 @@ export class DuplicateEpisodeError extends Error {
 export function checkDuplicates(parsedFiles: ParsedFile[]): void {
   const seen = new Map<string, string>();
   for (const pf of parsedFiles) {
-    const key = `S${pf.season}E${pf.episode}`;
+    const key = `S${pf.parsed.season_number}E${pf.parsed.episode_number}`;
     const existing = seen.get(key);
     if (existing) {
       throw new DuplicateEpisodeError(
-        `S${pf.season}E${pf.episode} 同时匹配到 "${pf.file_name}" 和 "${existing}"`,
+        `S${pf.parsed.season_number}E${pf.parsed.episode_number} 同时匹配到 "${pf.file_name}" 和 "${existing}"`,
       );
     }
     seen.set(key, pf.file_name);
@@ -443,20 +446,21 @@ export function fuzzyMatchBgm(
  */
 export function fuzzyMatchTvdb(
   sourceEpName: string,
-  tvdbData: Record<string, any>,
-): { tvdbSeason: number; tvdbEp: number } | null {
+  tvdbData: EpisodeCatalog["tvdb"],
+): { tvdbSeason: number; tvdbEp: number; reference: TmdbEpisode } | null {
   const sourceNorm = normalise(sourceEpName);
   if (!sourceNorm) return null;
 
   // Flatten all TVDB episodes
-  const flat: { tvdbSeason: number; tvdbEp: number; nameNorm: string }[] = [];
+  const flat: { tvdbSeason: number; tvdbEp: number; reference: TmdbEpisode; nameNorm: string }[] = [];
   for (const [, seriesData] of Object.entries(tvdbData)) {
     const seasons = seriesData?.seasons || {};
     for (const [skey, sdata] of Object.entries(seasons)) {
-      for (const ep of (sdata as any)?.episodes || []) {
+      for (const ep of sdata?.episodes || []) {
         flat.push({
           tvdbSeason: Number(skey),
-          tvdbEp: ep.epNum,
+          tvdbEp: ep.episode_number,
+          reference: ep,
           nameNorm: normalise(ep.name || ""),
         });
       }
@@ -466,37 +470,37 @@ export function fuzzyMatchTvdb(
   // Round 1: exact match
   for (const item of flat) {
     if (item.nameNorm === sourceNorm) {
-      return { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp };
+      return { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp, reference: item.reference };
     }
   }
 
   // Round 2 & 3 combined: collect substring matches + Dice similarity
   // No short-circuit — always compare both and pick the highest-scoring match.
   const MIN_SIMILARITY = 0.55;
-  let bestSubstr: { tvdbSeason: number; tvdbEp: number; score: number } | null = null;
-  let bestDice: { tvdbSeason: number; tvdbEp: number; score: number } | null = null;
+  let bestSubstr: { tvdbSeason: number; tvdbEp: number; reference: TmdbEpisode; score: number } | null = null;
+  let bestDice: { tvdbSeason: number; tvdbEp: number; reference: TmdbEpisode; score: number } | null = null;
   for (const item of flat) {
     const score = charSimilarity(sourceNorm, item.nameNorm);
 
     // Track best Dice candidate regardless
     if (score > (bestDice?.score ?? 0)) {
-      bestDice = { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp, score };
+      bestDice = { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp, reference: item.reference, score };
     }
 
     // Also track best substring candidate
     if (item.nameNorm && (item.nameNorm.includes(sourceNorm) || sourceNorm.includes(item.nameNorm))) {
       if (score > (bestSubstr?.score ?? -1)) {
-        bestSubstr = { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp, score };
+        bestSubstr = { tvdbSeason: item.tvdbSeason, tvdbEp: item.tvdbEp, reference: item.reference, score };
       }
     }
   }
 
   // Decision: prefer substring when its Dice score is >= the best pure-Dice candidate.
   if (bestSubstr && (!bestDice || bestSubstr.score >= bestDice.score)) {
-    return { tvdbSeason: bestSubstr.tvdbSeason, tvdbEp: bestSubstr.tvdbEp };
+    return { tvdbSeason: bestSubstr.tvdbSeason, tvdbEp: bestSubstr.tvdbEp, reference: bestSubstr.reference };
   }
   if (bestDice && bestDice.score >= MIN_SIMILARITY) {
-    return { tvdbSeason: bestDice.tvdbSeason, tvdbEp: bestDice.tvdbEp };
+    return { tvdbSeason: bestDice.tvdbSeason, tvdbEp: bestDice.tvdbEp, reference: bestDice.reference };
   }
 
   return null;
@@ -506,7 +510,7 @@ export function fuzzyMatchTvdb(
  * TMDB-first matching:
  *   parsed_files S+E → TMDB direct → TMDB name → BGM + TVDB
  */
-export function computeMatchesTmdb(data: any): MatchRow[] {
+export function computeMatchesTmdb(data: TorrentPreviewResponse): MatchRow[] {
   const parsedFiles: ParsedFile[] = data.parsed_files || [];
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
   const episodeData = data.episode_data || { tmdb: {}, bangumi: {}, tvdb: {} };
@@ -514,7 +518,7 @@ export function computeMatchesTmdb(data: any): MatchRow[] {
   // Global duplicate check
   checkDuplicates(parsedFiles);
 
-  const allBgmEntries = Object.entries(episodeData.bangumi || {}) as [string, BgmEntry][];
+  const allBgmEntries = Object.entries(episodeData.bangumi || {});
 
   return parsedFiles.map((pf) => {
     const searchEntry = searchResults[pf.show_name];
@@ -524,22 +528,14 @@ export function computeMatchesTmdb(data: any): MatchRow[] {
     if (searchEntry?.media_type === "movie") {
       const matched = !!(searchEntry.tmdb && searchEntry.bangumi);
       return {
+        mapping: createEpisodeMapping(pf.parsed, searchEntry.bangumi?.id ?? null, null, null, null, data.index ?? null),
         file_name: pf.file_name,
         torrent_path: pf.torrent_path,
         show_name: pf.show_name,
-        src_season: pf.season,
-        src_episode: pf.episode,
         bgm_entry: searchEntry.bangumi?.name || (searchEntry.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
-        bgm_entry_id: searchEntry.bangumi?.id ?? null,
-        bgm_sort: null,
         bgm_ep_name: searchEntry.bangumi?.name || '-',
         bgm_ep_name_cn: searchEntry.bangumi?.name_cn || '',
-        bgm_ep_id: null,
-        tmdb_season: null,
-        tmdb_ep: null,
         tmdb_ep_name: searchEntry.tmdb?.name || '-',
-        tvdb_season: null,
-        tvdb_ep: null,
         matched,
         media_type: "movie",
       };
@@ -548,10 +544,10 @@ export function computeMatchesTmdb(data: any): MatchRow[] {
     // ── Direct TMDB match by season + episode ──
     const tmdbSeasons: Record<string, TmdbSeason> =
       (tmdbId && episodeData.tmdb?.[String(tmdbId)]) || {};
-    const seasonData = tmdbSeasons[String(pf.season)];
-    const tmdbEp = seasonData?.episodes?.find((e: TmdbEpisode) => e.epNum === pf.episode);
+    const seasonData = tmdbSeasons[String(pf.parsed.season_number)];
+    const tmdbEp = seasonData?.episodes?.find((e: TmdbEpisode) => e.episode_number === pf.parsed.episode_number);
     const tmdbMatch = tmdbEp
-      ? { season: pf.season, epNum: tmdbEp.epNum, name: tmdbEp.name }
+      ? { season: pf.parsed.season_number, episode_number: tmdbEp.episode_number, name: tmdbEp.name, reference: tmdbEp }
       : null;
 
     const tmdbEpName = tmdbMatch?.name || '';
@@ -563,22 +559,14 @@ export function computeMatchesTmdb(data: any): MatchRow[] {
     const tvdbMatch = tmdbEpName ? fuzzyMatchTvdb(tmdbEpName, episodeData.tvdb || {}) : null;
 
     return {
+      mapping: createEpisodeMapping(pf.parsed, bgmMatch?.bgmId ?? searchEntry?.bangumi?.id ?? null, bgmMatch?.bgmEp, tmdbMatch?.reference, tvdbMatch?.reference, data.index ?? null),
       file_name: pf.file_name,
       torrent_path: pf.torrent_path,
       show_name: pf.show_name,
-      src_season: pf.season,
-      src_episode: pf.episode,
       bgm_entry: bgmMatch?.bgmEntryName || (searchEntry?.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
-      bgm_entry_id: bgmMatch?.bgmId ?? searchEntry?.bangumi?.id ?? null,
-      bgm_sort: bgmMatch?.bgmEp.sort ?? null,
       bgm_ep_name: bgmMatch?.bgmEp.name || '-',
       bgm_ep_name_cn: bgmMatch?.bgmEp.name_cn || '',
-      bgm_ep_id: bgmMatch?.bgmEp.id ?? null,
-      tmdb_season: tmdbMatch?.season ?? null,
-      tmdb_ep: tmdbMatch?.epNum ?? null,
       tmdb_ep_name: tmdbEpName || '-',
-      tvdb_season: tvdbMatch?.tvdbSeason ?? null,
-      tvdb_ep: tvdbMatch?.tvdbEp ?? null,
       matched: tmdbMatch !== null,
       media_type: "tv",
     };
@@ -589,7 +577,7 @@ export function computeMatchesTmdb(data: any): MatchRow[] {
  * TVDB-first matching:
  *   parsed_files S+E → TVDB direct → TVDB name → TMDB → TMDB name → BGM
  */
-export function computeMatchesTvdb(data: any): MatchRow[] {
+export function computeMatchesTvdb(data: TorrentPreviewResponse): MatchRow[] {
   const parsedFiles: ParsedFile[] = data.parsed_files || [];
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
   const episodeData = data.episode_data || { tmdb: {}, bangumi: {}, tvdb: {} };
@@ -597,7 +585,7 @@ export function computeMatchesTvdb(data: any): MatchRow[] {
   // Global duplicate check
   checkDuplicates(parsedFiles);
 
-  const allBgmEntries = Object.entries(episodeData.bangumi || {}) as [string, BgmEntry][];
+  const allBgmEntries = Object.entries(episodeData.bangumi || {});
   // Merge all TMDB seasons for cross-show fuzzy matching
   const mergedTmdbSeasons = mergeAllTmdbSeasons(episodeData);
   const tvdbData = episodeData.tvdb || {};
@@ -609,22 +597,14 @@ export function computeMatchesTvdb(data: any): MatchRow[] {
     if (searchEntry?.media_type === "movie") {
       const matched = !!(searchEntry.tmdb && searchEntry.bangumi);
       return {
+        mapping: createEpisodeMapping(pf.parsed, searchEntry.bangumi?.id ?? null, null, null, null, data.index ?? null),
         file_name: pf.file_name,
         torrent_path: pf.torrent_path,
         show_name: pf.show_name,
-        src_season: pf.season,
-        src_episode: pf.episode,
         bgm_entry: searchEntry.bangumi?.name || (searchEntry.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
-        bgm_entry_id: searchEntry.bangumi?.id ?? null,
-        bgm_sort: null,
         bgm_ep_name: searchEntry.bangumi?.name || '-',
         bgm_ep_name_cn: searchEntry.bangumi?.name_cn || '',
-        bgm_ep_id: null,
-        tmdb_season: null,
-        tmdb_ep: null,
         tmdb_ep_name: searchEntry.tmdb?.name || '-',
-        tvdb_season: null,
-        tvdb_ep: null,
         matched,
         media_type: "movie",
       };
@@ -632,12 +612,12 @@ export function computeMatchesTvdb(data: any): MatchRow[] {
 
     // ── Resolve TVDB ID (specific first, merge all as fallback) ──
     const bgmId = searchEntry?.bangumi?.id;
-    const mapEntries: any[] = searchEntry?.map_entries || [];
-    const mapEntry = mapEntries.find((me: any) => me.bangumi_id === bgmId);
+    const mapEntries = searchEntry?.map_entries || [];
+    const mapEntry = mapEntries.find((me) => me.bangumi_id === bgmId);
     const tvdbId: number | undefined = mapEntry?.tvdb_id;
 
     // Use specific TVDB show if available, otherwise merge all TVDB entries
-    let tvdbSeasons: Record<string, any>;
+    let tvdbSeasons: Record<string, CatalogSeason>;
     if (tvdbId != null && tvdbData[String(tvdbId)]) {
       tvdbSeasons = tvdbData[String(tvdbId)].seasons || {};
     } else {
@@ -645,10 +625,8 @@ export function computeMatchesTvdb(data: any): MatchRow[] {
     }
 
     // ── Direct TVDB match by season + episode ──
-    const seasonData = tvdbSeasons[String(pf.season)];
-    const tvdbEp = seasonData?.episodes?.find((e: any) => e.epNum === pf.episode);
-    const tvdb_season: number | null = tvdbEp ? pf.season : null;
-    const tvdb_ep: number | null = tvdbEp?.epNum ?? null;
+    const seasonData = tvdbSeasons[String(pf.parsed.season_number)];
+    const tvdbEp = seasonData?.episodes?.find((e) => e.episode_number === pf.parsed.episode_number);
     const tvdbEpName: string | null = tvdbEp?.name || null;
 
     // ── TVDB episode name → fuzzy match TMDB (all merged seasons) ──
@@ -657,29 +635,19 @@ export function computeMatchesTvdb(data: any): MatchRow[] {
       : null;
 
     const tmdbEpName = tmdbMatch?.name || '';
-    const tmdb_season = tmdbMatch?.season ?? null;
-    const tmdb_ep = tmdbMatch?.epNum ?? null;
 
     // ── TMDB episode name → fuzzy match BGM ──
     const bgmMatch = tmdbEpName ? fuzzyMatchBgm(tmdbEpName, allBgmEntries) : null;
 
     return {
+      mapping: createEpisodeMapping(pf.parsed, bgmMatch?.bgmId ?? searchEntry?.bangumi?.id ?? null, bgmMatch?.bgmEp, tmdbMatch?.reference, tvdbEp, data.index ?? null),
       file_name: pf.file_name,
       torrent_path: pf.torrent_path,
       show_name: pf.show_name,
-      src_season: pf.season,
-      src_episode: pf.episode,
       bgm_entry: bgmMatch?.bgmEntryName || (searchEntry?.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
-      bgm_entry_id: bgmMatch?.bgmId ?? searchEntry?.bangumi?.id ?? null,
-      bgm_sort: bgmMatch?.bgmEp.sort ?? null,
       bgm_ep_name: bgmMatch?.bgmEp.name || '-',
       bgm_ep_name_cn: bgmMatch?.bgmEp.name_cn || '',
-      bgm_ep_id: bgmMatch?.bgmEp.id ?? null,
-      tmdb_season,
-      tmdb_ep,
       tmdb_ep_name: tmdbEpName || '-',
-      tvdb_season,
-      tvdb_ep,
       matched: tmdbMatch !== null,
       media_type: "tv",
     };
@@ -687,7 +655,7 @@ export function computeMatchesTvdb(data: any): MatchRow[] {
 }
 
 /** Dispatch entry point: selects matching strategy based on data.index. */
-export function computeMatches(data: any): MatchRow[] {
+export function computeMatches(data: TorrentPreviewResponse): MatchRow[] {
   if (data.index === "tmdb") return computeMatchesTmdb(data);
   if (data.index === "tvdb") return computeMatchesTvdb(data);
   // Legacy: no index field — use original Bangumi-first logic
@@ -695,13 +663,8 @@ export function computeMatches(data: any): MatchRow[] {
 }
 
 /** Original Bangumi-first matching (legacy, used when data.index is absent). */
-export function computeMatchesLegacy(data: any): MatchRow[] {
-  // Reuse the existing implementation above by aliasing it
-  return _computeMatchesLegacy(data);
-}
-
-// Rename the original function for internal use
-function _computeMatchesLegacy(data: any): MatchRow[] {
+/** Original Bangumi-first strategy for previews without an index. */
+export function computeMatchesLegacy(data: TorrentPreviewResponse): MatchRow[] {
   const parsedFiles: ParsedFile[] = data.parsed_files || [];
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
   const episodeData = data.episode_data || { tmdb: {}, bangumi: {} };
@@ -717,33 +680,30 @@ function _computeMatchesLegacy(data: any): MatchRow[] {
         ? autoSeasons
         : mergeAllTmdbSeasons(episodeData);
 
-    const allBgmEntries = Object.entries(episodeData.bangumi || {}) as [string, BgmEntry][];
+    const allBgmEntries = Object.entries(episodeData.bangumi || {});
     let bgmEp: BgmEpisode | null = null;
     let matchedBgmName = "";
     let matchedBgmId: number | null = null;
-    let tmdbMatch: { season: number; epNum: number; name: string } | null = null;
+    let tmdbMatch: { season: number; episode_number: number; name: string; reference: TmdbEpisode } | null = null;
 
     if (searchEntry?.media_type === "movie") {
       const matched = !!(searchEntry.tmdb && searchEntry.bangumi);
       return {
+        mapping: createEpisodeMapping(pf.parsed, searchEntry.bangumi?.id ?? null, null, null, null, data.index ?? null),
         file_name: pf.file_name, torrent_path: pf.torrent_path, show_name: pf.show_name,
-        src_season: pf.season, src_episode: pf.episode,
         bgm_entry: searchEntry.bangumi?.name || (searchEntry.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
-        bgm_entry_id: searchEntry.bangumi?.id ?? null,
-        bgm_sort: null, bgm_ep_name: searchEntry.bangumi?.name || '-',
-        bgm_ep_name_cn: searchEntry.bangumi?.name_cn || '', bgm_ep_id: null,
-        tmdb_season: null, tmdb_ep: null, tmdb_ep_name: searchEntry.tmdb?.name || '-',
-        tvdb_season: null, tvdb_ep: null,
+        bgm_ep_name: searchEntry.bangumi?.name || '-',
+        bgm_ep_name_cn: searchEntry.bangumi?.name_cn || '', tmdb_ep_name: searchEntry.tmdb?.name || '-',
         matched, media_type: "movie",
       };
     }
 
-    if (pf.season === 0) {
+    if (pf.parsed.season_number === 0) {
       const tmdbS0 = tmdbSeasons["0"];
       if (tmdbS0) {
-        const tmdbEp = tmdbS0.episodes.find((ep) => ep.epNum === pf.episode);
+        const tmdbEp = tmdbS0.episodes.find((ep) => ep.episode_number === pf.parsed.episode_number);
         if (tmdbEp) {
-          tmdbMatch = { season: 0, epNum: tmdbEp.epNum, name: tmdbEp.name };
+          tmdbMatch = { season: 0, episode_number: tmdbEp.episode_number, name: tmdbEp.name, reference: tmdbEp };
           const tmdbNorm = normalise(tmdbEp.name);
           for (const [bidStr, entry] of allBgmEntries) {
             const eps = entry.episodes || [];
@@ -759,12 +719,12 @@ function _computeMatchesLegacy(data: any): MatchRow[] {
       const preferredEntry: BgmEntry | undefined =
         (preferredBgmId != null && episodeData.bangumi?.[String(preferredBgmId)]) || undefined;
       if (preferredEntry) {
-        const found = (preferredEntry.episodes || []).find((ep) => ep.sort === pf.episode) ?? null;
+        const found = (preferredEntry.episodes || []).find((ep) => legacyBangumiAbsolute(ep) === pf.parsed.episode_number) ?? null;
         if (found) { bgmEp = found; matchedBgmName = preferredEntry.name; matchedBgmId = preferredBgmId!; }
       }
       if (!bgmEp) {
         for (const [bidStr, entry] of allBgmEntries) {
-          const found = (entry.episodes || []).find((ep) => ep.sort === pf.episode) ?? null;
+          const found = (entry.episodes || []).find((ep) => legacyBangumiAbsolute(ep) === pf.parsed.episode_number) ?? null;
           if (found) { bgmEp = found; matchedBgmName = entry.name; matchedBgmId = Number(bidStr); break; }
         }
       }
@@ -772,8 +732,8 @@ function _computeMatchesLegacy(data: any): MatchRow[] {
         const primaryEntry: BgmEntry | undefined =
           (preferredBgmId && episodeData.bangumi?.[String(preferredBgmId)]) || undefined;
         const primaryEps = primaryEntry?.episodes || [];
-        if (pf.episode > 0 && pf.episode <= primaryEps.length) {
-          bgmEp = primaryEps[pf.episode - 1]; matchedBgmName = primaryEntry?.name || ""; matchedBgmId = preferredBgmId ?? null;
+        if (pf.parsed.episode_number != null && pf.parsed.episode_number > 0 && pf.parsed.episode_number <= primaryEps.length) {
+          bgmEp = primaryEps[pf.parsed.episode_number - 1]; matchedBgmName = primaryEntry?.name || ""; matchedBgmId = preferredBgmId ?? null;
         }
       }
     }
@@ -782,37 +742,32 @@ function _computeMatchesLegacy(data: any): MatchRow[] {
       tmdbMatch = bgmEp?.name ? fuzzyMatchTmdb(bgmEp.name, bgmEp.name_cn || "", tmdbSeasons) : null;
     }
 
-    let tvdb_season: number | null = null;
-    let tvdb_ep: number | null = null;
+    let tvdbReference: TmdbEpisode | null = null;
     if (bgmEp && matchedBgmId != null) {
-      const mapEntries: any[] = searchEntry?.map_entries || [];
-      const mapEntry = mapEntries.find((me: any) => me.bangumi_id === matchedBgmId);
+      const mapEntries = searchEntry?.map_entries || [];
+      const mapEntry = mapEntries.find((me) => me.bangumi_id === matchedBgmId);
       const tvdbId: number | undefined = mapEntry?.tvdb_id;
       if (tvdbId != null) {
         const tvdbSeries = episodeData?.tvdb?.[String(tvdbId)];
-        const seasons: Record<string, any> = tvdbSeries?.seasons || {};
-        for (const [skey, sdata] of Object.entries(seasons)) {
-          const found = (sdata?.episodes || []).find((e: any) => e.absoluteNumber === bgmEp.sort);
-          if (found) { tvdb_season = found.seasonNumber ?? Number(skey); tvdb_ep = found.epNum; break; }
+        const seasons: Record<string, CatalogSeason> = tvdbSeries?.seasons || {};
+        for (const sdata of Object.values(seasons)) {
+          const found = (sdata?.episodes || []).find((e) => e.episode_absolute === legacyBangumiAbsolute(bgmEp));
+          if (found) { tvdbReference = found; break; }
         }
-        if (tvdb_ep == null && mapEntry?.tvdb_season != null) {
+        if (tvdbReference == null && mapEntry?.tvdb_season != null) {
           const targetSeason = seasons[String(mapEntry.tvdb_season)];
-          const found = (targetSeason?.episodes || []).find((e: any) => e.epNum === bgmEp.sort);
-          if (found) { tvdb_season = mapEntry.tvdb_season; tvdb_ep = found.epNum; }
+          const found = (targetSeason?.episodes || []).find((e) => e.episode_number === legacyBangumiAbsolute(bgmEp));
+          if (found) { tvdbReference = found; }
         }
       }
     }
 
     return {
+      mapping: createEpisodeMapping(pf.parsed, matchedBgmId ?? searchEntry?.bangumi?.id ?? null, bgmEp, tmdbMatch?.reference, tvdbReference, data.index ?? null),
       file_name: pf.file_name, torrent_path: pf.torrent_path, show_name: pf.show_name,
-      src_season: pf.season, src_episode: pf.episode,
       bgm_entry: matchedBgmName || (searchEntry?.bangumi?.id ? `ID ${searchEntry.bangumi.id}` : '-'),
-      bgm_entry_id: matchedBgmId ?? searchEntry?.bangumi?.id ?? null,
-      bgm_sort: bgmEp?.sort ?? null, bgm_ep_name: bgmEp?.name || '-',
-      bgm_ep_name_cn: bgmEp?.name_cn || '', bgm_ep_id: bgmEp?.id ?? null,
-      tmdb_season: tmdbMatch?.season ?? null, tmdb_ep: tmdbMatch?.epNum ?? null,
-      tmdb_ep_name: tmdbMatch?.name || '-', tvdb_season, tvdb_ep,
-      matched: tmdbMatch !== null, media_type: "tv",
+      bgm_ep_name: bgmEp?.name || '-',
+      bgm_ep_name_cn: bgmEp?.name_cn || '', tmdb_ep_name: tmdbMatch?.name || '-', matched: tmdbMatch !== null, media_type: "tv",
     };
   });
 }

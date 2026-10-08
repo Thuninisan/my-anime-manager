@@ -224,3 +224,18 @@ class DownloadEpisode(Base):
     tmdb_ep_calc: Mapped[int | None] = mapped_column(Integer)
     fail_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="downloaded")
+
+
+class TorrentPreviewSession(Base):
+    """Disposable canonical snapshot; incompatible schemas require a new preview."""
+    __tablename__ = "torrent_preview_sessions"
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    torrent_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    torrent_name: Mapped[str] = mapped_column(Text, nullable=False)
+    context_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+    last_used_at: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[str] = mapped_column(Text, nullable=False, index=True)

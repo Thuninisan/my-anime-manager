@@ -2,6 +2,10 @@
 
 import io
 import logging
+import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -13,6 +17,27 @@ from backend.logging.logging_config import configure_logging, operation_context,
 
 
 class LoggingConfigTests(unittest.TestCase):
+    def test_default_debug_and_explicit_info(self):
+        script = '''
+import json, logging
+from backend.logging.logging_config import configure_logging
+configure_logging()
+logging.getLogger("backend.test").debug("debug-diagnostic-marker")
+print(json.dumps({"root": logging.getLogger().level, "httpx": logging.getLogger("httpx").level, "httpcore": logging.getLogger("httpcore").level}))
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            for configured, expected in ((None, logging.DEBUG), ("INFO", logging.INFO), ("invalid", logging.DEBUG)):
+                with self.subTest(configured=configured):
+                    environment = {**os.environ, "MAM_LOG_DIR": directory}
+                    environment.pop("MAM_LOG_LEVEL", None)
+                    if configured is not None:
+                        environment["MAM_LOG_LEVEL"] = configured
+                    result = subprocess.run([sys.executable, "-c", script], env=environment,
+                                            capture_output=True, text=True, check=True)
+                    values = json.loads(result.stdout.splitlines()[-1])
+                    self.assertEqual(values, {"root": expected, "httpx": logging.WARNING, "httpcore": logging.WARNING})
+                    self.assertEqual("debug-diagnostic-marker" in result.stdout, expected == logging.DEBUG)
+
     def test_http_response_exposes_request_id(self):
         from fastapi.testclient import TestClient
         from backend.api import app

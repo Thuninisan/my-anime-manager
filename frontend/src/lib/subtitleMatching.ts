@@ -28,7 +28,7 @@ export function associateSubtitles(rows: MatchRow[], files: SubtitleFile[], over
     if (!names.length) {
       const episode = base(sub.path).match(/\bS(\d+)E(\d+)\b/i);
       const normalise = (value: string) => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-      if (episode) names = rows.filter(r => r.src_season === Number(episode[1]) && r.src_episode === Number(episode[2])
+      if (episode) names = rows.filter(r => r.mapping.parsed.season_number === Number(episode[1]) && r.mapping.parsed.episode_number === Number(episode[2])
         && normalise(r.show_name).length > 2 && normalise(base(sub.path)).includes(normalise(r.show_name)));
     }
     const exact = sub.source === 'torrent' ? names.filter(r => dir(r.torrent_path) === dir(sub.path)) : names;

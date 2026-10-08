@@ -1,3 +1,7 @@
+import type { EpisodeMapping } from '@/types/episode';
+import { normalizeTorrentPreview, normalizeEpisodeCatalog, catalogSeriesTitle } from '@/lib/episodeAdapters';
+import type { TorrentPreviewResponse } from '@/types/preview';
+import type { CatalogSeason, BangumiCatalogEntry } from '@/types/episode';
 import type { AppConfig } from '../types/preview';
 
 const API_BASE = '/api';
@@ -67,7 +71,7 @@ export async function getConfig(): Promise<AppConfig> {
 
 // ── Parse & Search (primary torrent flow) ──
 
-export async function parseAndSearchTorrent(file: File): Promise<any> {
+export async function parseAndSearchTorrent(file: File): Promise<TorrentPreviewResponse> {
   const formData = new FormData();
   formData.append('file', file);
 
@@ -81,61 +85,29 @@ export async function parseAndSearchTorrent(file: File): Promise<any> {
     throw new Error(err.detail || `Parse+Search failed (HTTP ${res.status})`);
   }
 
-  return res.json();
+  return normalizeTorrentPreview(await res.json());
 }
 
 // ── Download (submit to qBittorrent) ──
 
 export interface DownloadFileEntry {
+  file_id: string;
+  mapping: EpisodeMapping;
   subtitle_suffix?: string;
-  torrent_path: string;
-  is_subtitle: boolean;
-  tmdb_show_name: string;
-  bangumi_show_name: string;
-  bangumi_sort: number;
-  // NFO metadata
-  bangumi_id: number;
-  bangumi_ep_id: number | null;
-  tmdb_season: number;
-  tmdb_episode: number;
-  tvdb_season: number | null;
-  tvdb_episode: number | null;
 }
 
-export interface UploadedSubEntry {
-  subtitle_suffix?: string;
+export interface UploadedSubEntry extends DownloadFileEntry {
   stored_filename: string;
   original_filename: string;
-  tmdb_show_name: string;
-  bangumi_show_name: string;
-  bangumi_sort: number;
-  // NFO metadata
-  bangumi_id: number;
-  bangumi_ep_id: number | null;
-  tmdb_season: number;
-  tmdb_episode: number;
-  tvdb_season: number | null;
-  tvdb_episode: number | null;
 }
 
 export interface DownloadRequest {
+  preview_id: string;
+  preview_revision: number;
   resource_id?: number;
   replace_bangumi_id?: number;
-  torrent_path: string;
-  torrent_name: string;
   files: DownloadFileEntry[];
   uploaded_subtitles: UploadedSubEntry[];
-  // Optional: full preview metadata for pre-download NFO generation.
-  // When present, NFO + images are written BEFORE the torrent resumes
-  // (matching the batch/scan flow).  When absent, legacy behaviour
-  // (simple inline NFO after download completes) is used.
-  preview_data?: {
-    search_results: Record<string, any>;
-    episode_data: {
-      tmdb: Record<string, Record<string, any>>;
-      bangumi: Record<string, { name: string; episodes: any[] }>;
-    };
-  };
 }
 
 export interface DownloadResponse {
@@ -213,13 +185,14 @@ export async function deleteSubtitle(
 
 // ── Episode data lookup by ID ──
 
-export async function fetchTmdbSeasonMap(tmdbId: number): Promise<Record<string, { name: string; episodes: { epNum: number; tmdbId: number; name: string }[] }>> {
+export async function fetchTmdbSeasonMap(tmdbId: number): Promise<{ name: string; seasons: Record<string, CatalogSeason> }> {
   const res = await fetch(`/api/rss/tmdb/${tmdbId}/seasons`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  const catalog = normalizeEpisodeCatalog({ tmdb: { [String(tmdbId)]: await res.json() } });
+  return { name: catalogSeriesTitle(catalog, String(tmdbId)) || `TMDB ${tmdbId}`, seasons: catalog.tmdb[String(tmdbId)] };
 }
 
-export async function fetchBangumiEpisodes(bangumiId: number): Promise<{ id: number; name: string; episodes: { sort: number; id: number; name: string; name_cn?: string }[] }> {
+export async function fetchBangumiEpisodes(bangumiId: number): Promise<BangumiCatalogEntry> {
   const res = await fetch(`${API_BASE}/torrent/bangumi/${bangumiId}/episodes`);
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -236,7 +209,7 @@ export async function fetchBangumiEpisodes(bangumiId: number): Promise<{ id: num
     }
     throw new Error(`Expected JSON but got ${ct || 'unknown'}`);
   }
-  return res.json();
+  return normalizeEpisodeCatalog({ bangumi: { [String(bangumiId)]: await res.json() } }).bangumi[String(bangumiId)];
 }
 
 export async function updateConfig(changes: Partial<AppConfig>): Promise<AppConfig> {
@@ -250,4 +223,15 @@ export async function updateConfig(changes: Partial<AppConfig>): Promise<AppConf
     throw new Error(err.detail || `Failed to update config (HTTP ${res.status})`);
   }
   return res.json();
+}
+
+
+export async function augmentPreview(preview: TorrentPreviewResponse, provider: 'tmdb' | 'tvdb' | 'bangumi', id: number): Promise<TorrentPreviewResponse> {
+  const res = await fetch(`${API_BASE}/torrent/previews/${encodeURIComponent(preview.preview_id)}/augment`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preview_revision: preview.revision, show_key: Object.keys(preview.search_results)[0],
+      provider, ...(provider === 'bangumi' ? { subject_id: id } : { series_id: id }) }),
+  });
+  if (!res.ok) { const body = await res.json(); throw new Error(body.detail || `HTTP ${res.status}`); }
+  return normalizeTorrentPreview(await res.json());
 }

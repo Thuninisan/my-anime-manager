@@ -225,3 +225,11 @@ async def get_series_translations(series_id: int, language: str) -> httpx.Respon
         f"/series/{series_id}/translations/{language}",
         label=f"TVDB series/{series_id}/translations/{language}",
     )
+
+
+async def get_episode_translations(episode_id: int, language: str) -> httpx.Response:
+    """Fetch a selected episode translation without downloading its series catalog."""
+    return await _tvdb_request(
+        "GET", f"/episodes/{episode_id}/translations/{language}",
+        label=f"TVDB episode/{episode_id}/translations/{language}",
+    )

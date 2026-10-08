@@ -33,4 +33,5 @@ from .images import (
     get_subscription_poster_url,
 )
 from .metadata_builder import generate_metadata
-from .nfo_xml import generate_episode_nfo, generate_season_nfo, generate_tv_show_nfo
+from .episode_compat import generate_episode_nfo
+from .nfo_xml import generate_season_nfo, generate_tv_show_nfo

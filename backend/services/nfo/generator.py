@@ -1,16 +1,14 @@
-"""Episode file generation — thumbnail download + NFO writing.
+"""NFO orchestration: acquire provider data, resolve episodes, download assets, serialize.
 
-Pure file-writing layer — no API calls.  Used by both the RSS flow
-(:func:`~.metadata_builder.generate_metadata`) and the torrent batch
-flow (:func:`~backend.services.torrent.batch_service.generate_metadata_collection`).
+Legacy RSS/batch inputs cross the domain adapters before metadata resolution.
+The XML writer consumes only ResolvedEpisode; compatibility calls are re-exported.
 """
 
 import logging
 from pathlib import Path
 
 from ... import config
-from .images import download_episode_thumb
-from .nfo_xml import generate_episode_nfo
+from .episode_compat import write_episode_files
 
 logger = logging.getLogger(__name__)
 
@@ -29,8 +27,8 @@ def sanitize_path_name(name: str) -> str:
 
 def format_download_path(
     template: str, sub: dict, sort: int = 0, ext: str = "",
-    bangumi_sort: int = 0, bangumi_ep: int = 0,
-    tvdb_episode: int = 0, tmdb_episode: int = 0,
+    bangumi_sort: int | None = None, bangumi_ep: int | None = None,
+    tvdb_episode: int | None = None, tmdb_episode: int | None = None,
     tmdb_title: str = "",
 ) -> str:
     """Format a download path template with subscription and episode variables.
@@ -62,107 +60,21 @@ def format_download_path(
     _tvdb_s = tvdb.get("season")
     _tmdb_s = tmdb.get("season")
     _bgm_s = bgm.get("season", 1)
+    effective_sort = bangumi_sort if bangumi_sort is not None else sort
+    effective_bangumi_episode = bangumi_ep if bangumi_ep is not None else effective_sort
     return template.format(
         series_name=sanitize_path_name(sub.get("series_name") or sub.get("name", "")),
         bangumi_title=sanitize_path_name(bgm.get("subject_name") or sub.get("name", "")),
         bgm_season=_bgm_s,
         tvdb_season=_tvdb_s if _tvdb_s is not None else _bgm_s,
         tmdb_season=_tmdb_s if _tmdb_s is not None else _bgm_s,
-        sort=bangumi_sort or sort,
-        bangumi_sort=bangumi_sort or sort,
-        bangumi_ep=bangumi_ep or bangumi_sort or sort,
-        tvdb_episode=tvdb_episode or bangumi_ep or bangumi_sort or sort,
-        tmdb_episode=tmdb_episode or bangumi_sort or sort,
+        sort=effective_sort,
+        bangumi_sort=effective_sort,
+        bangumi_ep=effective_bangumi_episode,
+        tvdb_episode=tvdb_episode if tvdb_episode is not None else effective_bangumi_episode,
+        tmdb_episode=tmdb_episode if tmdb_episode is not None else effective_sort,
         tmdb_title=sanitize_path_name(tmdb_title or sub.get("series_name") or sub.get("name", "")),
     ) + ext
-
-
-async def write_episode_files(
-    tmdb_ep: dict,
-    *,
-    season_number: int,
-    episode_number: int,
-    bangumi_ep_id: int | None,
-    show_name: str,
-    original_name: str,
-    bangumi_subject_name: str,
-    studios: list[str] | None = None,
-    rating: float = 0.0,
-    output_dir: str = ".",
-    thumb_source: str = "tmdb",
-    file_stem: str = "",
-) -> dict:
-    """Download episode thumbnail and generate ``.nfo`` — no API calls.
-
-    All metadata must already be extracted into *tmdb_ep* before
-    calling.  Used by both the RSS flow (:func:`~.metadata_builder.generate_metadata`)
-    and the torrent batch flow (:func:`~backend.services.torrent.batch_service.generate_metadata_collection`).
-
-    Args:
-        tmdb_ep: Normalised dict with keys ``name``, ``overview``,
-            ``air_date``, ``runtime``, ``still_path``.
-        season_number:  Season number written into the NFO.
-        episode_number: Episode number written into the NFO.
-        bangumi_ep_id:  Bangumi episode ID (or ``None``).
-        show_name:      Show title → ``<showtitle>``.
-        original_name:  Original name → ``<originaltitle>``.
-        bangumi_subject_name: Bangumi subject name (fallback for file naming).
-        studios:        Network / studio names.
-        output_dir:     Directory to write NFO and thumbnail into.
-        thumb_source:   ``"tvdb"`` or ``"tmdb"`` controls which CDN is used.
-        file_stem:      Base filename (without extension) from path template.
-            If empty, falls back to ``{bangumi_subject_name} {ep:02d}``.
-
-    Returns:
-        ``{"nfo_path": str, "thumb_path": str}``.
-    """
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-    # ── Thumbnail ───────────────────────────────────────────────────
-    if file_stem:
-        thumb_base = file_stem
-    else:
-        thumb_base = f"{bangumi_subject_name or show_name} {episode_number:02d}"
-    thumb_path = ""
-    still = tmdb_ep.get("still_path", "")
-    if still:
-        try:
-            if thumb_source == "tvdb":
-                from .images import download_tvdb_episode_thumb
-                thumb_path = await download_tvdb_episode_thumb(
-                    still, output_dir, thumb_base,
-                ) or ""
-            else:
-                thumb_path = await download_episode_thumb(
-                    still, output_dir, thumb_base,
-                ) or ""
-        except Exception:
-            logger.exception("thumbnail download failed (non-fatal)")
-
-    # ── Episode NFO ─────────────────────────────────────────────────
-    nfo_path = generate_episode_nfo(
-        show_name=show_name,
-        original_name=original_name,
-        episode_name=tmdb_ep.get("name", ""),
-        plot=tmdb_ep.get("overview", ""),
-        air_date=tmdb_ep.get("air_date", ""),
-        runtime=tmdb_ep.get("runtime", 0),
-        season_number=season_number,
-        episode_number=episode_number,
-        bangumi_ep_id=bangumi_ep_id,
-        bangumi_subject_name=bangumi_subject_name or show_name,
-        directors=tmdb_ep.get("directors", []),
-        writers=tmdb_ep.get("writers", []),
-        actors=tmdb_ep.get("guest_stars", []),
-        thumb_path=Path(thumb_path).name if thumb_path else "",
-        studios=studios or [],
-        rating=rating,
-        output_dir=output_dir,
-        tvdb_ep_id=tmdb_ep.get("tvdb_ep_id", 0),
-        file_stem=file_stem,
-    )
-
-    return {"nfo_path": nfo_path, "thumb_path": thumb_path}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -196,16 +108,12 @@ async def batch_nfo_generator(
     """
     import asyncio
     from ... import config
-    from ...clients import tmdb as tmdb_client
-    from .. import tmdb as tmdb_service
-    from ..enrich import _get_bangumi_episodes
-    from ..tvdb import fetch_tvdb_series_episodes
     from .images import (
         download_episode_thumb, download_show_images, download_season_poster,
         download_tvdb_episode_thumb,
     )
     from .nfo_xml import (
-        generate_episode_nfo, generate_tv_show_nfo, generate_season_nfo,
+        generate_episode_nfo as write_resolved_episode_nfo, generate_tv_show_nfo, generate_season_nfo,
     )
 
     if not episodes:
@@ -215,11 +123,17 @@ async def batch_nfo_generator(
 
     template = config.RSS_PATH_TEMPLATE
 
-    # ── Phase 1: Collect unique IDs ───────────────────────────────────
-    unique_bgm_ids = {ep["bangumi_subject_id"] for ep in episodes}
-    unique_tvdb_ids = {ep["tvdb_id"] for ep in episodes if ep.get("tvdb_id")}
-    unique_tmdb_ids = {ep["tmdb_id"] for ep in episodes}
-    unique_tmdb_seasons = {ep["tmdb_id"] for ep in episodes}
+    from ...domain.episode_metadata_adapters import (
+        legacy_batch_episode_mapping, metadata_candidates_from_catalogs, bind_legacy_episode_ids,
+    )
+    from ..episode_metadata_resolver import resolve_nfo_episode
+    mappings = [legacy_batch_episode_mapping(episode) for episode in episodes]
+
+    # ── Phase 1: Collect already determined identities ───────────────
+    unique_bgm_ids = {mapping["bangumi"]["subject_id"] for mapping in mappings if mapping["bangumi"]["subject_id"]}
+    unique_tvdb_ids = {mapping["tvdb"]["series_id"] for mapping in mappings if mapping["tvdb"]["series_id"]}
+    unique_tmdb_ids = {mapping["tmdb"]["series_id"] for mapping in mappings if mapping["tmdb"]["series_id"]}
+    unique_tmdb_seasons = unique_tmdb_ids
 
     # ── Phase 2: Pre-fetch all data (parallel where possible) ─────────
     bgm_cache: dict[int, list[dict]] = {}
@@ -240,7 +154,6 @@ async def batch_nfo_generator(
             bgm_cache[bgm_id] = []
         # Also fetch subject name + full data
         try:
-            from ...clients import bangumi as bgm_client
             subject = await metadata_ctx.get_bgm_subject(bgm_id)
             bgm_subject_cache[bgm_id] = subject.get("name_cn") or subject.get("name", str(bgm_id))
             bgm_subject_data_cache[bgm_id] = subject
@@ -306,127 +219,43 @@ async def batch_nfo_generator(
     pending_eps: list[dict] = []
     thumb_coros: list = []  # (coroutine, index into pending_eps)
 
-    for ep in episodes:
-        bgm_id = ep["bangumi_subject_id"]
-        bgm_sort = ep.get("bangumi_episode_sort", 0)
-        tvdb_id = ep.get("tvdb_id") or 0
-        tvdb_season = ep.get("tvdb_season")  # keep None — 0 is valid (Specials)
-        tvdb_ep = ep.get("tvdb_episode") or 0
-        tmdb_id = ep["tmdb_id"]
-        tmdb_season = ep.get("tmdb_season", 0)
-        tmdb_ep_num = ep.get("tmdb_episode", 0)
+    for ep, mapping in zip(episodes, mappings):
+        bgm_id = mapping["bangumi"]["subject_id"]
+        bgm_sort = mapping["bangumi"]["episode_absolute"]
+        tvdb_id = mapping["tvdb"]["series_id"] or 0
+        tvdb_season = mapping["tvdb"]["season_number"]  # keep None — 0 is valid (Specials)
+        tvdb_ep = mapping["tvdb"]["episode_number"]
+        tmdb_id = mapping["tmdb"]["series_id"] or 0
+        tmdb_season = mapping["tmdb"]["season_number"]
+        tmdb_ep_num = mapping["tmdb"]["episode_number"]
         ep_context = f"BGM {bgm_id} 第{bgm_sort}集 / TMDB {tmdb_id} S{int(tmdb_season or 0):02d}E{int(tmdb_ep_num or 0):02d}"
 
         # ── Resolve metadata from caches ──
         show = tmdb_show_cache.get(tmdb_id, {})
         tmdb_title = show.get("title", str(tmdb_id))
 
-        # BGM episode data
-        bgm_ep_name = ""
-        bgm_ep_name_cn = ""
-        bangumi_ep_val = bgm_sort
-        for e in bgm_cache.get(bgm_id, []):
-            if (e.get("sort") or e.get("ep", 0)) == bgm_sort:
-                bangumi_ep_val = e.get("ep") or bgm_sort
-                bgm_ep_name = (e.get("name") or "").strip()
-                bgm_ep_name_cn = (e.get("name_cn") or "").strip()
-                break
-
-        # TVDB episode data
-        tvdb_ep_data: dict = {}
-        if tvdb_id and tvdb_id in tvdb_cache:
-            tvdb_seasons = tvdb_cache[tvdb_id].get("seasons", {})
-            _lookup_tvdb_s = tvdb_season if tvdb_season is not None else tmdb_season
-            season_data = tvdb_seasons.get(str(_lookup_tvdb_s), {})
-            for tv_ep in season_data.get("episodes", []):
-                if tv_ep.get("epNum") == tvdb_ep:
-                    tvdb_ep_data = {
-                        "tvdb_ep_id": tv_ep.get("tvdbId", 0),
-                        "site_rating": tv_ep.get("siteRating", 0) or 0,
-                        "overview": tv_ep.get("overview", ""),
-                        "name": tv_ep.get("name", ""),
-                        "air_date": tv_ep.get("airDate", ""),
-                        "runtime": tv_ep.get("runtime", 0),
-                        "still_path": tv_ep.get("stillPath", ""),
-                    }
-                    break
-
-        # TMDB episode data
-        tmdb_ep_data: dict = {}
-        season_map = await metadata_ctx.get_tmdb_season_map(tmdb_id, "zh-CN")
-        season_eps = season_map.get(str(tmdb_season), season_map.get(tmdb_season, {}))
-        for tm_ep in season_eps.get("episodes", []):
-            if tm_ep.get("epNum") == tmdb_ep_num:
-                tmdb_ep_data = dict(tm_ep)
-                break
-
-        # Merge: TMDB base, TVDB overrides (rating, tvdb_ep_id), BGM name_cn
-        still_source = "tmdb"
-        merged_ep: dict = dict(tmdb_ep_data)
-        # Normalise: build_season_episode_map returns camelCase keys
-        # (stillPath, airDate) — unify to snake_case for downstream code
-        if "stillPath" in merged_ep:
-            merged_ep.setdefault("still_path", merged_ep["stillPath"])
-        if tvdb_ep_data:
-            merged_ep.setdefault("tvdb_ep_id", tvdb_ep_data.get("tvdb_ep_id", 0))
-            if tvdb_ep_data.get("site_rating"):
-                merged_ep["site_rating"] = tvdb_ep_data["site_rating"]
-            if tvdb_ep_data.get("overview") and not merged_ep.get("overview"):
-                merged_ep["overview"] = tvdb_ep_data["overview"]
-            if tvdb_ep_data.get("still_path") and not merged_ep.get("still_path"):
-                merged_ep["still_path"] = tvdb_ep_data["still_path"]
-                still_source = "tvdb"
-        from .translate import resolve_episode_title
-        title_source: list[str] = []
-        merged_ep["name"] = await resolve_episode_title(
-            bgm_ep_name_cn, bgm_ep_name, tmdb_ep_data.get("name") or "",
-            show_name=bgm_subject_cache.get(bgm_id) or tmdb_title,
-            context=ep_context,
-            selected_source=title_source,
-        )
-
-        # ── Episode plot fallback (zh-CN via TMDB/TVDB/Bangumi+DeepSeek) ──
-        from .translate import is_chinese_plot, translate_ja_to_zh
-        initial_plot = merged_ep.get("overview") or ""
-        plot_source: list[str] = []
-        if is_chinese_plot(initial_plot):
-            plot_source.append("TMDB" if tmdb_ep_data.get("overview") else "TVDB")
-            logger.info("NFO [%s 简介] %s：命中中文简介；最终使用该来源", ep_context,
-                        "TMDB" if tmdb_ep_data.get("overview") else "TVDB")
+        # Raw provider payloads stop at the catalog compatibility boundary.
+        is_legacy = ep.get("episode_mapping") is None or ep.get("_legacy_episode_mapping", False)
+        season_map = await metadata_ctx.get_tmdb_season_map(tmdb_id, "zh-CN") if tmdb_id else {}
+        if metadata_ctx.preview_snapshot is not None:
+            from ..torrent.preview_session import metadata_candidates
+            candidates = metadata_candidates(metadata_ctx.preview_snapshot, mapping)
         else:
-            original_plot = merged_ep.get("overview") or ""
-            if original_plot:
-                logger.info("NFO [%s 简介] %s：现有简介非中文，继续回退", ep_context,
-                            "TMDB" if tmdb_ep_data.get("overview") else "TVDB")
-            merged_ep["overview"] = ""
-            try:
-                from .plot_fallback import resolve_episode_plot
-                zh_plot = await resolve_episode_plot(
-                    tmdb_id=tmdb_id,
-                    tvdb_id=tvdb_id,
-                    tvdb_season=tvdb_season,
-                    tvdb_ep=tvdb_ep,
-                    tmdb_season=tmdb_season,
-                    tmdb_ep_num=tmdb_ep_num,
-                    bangumi_id=bgm_id,
-                    bangumi_sort=bgm_sort,
-                    context=ep_context,
-                    selected_source=plot_source,
-                    metadata_ctx=metadata_ctx,
-                )
-                if not zh_plot and original_plot:
-                    logger.info("NFO [%s 简介] 原始简介：尝试 DeepSeek 翻译", ep_context)
-                    zh_plot = await translate_ja_to_zh(original_plot)
-                    if zh_plot:
-                        plot_source.append("原始简介 → DeepSeek")
-                    logger.info("NFO [%s 简介] 原始简介 → DeepSeek：%s", ep_context,
-                                "翻译成功" if zh_plot else "翻译失败")
-                if zh_plot:
-                    merged_ep["overview"] = zh_plot
-                else:
-                    logger.info("NFO [%s 简介] 最终使用：空简介", ep_context)
-            except Exception:
-                logger.warning("Chinese episode plot resolution failed", exc_info=True)
+            candidates = metadata_candidates_from_catalogs(
+                mapping, season_map, tvdb_cache.get(tvdb_id, {}),
+                bgm_cache.get(bgm_id, []), legacy=is_legacy,
+            )
+        if is_legacy:
+            mapping = bind_legacy_episode_ids(mapping, candidates, bgm_cache.get(bgm_id, []))
+        bangumi_ep_val = mapping["bangumi"]["episode_number"]
+        if is_legacy and bangumi_ep_val is None:
+            bangumi_ep_val = bgm_sort  # compatibility path naming only
+        resolved = await resolve_nfo_episode(
+            mapping, candidates,
+            show_name=bgm_subject_cache.get(bgm_id) or tmdb_title,
+            context=ep_context, metadata_ctx=metadata_ctx,
+        )
+        still_source = resolved["provenance"]["still_path"]
 
         # ── Compute paths via template ──
         sub = {
@@ -441,7 +270,7 @@ async def batch_nfo_generator(
         }
         rel_path = format_download_path(
             template, sub,
-            bangumi_sort=bgm_sort, bangumi_ep=int(bangumi_ep_val),
+            bangumi_sort=bgm_sort, bangumi_ep=int(bangumi_ep_val if bangumi_ep_val is not None else 0),
             tvdb_episode=tvdb_ep, tmdb_episode=tmdb_ep_num,
             tmdb_title=tmdb_title,
         ).lstrip("/")
@@ -467,18 +296,11 @@ async def batch_nfo_generator(
             )
             nfo_count += int(not show_nfo_exists)
             logger.info("   tvshow.nfo → %s", show_dir / "tvshow.nfo")
-            imgs = await download_show_images(tmdb_id, str(show_dir))
+            imgs = await download_show_images(tmdb_id, str(show_dir)) if tmdb_id else {}
             img_count += sum(1 for v in imgs.values() if v)
 
         # BGM subject name (for season.nfo originaltitle)
         bgm_subject_name = bgm_subject_cache.get(bgm_id, tmdb_title)
-
-        # BGM episode ID (for episode.nfo bangumiid)
-        bgm_ep_id = None
-        for e in bgm_cache.get(bgm_id, []):
-            if (e.get("sort") or e.get("ep", 0)) == bgm_sort:
-                bgm_ep_id = e.get("id")
-                break
 
         # ── season.nfo + poster (once per season_dir) ──
         season_key = str(season_dir)
@@ -511,7 +333,7 @@ async def batch_nfo_generator(
                 original_title=bgm_subject_name,
                 plot=season_plot,
                 premiered=show.get("first_air_date", ""),
-                season_number=int(effective_tvdb_season),
+                season_number=resolved["season_number"],
                 bangumi_id=bgm_id,
                 output_dir=str(season_dir),
                 tvdb_season_id=tvdb_id,
@@ -535,16 +357,8 @@ async def batch_nfo_generator(
                     pass
 
         # ── Episode: collect thumb coroutine + metadata ──
-        # Season and episode must be atomic: either both from TVDB
-        # or both from TMDB.  Mixing sources (e.g. TVDB season + TMDB
-        # episode) produces wrong results when the two databases use
-        # different season boundaries.
-        _use_tvdb = (tvdb_season is not None) and bool(tvdb_ep)
-        eff_season = tvdb_season if _use_tvdb else tmdb_season
-        eff_episode = tvdb_ep if _use_tvdb else tmdb_ep_num
-
-        # Collect thumbnail download coroutine (deferred to Phase 3b)
-        still = merged_ep.get("still_path", "")
+        # Coordinates and still provenance are already resolved.
+        still = resolved["metadata"]["still_path"]
         if still:
             if still_source == "tvdb":
                 thumb_coros.append((
@@ -563,16 +377,11 @@ async def batch_nfo_generator(
 
         pending_eps.append({
             "context": ep_context,
-            "title_source": title_source[0] if title_source else "未知",
-            "plot_source": plot_source[0] if plot_source else "空简介",
+            "title_source": resolved["provenance"]["title"],
+            "plot_source": resolved["provenance"]["plot"],
             "show": show,
-            "bgm_ep_name": bgm_ep_name,
-            "bgm_ep_name_cn": bgm_ep_name_cn,
             "bgm_subject_name": bgm_subject_name,
-            "bgm_ep_id": bgm_ep_id,
-            "merged_ep": merged_ep,
-            "eff_season": eff_season,
-            "eff_episode": eff_episode,
+            "resolved": resolved,
             "season_dir": str(season_dir),
             "file_stem": file_stem,
             "tmdb_id": tmdb_id,
@@ -601,23 +410,12 @@ async def batch_nfo_generator(
                         "季集编号=TVDB→TMDB；缩略图=%s",
                         rec["context"], rec["title_source"], rec["plot_source"],
                         "已下载" if thumb_path else "无")
-        generate_episode_nfo(
+        write_resolved_episode_nfo(
+            rec["resolved"],
             show_name=rec["show"].get("title", str(rec["tmdb_id"])),
-            original_name=rec["bgm_ep_name"] or rec["merged_ep"].get("name", ""),
-            episode_name=rec["merged_ep"].get("name", ""),
-            plot=rec["merged_ep"].get("overview", ""),
-            air_date=rec["merged_ep"].get("airDate", rec["merged_ep"].get("air_date", "")),
-            runtime=rec["merged_ep"].get("runtime", 0),
-            season_number=int(rec["eff_season"]),
-            episode_number=rec["eff_episode"],
-            bangumi_ep_id=rec["bgm_ep_id"],
             bangumi_subject_name=rec["bgm_subject_name"],
             thumb_path=Path(thumb_path).name if thumb_path else "",
-            rating=rec["merged_ep"].get("site_rating") or rec["merged_ep"].get("voteAverage", rec["merged_ep"].get("vote_average", 0)) or 0,
-            output_dir=rec["season_dir"],
-            tvdb_ep_id=rec["merged_ep"].get("tvdb_ep_id", 0),
-            file_stem=rec["file_stem"],
-            overwrite=overwrite,
+            output_dir=rec["season_dir"], file_stem=rec["file_stem"], overwrite=overwrite,
         )
         nfo_count += int(overwrite or not episode_nfo_exists)
         logger.info("   episode.nfo → %s", Path(rec["season_dir"]) / f"{rec['file_stem']}.nfo")

@@ -1,0 +1,36 @@
+"""The sole private snapshot → public matcher/UI projection."""
+import copy
+from ...domain.preview import PreviewContextSnapshot, TorrentPreviewResponse, PreviewParsedFileView, PreviewSearchEntry
+
+
+def search_views(snapshot: PreviewContextSnapshot) -> dict[str, PreviewSearchEntry]:
+    return {key: {
+        "tmdb": {"id": series["tmdb_series_id"], "name": series["display_name"]} if series["tmdb_series_id"] is not None else None,
+        "bangumi": {"id": series["bangumi_subject_id"], "name": snapshot["episode_catalog"]["bangumi"].get(
+            str(series["bangumi_subject_id"]), {}).get("name", series["bangumi_display_name"])} if series["bangumi_subject_id"] is not None else None,
+        "media_type": series["media_type"], "bangumi_ids": series["bangumi_subject_ids"],
+        "map_entries": copy.deepcopy(series["mapping_hints"]),
+    } for key, series in snapshot["series_contexts"].items()}
+
+
+def build_preview_view(snapshot: PreviewContextSnapshot, preview_id: str, revision: int, expires_at: str) -> TorrentPreviewResponse:
+    def file_view(item) -> PreviewParsedFileView:
+        return {"file_id": item["file_id"], "file_name": item["file_name"], "torrent_path": item["torrent_path"],
+                "show_name": item["show_key"], "parsed_episode": dict(item["parsed"])}
+    return {"preview_id": preview_id, "revision": revision, "expires_at": expires_at,
+            "torrent_name": snapshot["torrent"]["name"], "torrent_path": "",
+            "resource_id": snapshot["torrent"]["resource_id"], "index": snapshot["episode_match_source"],
+            "parsed_files": [file_view(f) for f in snapshot["parsed_files"] if f["kind"] == "video"],
+            "specials": [file_view(f) for f in snapshot["parsed_files"] if f["kind"] == "special"],
+            "subtitles": [f["torrent_path"] for f in snapshot["parsed_files"] if f["kind"] == "subtitle"],
+            "subtitle_files": [file_view(f) for f in snapshot["parsed_files"] if f["kind"] == "subtitle"],
+            "series": [{key: series[key] for key in ("show_key", "display_name", "tmdb_series_id", "tvdb_series_id", "bangumi_subject_id")}
+                       for series in snapshot["series_contexts"].values()],
+            "skipped_files": copy.deepcopy(snapshot["skipped_files"]),
+            "search_results": search_views(snapshot), "episode_catalog": copy.deepcopy(snapshot["episode_catalog"])}
+
+
+def session_view(row) -> dict:
+    from .preview_session import load_preview_session
+    row, snapshot = load_preview_session(row.id)
+    return build_preview_view(snapshot, row.id, row.revision, row.expires_at)

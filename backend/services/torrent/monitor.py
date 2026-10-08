@@ -12,6 +12,7 @@ import re
 from pathlib import Path
 
 from ... import config
+from ...domain.episode_metadata_adapters import download_entry_with_mapping, episode_path_parameters
 from ...clients.qbittorrent import get_torrents_by_hashes, login as qb_login
 from ...utils.paths import SUBTITLE_DIR
 from .fontinass import copy_subtitle
@@ -44,8 +45,7 @@ def build_processing(context: dict) -> dict:
         sub = _make_sub_for_path(item, context.get("series_name", ""))
         rel = format_download_path(
             config.RSS_PATH_TEMPLATE, sub,
-            tvdb_episode=item.get("tvdb_episode") or 0,
-            tmdb_episode=item.get("tmdb_episode") or 0,
+            **episode_path_parameters(item),
         ).lstrip("/")
         rel = str(Path(rel).with_suffix(suffix))
         target = root / item.get("replacement_target", rel)
@@ -131,6 +131,7 @@ def _sanitize(name: str) -> str:
 
 def _make_sub_for_path(f: dict, series_name: str = "") -> dict:
     """Build a pseudo-subscription dict for :func:`format_download_path`."""
+    f = download_entry_with_mapping(f)
     bgm_name = f.get("bangumi_show_name", "")
     return {
         "name": bgm_name,
@@ -140,7 +141,7 @@ def _make_sub_for_path(f: dict, series_name: str = "") -> dict:
             "season": 1,
         },
         "tvdb": {
-            "season": f.get("tvdb_season") or f.get("tmdb_season", 1),
+            "season": f.get("tvdb_season") if f.get("tvdb_season") is not None else f.get("tmdb_season", 1),
         },
         "tmdb": {
             "season": f.get("tmdb_season", 1),
@@ -275,12 +276,10 @@ async def monitor_download(
                     src_ext = _subtitle_suffix(f, Path(torrent_path).suffix) if is_sub else Path(torrent_path).suffix
 
                     sub = _make_sub_for_path(f, series_name)
-                    tvdb_ep = f.get("tvdb_episode") or 0
-                    tmdb_ep = f.get("tmdb_episode") or 0
 
                     rel_path = format_download_path(
                         template, sub,
-                        tvdb_episode=tvdb_ep, tmdb_episode=tmdb_ep,
+                        **episode_path_parameters(f),
                     ).lstrip("/")
                     # Replace extension with the actual source extension
                     rel_path = str(Path(rel_path).with_suffix(src_ext))
@@ -319,12 +318,10 @@ async def monitor_download(
                         continue
 
                     sub = _make_sub_for_path(usub, series_name)
-                    tvdb_ep = usub.get("tvdb_episode") or 0
-                    tmdb_ep = usub.get("tmdb_episode") or 0
 
                     rel_path = format_download_path(
                         template, sub,
-                        tvdb_episode=tvdb_ep, tmdb_episode=tmdb_ep,
+                        **episode_path_parameters(usub),
                     ).lstrip("/")
                     rel_path = str(Path(rel_path).with_suffix(_subtitle_suffix(usub, src_sub.suffix)))
 
@@ -353,13 +350,11 @@ async def monitor_download(
                         continue
 
                     sub = _make_sub_for_path(f, series_name)
-                    tvdb_ep = f.get("tvdb_episode") or 0
-                    tmdb_ep = f.get("tmdb_episode") or 0
 
                     # Compute paths via template
                     rel_path = format_download_path(
                         template, sub,
-                        tvdb_episode=tvdb_ep, tmdb_episode=tmdb_ep,
+                        **episode_path_parameters(f),
                     ).lstrip("/")
                     file_stem = Path(rel_path).stem
                     season_dir = Path(hardlink_root) / Path(rel_path).parent
@@ -406,6 +401,7 @@ async def monitor_download(
                     # Episode NFO
                     await write_episode_files(
                         {},  # tmdb_ep (empty = skip thumb download)
+                        episode_mapping=f.get("episode_mapping"),
                         season_number=f.get("tmdb_season", 0),
                         episode_number=f.get("tmdb_episode", 0),
                         bangumi_ep_id=f.get("bangumi_ep_id"),

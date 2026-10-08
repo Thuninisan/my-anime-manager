@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<episodedetails>
+  <title>中文标题</title>
+  <originaltitle>原名</originaltitle>
+  <showtitle>测试番剧 &amp; Show</showtitle>
+  <season>2</season>
+  <episode>15</episode>
+  <year>2026</year>
+  <bangumiid>201</bangumiid>
+  <plot>这是本集简介。</plot>
+  <aired>2026-01-02</aired>
+  <premiered>2026-01-02</premiered>
+  <runtime>24</runtime>
+  <rating>8.2</rating>
+  <thumb>episode.jpg</thumb>
+  <tvdbid>301</tvdbid>
+</episodedetails>

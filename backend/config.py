@@ -42,12 +42,14 @@ _DEFAULTS: dict[str, Any] = {
     "TORRENT_EXCLUDE_PATTERNS": "cds,scans,pv,cm,menu,iv,preview,mka,nced,ncop",
     "TORRENT_HARDLINK_PATH": "/Media/BD",
     "MOVIE_HARDLINK_PATH": "/Media/剧场版",
+    "PREVIEW_SESSION_TTL_HOURS": 72,
     "FONTINASS_ENABLED": False,
     "FONTINASS_URL": "https://font.anibt.net",
     "FONTINASS_TIMEOUT": 180,
 }
 
 _BOUNDED_INTS = {"RESOURCE_POLL_INTERVAL_MIN": (1, 1440), "RSS_POLL_INTERVAL_MIN": (1, 1440), "API_DELAY_MS": (0, 60000), "PROXY_PORT": (1, 65535)}
+_BOUNDED_INTS["PREVIEW_SESSION_TTL_HOURS"] = (1, 720)
 _BOUNDED_INTS["FONTINASS_TIMEOUT"] = (10, 600)
 
 

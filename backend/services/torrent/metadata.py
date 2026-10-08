@@ -12,33 +12,8 @@ from ... import config
 
 logger = logging.getLogger(__name__)
 
-def _find_tmdb_id(preview_data: dict | None, show_name: str) -> int:
-    """Find TMDB ID from preview_data for a given show name."""
-    if not preview_data:
-        return 0
-    search_results = preview_data.get("search_results", {})
-    for entry in search_results.values():
-        tmdb = entry.get("tmdb", {}) if isinstance(entry, dict) else {}
-        if tmdb.get("id"):
-            return tmdb["id"]
-    return 0
-
-
-def _find_tvdb_id(preview_data: dict | None, bgm_id: int) -> int:
-    """Find TVDB ID from preview_data's map_entries for a given BGM ID."""
-    if not preview_data or not bgm_id:
-        return 0
-    search_results = preview_data.get("search_results", {})
-    for entry in search_results.values():
-        map_entries = entry.get("map_entries", []) if isinstance(entry, dict) else []
-        for me in map_entries:
-            if me.get("bangumi_id") == bgm_id and me.get("tvdb_id"):
-                return me["tvdb_id"]
-    return 0
-
-
 async def pre_generate_nfo(
-    preview_data: dict,
+    preview_data: dict | None,
     files: list[dict],
     torrent_name: str,
     hardlink_root: str,
@@ -100,22 +75,34 @@ async def pre_generate_nfo(
             for f in files:
                 if f.get("is_subtitle"):
                     continue
-                # Resolve bangumi_subject_id from the file's bangumi_id
-                # (the search_result's bangumi.id for this show_name)
-                bgm_id = f.get("bangumi_id", 0)
-                nfo_episodes.append({
-                    "bangumi_subject_id": bgm_id,
-                    "bangumi_episode_sort": f.get("bangumi_sort", 0),
-                    "tvdb_id": f.get("tvdb_season") and f.get("tvdb_episode") and _find_tvdb_id(preview_data, bgm_id) or 0,
-                    "tvdb_season": f.get("tvdb_season"),     # None if not provided — 0 is valid (Specials)
-                    "tvdb_episode": f.get("tvdb_episode"),   # None if not provided
-                    "tmdb_id": _find_tmdb_id(preview_data, f.get("tmdb_show_name", "")),
-                    "tmdb_season": f.get("tmdb_season", 0),
-                    "tmdb_episode": f.get("tmdb_episode", 0),
-                })
+                from ...domain.episode_metadata_adapters import (
+                    legacy_download_episode_mapping, mapping_to_legacy_batch_episode,
+                )
+                mapping = legacy_download_episode_mapping(f, preview_data)
+                episode_entry = mapping_to_legacy_batch_episode(mapping)
+                episode_entry["_legacy_episode_mapping"] = f.get("episode_mapping") is None
+                nfo_episodes.append(episode_entry)
             if nfo_episodes:
                 from ..nfo.generator import batch_nfo_generator
-                summary = await batch_nfo_generator(hardlink_root, nfo_episodes, series_name=series_name)
+                from ..nfo.metadata_context import MetadataContext
+                from ...domain.episode_metadata_adapters import seed_preview_metadata
+                metadata_ctx = MetadataContext()
+                snapshot = preview_data.get("canonical_snapshot")
+                if snapshot is not None:
+                    metadata_ctx.preview_snapshot = snapshot
+                    # Even absent provider catalogs are authoritative for this session.
+                    for mapping in (entry["episode_mapping"] for entry in nfo_episodes):
+                        tid = mapping["tmdb"]["series_id"]
+                        vid = mapping["tvdb"]["series_id"]
+                        bid = mapping["bangumi"]["subject_id"]
+                        metadata_ctx.tmdb_season_maps[(tid, "zh-CN")] = {}
+                        metadata_ctx.tvdb_series[(vid, "jpn")] = {}
+                        metadata_ctx.bgm_episodes[bid] = []
+                else:
+                    seed_preview_metadata(metadata_ctx, preview_data)
+                summary = await batch_nfo_generator(
+                    hardlink_root, nfo_episodes, series_name=series_name, metadata_ctx=metadata_ctx,
+                )
                 nfo_generated = True
                 logger.info(
                     "预生成元数据完成 [%s]: NFO=%d, images=%d",

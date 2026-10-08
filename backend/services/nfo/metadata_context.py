@@ -3,6 +3,8 @@
 
 class MetadataContext:
     def __init__(self):
+        self.preview_snapshot = None
+        self.tvdb_episode_translations = {}
         self.tmdb_details = {}
         self.tmdb_season_maps = {}
         self.tmdb_images = {}
@@ -53,3 +55,12 @@ class MetadataContext:
                 payload = response.json()
                 self.tvdb_series[key] = payload.get("data", payload)
         return self.tvdb_series[key]
+
+
+    async def get_tvdb_episode_translation(self, episode_id: int, language: str = "zho") -> dict:
+        from ...clients import tvdb as client
+        key = (episode_id, language)
+        if key not in self.tvdb_episode_translations:
+            payload = (await client.get_episode_translations(episode_id, language)).json()
+            self.tvdb_episode_translations[key] = payload.get("data", payload)
+        return self.tvdb_episode_translations[key]

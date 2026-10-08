@@ -234,7 +234,7 @@ def find_best_episode_group(groups: list[dict]) -> dict | None:
 
 
 async def build_season_episode_map(
-    tv_id: int, language: str = "", *, tv_detail: dict | None = None,
+    tv_id: int, language: str = "", *, tv_detail: dict | None = None, strict: bool = False,
 ) -> dict[int, dict]:
     """Build a TMDB season→episodes mapping using the default Season API.
 
@@ -262,6 +262,9 @@ async def build_season_episode_map(
         detail = tv_detail if tv_detail is not None else (await tmdb_client.get_tv_detail(tv_id)).json()
         total_seasons = detail.get("number_of_seasons", 0)
     except Exception:
+        if strict:
+            raise
+        detail = {}
         total_seasons = 0
 
     if total_seasons <= 0:
@@ -277,11 +280,15 @@ async def build_season_episode_map(
             res = await tmdb_client.get_season_detail(tv_id, s, language=language)
         except Exception as exc:
             logger.warning(f"   ⚠️ S{s:02d} 请求失败: {exc}")
+            if strict:
+                raise
             continue
 
         try:
             data = res.json()
         except Exception:
+            if strict:
+                raise
             continue
 
         if not data or not data.get("episodes"):
@@ -322,6 +329,7 @@ async def build_season_episode_map(
                 "runtime": ep.get("runtime", 0),
                 "stillPath": ep.get("still_path", ""),
                 "voteAverage": ep.get("vote_average", 0),
+                "voteCount": ep.get("vote_count"),
                 "directors": directors,
                 "writers": writers,
                 "guestStars": guest_stars,
@@ -360,6 +368,7 @@ async def build_season_episode_map(
                         "runtime": ep.get("runtime", 0),
                         "stillPath": ep.get("still_path", ""),
                         "voteAverage": ep.get("vote_average", 0),
+                        "voteCount": ep.get("vote_count"),
                     })
                 episodes.sort(key=lambda e: e["epNum"])
                 season_map[0] = {
@@ -368,7 +377,8 @@ async def build_season_episode_map(
                 }
                 logger.debug(f"   ✅ S00 (Specials): {len(episodes)} 集")
         except Exception:
-            pass
+            if strict:
+                raise
 
     logger.debug(f"   📊 共获取 {len(season_map)} 个季: S{sorted(season_map.keys())}")
     return season_map

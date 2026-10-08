@@ -67,10 +67,10 @@ def configure_logging() -> None:
     if _configured:
         return
 
-    level_name = os.environ.get("MAM_LOG_LEVEL", "INFO").upper()
+    level_name = os.environ.get("MAM_LOG_LEVEL", "DEBUG").upper()
     level = logging.getLevelNamesMapping().get(level_name)
     if not isinstance(level, int):
-        level = logging.INFO
+        level = logging.DEBUG
 
     timezone_info = _log_timezone()
     formatter = TimezoneFormatter(
@@ -118,10 +118,15 @@ def configure_logging() -> None:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     _configured = True
+    logging.getLogger(__name__).info("日志已配置: level=%s directory=%s", logging.getLevelName(level), _log_directory())
 
 
 def new_operation_id(prefix: str) -> str:
     return f"{prefix}-{uuid4().hex[:10]}"
+
+
+def current_operation_id() -> str:
+    return _operation_id.get()
 
 
 def safe_url(url: str) -> str:

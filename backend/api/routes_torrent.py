@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from .. import config
+from ..domain.episode_metadata_adapters import download_entry_with_mapping
 from ..db import torrents as torrent_store
 from . import state
 from ..clients import bangumi as bgm_client
@@ -28,6 +29,7 @@ from ..services.nfo import format_download_path
 from ..utils.torrent_hash import compute_info_hash
 from ..services.torrent.monitor import build_processing, monitor_download, monitor_processing
 from ..services.torrent import fontinass
+from ..logging.logging_config import new_operation_id, operation_context
 from ..services.torrent.metadata import pre_generate_nfo
 from ..services.torrent.preview import derive_series_name
 from ..utils.paths import SUBTITLE_DIR
@@ -48,7 +50,7 @@ async def list_torrent_collections():
 
 
 def _start_fontinass(info_hash: str, *, retry: bool = False) -> None:
-    async def run() -> None:
+    async def run_work() -> None:
         try:
             await fontinass.process(info_hash, retry=retry)
         except asyncio.CancelledError:
@@ -57,6 +59,9 @@ def _start_fontinass(info_hash: str, *, retry: bool = False) -> None:
             logger.exception("FontInAss 后处理异常 [%s]", info_hash[:8])
         finally:
             state._download_tasks.pop(info_hash, None)
+    async def run() -> None:
+        with operation_context(new_operation_id("fontinass")):
+            await run_work()
     state._download_tasks[info_hash] = asyncio.create_task(run())
 
 
@@ -64,13 +69,17 @@ def _start_fontinass(info_hash: str, *, retry: bool = False) -> None:
 async def retry_fontinass(info_hash: str):
     record = torrent_store.get_torrent(info_hash)
     if not record:
+        logger.debug("fontinass.retry.rejected torrent=%s reason=not_found", info_hash)
         raise HTTPException(404, "Torrent 不存在")
     task = state._download_tasks.get(info_hash)
     if record["status"] == "downloading" or (task and not task.done()):
+        logger.debug("fontinass.retry.rejected torrent=%s reason=task_active", info_hash)
         raise HTTPException(409, "Torrent 后处理尚未结束")
     if not config.FONTINASS_ENABLED:
+        logger.debug("fontinass.retry.rejected torrent=%s reason=disabled", info_hash)
         raise HTTPException(400, "请先在设置中启用 FontInAss")
     if not any(item["status"] == "failed" for item in record.get("fontinass", {}).get("files", [])):
+        logger.debug("fontinass.retry.rejected torrent=%s reason=no_failed_files", info_hash)
         raise HTTPException(400, "没有需要重试的失败字幕")
     subtitle_state = record["fontinass"]
     subtitle_state.pop("settings", None)
@@ -79,6 +88,8 @@ async def retry_fontinass(info_hash: str):
         if item["status"] == "failed":
             item.update(status="pending", error="")
     torrent_store.save_fontinass(info_hash, subtitle_state)
+    logger.info("fontinass.retry.accepted torrent=%s files=%d", info_hash,
+                sum(item["status"] == "pending" for item in subtitle_state["files"]))
     _start_fontinass(info_hash)
     return {"status": "accepted"}
 
@@ -129,7 +140,7 @@ def _start_torrent_monitor(record: dict, context: dict | None = None) -> None:
     if existing and not existing.done():
         return
 
-    async def run() -> None:
+    async def run_work() -> None:
         try:
             processing = record["processing"]
             if context is None:
@@ -158,12 +169,16 @@ def _start_torrent_monitor(record: dict, context: dict | None = None) -> None:
                 hashes, old_links = await bd_replacement.old_files(client, bangumi_id, episodes, info_hash)
                 success = await bd_replacement.finalize(client, bangumi_id, episodes, hashes, old_links, linked, required)
             if linked is not None:
+                logger.debug("fontinass.dispatch torrent=%s media_success=%s copied_subtitle_operations=%d",
+                             info_hash, success, sum(item["action"] == "copy" for item in processing["files"]))
                 try:
                     await fontinass.process(info_hash)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     logger.exception("FontInAss 后处理异常，保留媒体整理结果 [%s]", info_hash[:8])
+            else:
+                logger.debug("fontinass.dispatch.skipped torrent=%s reason=download_monitor_failed_or_timed_out", info_hash)
             torrent_store.finish_torrent(info_hash, "completed" if success else "failed")
         except asyncio.CancelledError:
             raise
@@ -173,6 +188,12 @@ def _start_torrent_monitor(record: dict, context: dict | None = None) -> None:
         finally:
             state._download_tasks.pop(info_hash, None)
 
+    async def run() -> None:
+        with operation_context(new_operation_id("torrent")):
+            logger.debug("torrent.monitor.start torrent=%s mode=%s operations=%d", info_hash,
+                         "recovery" if context is None else "normal", len(record["processing"]["files"]))
+            await run_work()
+
     state._download_tasks[info_hash] = asyncio.create_task(run())
 
 
@@ -180,10 +201,16 @@ async def recover_torrent_monitors() -> None:
     """Reattach persisted monitors; fail jobs whose qBittorrent entry vanished."""
     for record in torrent_store.list_torrents():
         subtitle_state = record.get("fontinass", {})
-        if (config.FONTINASS_ENABLED and record["status"] != "downloading"
-                and subtitle_state.get("ready") and subtitle_state.get("status") in {"processing", "disabled"}
-                and record["info_hash"] not in state._download_tasks):
-            _start_fontinass(record["info_hash"])
+        if (record["status"] == "downloading" or not subtitle_state.get("ready")
+                or subtitle_state.get("status") not in {"processing", "disabled"}):
+            continue
+        if not config.FONTINASS_ENABLED or record["info_hash"] in state._download_tasks:
+            logger.debug("fontinass.recovery.skipped torrent=%s reason=%s", record["info_hash"],
+                         "disabled" if not config.FONTINASS_ENABLED else "task_active")
+            continue
+        logger.info("fontinass.recovery.scheduled torrent=%s previous_status=%s files=%d",
+                    record["info_hash"], subtitle_state.get("status"), len(subtitle_state.get("files", [])))
+        _start_fontinass(record["info_hash"])
     pending = torrent_store.list_pending_torrents()
     if not pending:
         return
@@ -348,8 +375,13 @@ async def torrent_parse_and_search(file: UploadFile = File(...)):
         logger.exception("种子预览解析失败")
         raise HTTPException(400, str(e))
 
-    # Keep the temp file — the download endpoint needs it later
-    return result
+    from ..services.torrent.preview_session import create_preview_session
+    from ..services.torrent.preview_view import session_view
+    try:
+        row = create_preview_session(result, tmp_path)
+        return session_view(row)
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
 
 # ── /api/torrent/bangumi/{id}/episodes ──
@@ -380,6 +412,8 @@ async def torrent_bangumi_episodes(bangumi_id: int):
     for ep in all_eps:
         entry = {
             "sort": ep.get("sort") or ep.get("ep", 0),
+            "ep": ep.get("ep"),
+            "raw_sort": ep.get("sort"),
             "id": ep["id"],
             "name": ep.get("name", ""),
         }
@@ -412,6 +446,9 @@ async def torrent_download(body: dict):
     files and images are generated **before** the torrent is resumed,
     matching the batch/scan flow behaviour.
     """
+    if "preview_id" in body:
+        from ..services.torrent.preview_session import restore_download_request
+        body = restore_download_request(body)
     torrent_path = body.get("torrent_path", "")
     resource_id = body.get("resource_id")
     if resource_id is not None:
@@ -427,8 +464,8 @@ async def torrent_download(body: dict):
             raise HTTPException(400, "资源种子路径无效")
         torrent_path = str(expected)
     torrent_name = body.get("torrent_name", "")
-    files: list[dict] = body.get("files", [])
-    uploaded_subtitles: list[dict] = body.get("uploaded_subtitles", [])
+    files: list[dict] = [download_entry_with_mapping(file) for file in body.get("files", [])]
+    uploaded_subtitles: list[dict] = [download_entry_with_mapping(file) for file in body.get("uploaded_subtitles", [])]
     preview_data: dict | None = body.get("preview_data")
     replace_bangumi_id = body.get("replace_bangumi_id")
 
@@ -576,3 +613,22 @@ async def torrent_download(body: dict):
         "info_hash": info_hash,
         "message": f"种子已添加，选择性下载 {len(download_indices)}/{len(qb_files)} 个文件。下载完成后自动创建硬链接。",
     }
+
+
+@router.get("/api/torrent/previews/{preview_id}")
+async def get_preview(preview_id: str):
+    from ..services.torrent.preview_session import load_preview_session, touch_preview_session
+    from ..services.torrent.preview_view import build_preview_view
+    row, snapshot = load_preview_session(preview_id)
+    row = touch_preview_session(row)
+    return build_preview_view(snapshot, row.id, row.revision, row.expires_at)
+
+
+@router.post("/api/torrent/previews/{preview_id}/augment")
+async def augment_preview(preview_id: str, body: dict):
+    from ..services.torrent.preview_session import augment_preview_session
+    provider = body.get("provider")
+    provider_id = body.get("subject_id" if provider == "bangumi" else "series_id")
+    if type(provider_id) is not int or provider_id <= 0 or type(body.get("preview_revision")) is not int:
+        raise HTTPException(422, "invalid_preview_augment")
+    return await augment_preview_session(preview_id, body["preview_revision"], body.get("show_key", ""), provider, provider_id)

@@ -14,6 +14,7 @@ services:
       - PROXY_PORT=7890
       - WATCH_DIR=/torrents
       - TZ=Asia/Shanghai
+      - MAM_LOG_LEVEL=${MAM_LOG_LEVEL:-DEBUG}
       - MAM_REPO_URL=https://github.com/Thuninisan/my-anime-manager.git
       - MAM_BRANCH=main
     volumes:

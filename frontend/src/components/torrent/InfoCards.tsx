@@ -1,13 +1,17 @@
+import { catalogSeriesTitle } from '@/lib/episodeAdapters';
+import type { TorrentPreviewResponse } from '@/types/preview';
+import type { EpisodeCatalog } from '@/types/episode';
 import { useState, useEffect, useRef } from 'react';
-import { fetchTmdbSeasonMap, fetchBangumiEpisodes } from '@/api/torrentApi';
+import { augmentPreview } from '@/api/torrentApi';
 import { searchBangumi } from '@/api/rssApi';
 
 interface Props {
-  searchResult: any;
+  searchResult: TorrentPreviewResponse;
   /** The current (merged) episode_data from the parent, including the user's
    *  own additions.  Falls back to searchResult.episode_data when omitted. */
-  episodeDataOverride?: any;
-  onEpisodeDataChange: (augmented: any) => void;
+  episodeDataOverride?: EpisodeCatalog;
+  onEpisodeDataChange: (augmented: EpisodeCatalog) => void;
+  onPreviewChange: (view: TorrentPreviewResponse) => void;
 }
 
 interface Candidate {
@@ -15,7 +19,7 @@ interface Candidate {
   name: string;
 }
 
-export default function InfoCards({ searchResult, episodeDataOverride, onEpisodeDataChange }: Props) {
+export default function InfoCards({ searchResult, episodeDataOverride, onPreviewChange }: Props) {
   const searchResults = searchResult?.search_results || {};
   // Use the parent-merged data when available so the TMDB/Bangumi Match
   // display reflects the user's own additions immediately.
@@ -24,7 +28,7 @@ export default function InfoCards({ searchResult, episodeDataOverride, onEpisode
   // Collect unique TMDB / Bangumi entries from search_results
   const tmdbEntries = new Map<number, string>();
   const bangumiEntries = new Map<number, string>();
-  for (const entry of Object.values(searchResults) as any[]) {
+  for (const entry of Object.values(searchResults)) {
     if (entry?.tmdb?.id && !tmdbEntries.has(entry.tmdb.id)) {
       tmdbEntries.set(entry.tmdb.id, entry.tmdb.name || `ID ${entry.tmdb.id}`);
     }
@@ -36,18 +40,17 @@ export default function InfoCards({ searchResult, episodeDataOverride, onEpisode
     }
   }
   // Also from episode_data (sequels / specials / manually added).
-  // Manual additions store the show name under a `_name` sentinel key;
-  // auto-fetched data uses `.name` at the top level (same shape as Bangumi).
-  for (const [idStr, data] of Object.entries(episodeData.tmdb || {})) {
+  // Provider show-name sentinels are normalized into tmdb_series_titles.
+  for (const idStr of Object.keys(episodeData.tmdb || {})) {
     const id = Number(idStr);
     if (!tmdbEntries.has(id)) {
-      const label = (data as any)?._name || (data as any)?.name || `ID ${id}`;
+      const label = catalogSeriesTitle(episodeData, idStr) || `ID ${id}`;
       tmdbEntries.set(id, label);
     }
   }
   for (const [idStr, data] of Object.entries(episodeData.bangumi || {})) {
     const id = Number(idStr);
-    if (!bangumiEntries.has(id)) bangumiEntries.set(id, (data as any)?.name || `ID ${id}`);
+    if (!bangumiEntries.has(id)) bangumiEntries.set(id, data.name || `ID ${id}`);
   }
 
   // ── TMDB state ──
@@ -84,17 +87,10 @@ export default function InfoCards({ searchResult, episodeDataOverride, onEpisode
     setTmdbLoading(true);
     setTmdbError('');
     try {
-      const seasons = await fetchTmdbSeasonMap(id);
-      // Extract show-name sentinel injected by the backend so the TMDB
-      // Match display can show "中文名 (ID)" instead of "ID 83121 (83121)".
-      const showName: string = (seasons as any)._show_name;
-      const { _show_name: _, ...cleanSeasons } = seasons as any;
-      const newTmdb = { ...episodeData.tmdb };
-      newTmdb[String(id)] = { _name: showName || `TMDB ${id}`, ...cleanSeasons };
-      onEpisodeDataChange({ ...episodeData, tmdb: newTmdb });
+      onPreviewChange(await augmentPreview(searchResult, 'tmdb', id));
       setTmdbInput('');
-    } catch (e: any) {
-      setTmdbError(e.message || 'Failed');
+    } catch (e) {
+      setTmdbError(e instanceof Error ? e.message : 'Failed');
     } finally {
       setTmdbLoading(false);
     }
@@ -104,14 +100,11 @@ export default function InfoCards({ searchResult, episodeDataOverride, onEpisode
     setBgmLoading(true);
     setBgmError('');
     try {
-      const data = await fetchBangumiEpisodes(id);
-      const newBgm = { ...episodeData.bangumi };
-      newBgm[String(id)] = { name: data.name, episodes: data.episodes };
-      onEpisodeDataChange({ ...episodeData, bangumi: newBgm });
+      onPreviewChange(await augmentPreview(searchResult, 'bangumi', id));
       setBgmInput('');
       setCandidates([]);
-    } catch (e: any) {
-      setBgmError(e.message || 'Failed');
+    } catch (e) {
+      setBgmError(e instanceof Error ? e.message : 'Failed');
     } finally {
       setBgmLoading(false);
     }
