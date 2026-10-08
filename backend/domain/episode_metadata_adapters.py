@@ -99,6 +99,10 @@ def mapping_to_legacy_batch_episode(mapping: EpisodeMapping) -> dict:
     """The batch orchestrator still supports old RSS/batch inputs."""
     return {"episode_mapping": mapping,
             "bangumi_subject_id": mapping["bangumi"]["subject_id"],
+            "bangumi_ep_id": mapping["bangumi"]["episode_id"],
+            "bangumi_episode_number": mapping["bangumi"]["episode_number"],
+            "tmdb_ep_id": mapping["tmdb"]["episode_id"],
+            "tvdb_ep_id": mapping["tvdb"]["episode_id"],
             "bangumi_episode_sort": mapping["bangumi"]["episode_absolute"],
             "tmdb_id": mapping["tmdb"]["series_id"], "tvdb_id": mapping["tvdb"]["series_id"],
             "tmdb_season": mapping["tmdb"]["season_number"], "tmdb_episode": mapping["tmdb"]["episode_number"],

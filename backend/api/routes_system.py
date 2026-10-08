@@ -130,7 +130,7 @@ async def _scan_worker_with_context(dir_path: str):
     for tf in torrents:
         state._scan_status["current_file"] = tf.name
         try:
-            ok = await process_torrent(str(tf), config.TORRENT_DOWNLOAD_PATH, config.TORRENT_HARDLINK_PATH)
+            ok = await process_torrent(str(tf))
             if ok:
                 tf.unlink()
                 state._scan_status["deleted"] += 1
@@ -161,7 +161,7 @@ async def _watch_worker_with_context(dir_path: str):
             for tf in torrents:
                 state._watch_status["current_file"] = tf.name
                 try:
-                    ok = await process_torrent(str(tf), config.TORRENT_DOWNLOAD_PATH, config.TORRENT_HARDLINK_PATH)
+                    ok = await process_torrent(str(tf))
                     if ok:
                         tf.unlink()
                     else:

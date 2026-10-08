@@ -124,7 +124,7 @@ async def batch_nfo_generator(
     template = config.RSS_PATH_TEMPLATE
 
     from ...domain.episode_metadata_adapters import (
-        legacy_batch_episode_mapping, metadata_candidates_from_catalogs, bind_legacy_episode_ids,
+        legacy_batch_episode_mapping, metadata_candidates_from_catalogs,
     )
     from ..episode_metadata_resolver import resolve_nfo_episode
     mappings = [legacy_batch_episode_mapping(episode) for episode in episodes]
@@ -245,8 +245,6 @@ async def batch_nfo_generator(
                 mapping, season_map, tvdb_cache.get(tvdb_id, {}),
                 bgm_cache.get(bgm_id, []), legacy=is_legacy,
             )
-        if is_legacy:
-            mapping = bind_legacy_episode_ids(mapping, candidates, bgm_cache.get(bgm_id, []))
         bangumi_ep_val = mapping["bangumi"]["episode_number"]
         if is_legacy and bangumi_ep_val is None:
             bangumi_ep_val = bgm_sort  # compatibility path naming only
