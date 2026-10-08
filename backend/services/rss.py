@@ -81,13 +81,6 @@ def _derive_tags(parsed: dict, text: str = "") -> list[str]:
     return tags
 
 
-def _extract_ep_num(parsed: dict) -> int:
-    try:
-        return int(parsed.get("episode_number", 0) or 0)
-    except (ValueError, TypeError):
-        return 0
-
-
 def _matches_filter(item_tags: list[str], filter_tags: list[str] | None) -> bool:
     if not filter_tags:
         return True
@@ -205,14 +198,17 @@ def _parse_rss(content: str) -> dict:
         text_to_parse = guid or title
         parsed = anitopy_parse(text_to_parse) or {}
         item_tags = _derive_tags(parsed, text_to_parse)
-        ep_num = _extract_ep_num(parsed)
+        from ..domain.rss_episode import rss_episode_ref
+        ref = rss_episode_ref(parsed, title, text_to_parse)
+        ep_num = ref["rss_episode_number"]
 
         items.append({
             "guid": text_to_parse, "title": title,
             "torrent_url": torrent_url, "pub_date": pub_date,
             "size_bytes": size_bytes,
             "tags": item_tags,
-            "episode_number": ep_num,
+            "episode_number": ep_num if ep_num is not None else 0,  # public feed view compatibility
+            "rss_episode_ref": ref,
         })
 
     return {"title": feed_title, "items": items}

@@ -350,7 +350,7 @@ async def _refresh_sortrange(bangumi_id: int, sub: dict):
         # Clear cached episodes so we get the latest from the API
         _bgm_ep_cache.pop(bangumi_id, None)
         eps = await _get_bangumi_episodes(bangumi_id)
-        sorts = [e.get("sort") or e.get("ep", 0) for e in eps]
+        sorts = [e["sort"] for e in eps if e.get("sort") is not None]
         new_range = [min(sorts), max(sorts)] if sorts else [0, 0]
 
         if sub_bak != new_range:
@@ -475,8 +475,11 @@ async def _fetch_passed_items(
             missing_tags = [tag for tag in filter_tags if tag not in item.get("tags", [])]
             log_skip(item, f"标签不匹配: 缺少 {missing_tags}; 资源标签 {item.get('tags', [])}")
             continue
-        rss_ep = item.get("episode_number") or 0
-        if not rss_ep:
+        from ..domain.rss_episode import item_episode_ref
+        from .rss_episode_matcher import normalize_episode_number
+        ref = item_episode_ref(item)
+        rss_ep = ref["rss_episode_number"]
+        if rss_ep is None:
             log_skip(item, "无法从标题识别集数")
             continue
 
@@ -493,7 +496,7 @@ async def _fetch_passed_items(
         if rss_offset is None:
             log_skip(item, "RSS 集数偏移量未确定")
             continue  # can't determine sort without offset — skip
-        sort = rss_ep + rss_offset
+        sort = normalize_episode_number(ref, rss_offset)
         if bgm_sortrange and bgm_sortrange[0] > 0:
             if sort < bgm_sortrange[0] or sort > bgm_sortrange[1]:
                 log_skip(item, f"映射集数 {sort} 不在 Bangumi 范围 {bgm_sortrange} 内 (offset={rss_offset})")
@@ -555,8 +558,10 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict, me
     metadata_ctx = metadata_ctx or MetadataContext()
     torrent_url = item["torrent_url"]
     guid = item["guid"]
-    rss_ep_num = item.get("episode_number") or 0
-    if not torrent_url or not rss_ep_num:
+    from ..domain.rss_episode import item_episode_ref
+    ref = item_episode_ref(item)
+    rss_ep_num = ref["rss_episode_number"]
+    if not torrent_url or rss_ep_num is None:
         return False
 
     logger.debug(f"      ⬇️ EP{rss_ep_num:02d} [{source}] {guid[:60]}...")
@@ -604,8 +609,8 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict, me
 
     # ── Match RSS episode to Bangumi sort ──────────────────────────
     # sort is assigned by _fetch_passed_items via rss_ep + rss_offset.
-    sort = item.get("sort") or 0
-    if not sort:
+    sort = item.get("sort")
+    if sort is None:
         logger.warning(f"         ⚠️ rss_ep={rss_ep_num} 无法映射到 sort，跳过")
         return False
     if sort != rss_ep_num:
@@ -682,7 +687,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict, me
         await submit_episode_torrent(
             tmp_path, bangumi_id, sort, source, sub=sub, guid=guid,
             rss_url=item.get("rss_url", ""), pub_date=item.get("pub_date", ""),
-            metadata_ctx=metadata_ctx,
+            metadata_ctx=metadata_ctx, rss_ref=ref,
         )
     except Exception:
         logger.exception("RSS 单集提交失败: bangumi_id=%s sort=%s", bangumi_id, sort)
@@ -699,6 +704,7 @@ async def submit_episode_torrent(
     torrent_path: str, bangumi_id: int, sort: int, source: str, *,
     sub: dict, guid: str, rss_url: str = "", pub_date: str = "",
     metadata_ctx: MetadataContext | None = None, replace_existing: bool = False,
+    rss_ref=None,
 ) -> str:
     """Shared RSS/upload commit: paused add, metadata/rename, resume, history."""
     tmdb = sub.get("tmdb", {})
@@ -710,14 +716,22 @@ async def submit_episode_torrent(
         raise HTTPException(400, "订阅未关联 TMDB 或 TVDB ID，无法生成 NFO")
     torrent_hash = compute_info_hash(torrent_path)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
-    tvdb_ep = sort + tvdb.get("ep_offset", 0)
+    from ..domain.rss_episode import rss_episode_ref
+    from .rss_episode_matcher import subscription_episode_mapping
+    metadata_ctx = metadata_ctx or MetadataContext()
+    old = get_all_episodes(bangumi_id).get(str(sort), {})
+    mapping_sub = {**sub, "tmdb": {**tmdb, "id": tmdb_id}, "tvdb": {**tvdb, "id": tvdb_id}}
+    mapping = await subscription_episode_mapping(
+        rss_ref if rss_ref is not None else rss_episode_ref({}, ""),
+        mapping_sub, bangumi_id, metadata_ctx, sort=sort, overrides=old,
+    )
+    tvdb_ep = mapping["tvdb"]["episode_number"]
     rel_path = format_download_path(
         config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_ep,
-        tmdb_episode=sort + tmdb.get("ep_offset", 0),
+        tmdb_episode=mapping["tmdb"]["episode_number"],
     ).lstrip("/")
     season_dir = str(Path(rss_base) / Path(rel_path).parent)
     show_dir = str(Path(season_dir).parent)
-    old = get_all_episodes(bangumi_id).get(str(sort), {})
     qb = await qb_login(config.QBITTORRENT_URL, config.QBITTORRENT_USERNAME, config.QBITTORRENT_PASSWORD)
     if replace_existing and old.get("info_hash"):
         if old["info_hash"].lower() == torrent_hash.lower():
@@ -741,7 +755,7 @@ async def submit_episode_torrent(
             bgm_subject_name=bgm.get("subject_name") or show_name,
             series_name=sub.get("series_name") or show_name,
             metadata_ctx=metadata_ctx, base_path=rss_base,
-            overwrite=replace_existing,
+            overwrite=replace_existing, episode_mapping=mapping,
         )
         if not success:
             raise RuntimeError("NFO 生成或文件重命名失败")
@@ -758,7 +772,7 @@ async def submit_episode_torrent(
     mark_downloaded(
         bangumi_id, sort, rss_url, guid, source, pub_date=pub_date,
         info_hash=torrent_hash, tvdb_ep=tvdb_ep,
-        tmdb_ep_calc=old.get("tmdb_ep") if old.get("tmdb_ep") is not None else sort + tmdb.get("ep_offset", 0),
+        tmdb_ep_calc=mapping["tmdb"]["episode_number"],
     )
     reset_fail_count(bangumi_id, sort)
     return torrent_hash

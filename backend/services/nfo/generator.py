@@ -319,9 +319,9 @@ async def batch_nfo_generator(
                 if bgm_summary:
                     try:
                         from .plot_fallback import resolve_season_plot
-                        resolved = await resolve_season_plot(bgm_summary, context=str(season_dir))
-                        if resolved:
-                            season_plot = resolved
+                        resolved_plot = await resolve_season_plot(bgm_summary, context=str(season_dir))
+                        if resolved_plot:
+                            season_plot = resolved_plot
                     except Exception:
                         pass
 

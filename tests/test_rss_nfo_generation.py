@@ -31,6 +31,7 @@ class RssNfoGenerationTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp, \
              patch.object(config, "RSS_PATH_TEMPLATE", template), \
              patch.object(metadata_builder, "get_all_episodes", return_value={}), \
+             patch("backend.domain.episode_metadata_adapters.bind_legacy_episode_ids", side_effect=AssertionError("RSS must already own identity")), \
              patch.object(metadata_builder, "rename_file", AsyncMock()) as rename, \
              patch("backend.services.nfo.images.download_show_images", AsyncMock(return_value={})):
             success = await metadata_builder.generate_metadata(
@@ -54,13 +55,16 @@ class RssNfoGenerationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(ctx.tmdb_season_maps[(123, "zh-CN")], season_map)
 
     async def test_rename_conflict_returns_failure(self):
+        ctx = MetadataContext()
+        ctx.bgm_episodes[12] = []
+        ctx.tmdb_season_maps[(10, "zh-CN")] = {}
         with patch.object(metadata_builder, "get_all_episodes", return_value={}), \
              patch.object(metadata_builder, "batch_nfo_generator", AsyncMock(return_value={
                  "episodesProcessed": 1, "episodePaths": ["Show/Season 00/episode"]})) as generate, \
              patch.object(metadata_builder, "rename_file", AsyncMock(return_value=False)):
             success = await metadata_builder.generate_metadata(
                 object(), "hash", 12, 3, 12, 10, "Show", "old.mkv", "guid",
-                tmdb_season=0, tvdb_season=0, tvdb_ep=3, base_path="/downloads",
+                tmdb_season=0, tvdb_season=0, tvdb_ep=3, base_path="/downloads", metadata_ctx=ctx,
             )
             self.assertFalse(success)
             episode = generate.await_args.args[1][0]

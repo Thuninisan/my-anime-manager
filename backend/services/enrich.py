@@ -42,7 +42,7 @@ async def _get_bangumi_episodes(subject_id: int) -> list[dict]:
 def _compute_rss_offset(feed: dict, air_date: str) -> int | None:
     """Compute the offset between RSS episode numbering and Bangumi sort.
 
-    Finds the smallest *episode_number* among items
+    Finds the smallest *rss_episode_number* among items
     published on or after *air_date*, and returns that value.  The caller
     then uses ``sort = rss_ep + offset`` where *offset* is
     ``first_bangumi_sort - smallest_rss_ep``.
@@ -55,8 +55,9 @@ def _compute_rss_offset(feed: dict, air_date: str) -> int | None:
 
     smallest: int | None = None
     for item in items:
-        ep = item.get("episode_number") or 0
-        if not ep:
+        from ..domain.rss_episode import item_episode_ref
+        ep = item_episode_ref(item)["rss_episode_number"]
+        if ep is None:
             continue
         pub = item.get("pub_date", "")
         if published_before_air_date(pub, air_date):
@@ -292,6 +293,7 @@ async def _auto_infer_tvdb(
     chain_ids: list[int],
     root_subject: dict | None,
     _emit: Callable[[str], None],
+    metadata_ctx=None,
 ) -> dict | None:
     """Try to infer a missing TVDB ID via name-based matching.
 
@@ -305,6 +307,9 @@ async def _auto_infer_tvdb(
     """
     from ..clients import tvdb as tvdb_client
     from ..utils.episode_name_match import fuzzy_match_episode
+
+    from .nfo.metadata_context import MetadataContext
+    metadata_ctx = metadata_ctx or MetadataContext()
 
     # ── Step 1: Collect sibling TVDB IDs ──
     is_single = len(chain_ids) == 1
@@ -404,7 +409,7 @@ async def _auto_infer_tvdb(
     _emit(f"   📡 候选 TVDB ID: {unique_candidates}")
 
     try:
-        bgm_eps = await _get_bangumi_episodes(bangumi_id)
+        bgm_eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
     except Exception:
         _emit("   ⚠️ 获取 Bangumi 剧集列表失败")
         return None
@@ -425,9 +430,7 @@ async def _auto_infer_tvdb(
 
     for ctid in unique_candidates:
         try:
-            eps_resp = await tvdb_client.get_series_episodes(ctid)
-            eps_data = eps_resp.json().get("data", eps_resp.json())
-            episodes = eps_data.get("episodes", [])
+            episodes = await metadata_ctx.get_tvdb_matching_episodes(ctid)
         except Exception:
             _emit(f"   ⚠️ TVDB {ctid} 获取剧集列表失败")
             continue
@@ -463,36 +466,36 @@ async def _auto_infer_tvdb(
 async def _compute_tvdb_ep_offset(
     bangumi_id: int, tvdb_id: int, tvdb_season: int,
     _emit: Callable[[str], None],
+    metadata_ctx=None,
 ) -> int:
     """Compute TVDB episode offset via episode-name matching.
 
     Returns ``tvdb_ep_number - bgm_ep_val``, or 0 on failure.
     """
-    from ..clients import tvdb as tvdb_client
     from ..utils.episode_name_match import fuzzy_match_episode
 
+    from .nfo.metadata_context import MetadataContext
+    metadata_ctx = metadata_ctx or MetadataContext()
     try:
-        eps = await _get_bangumi_episodes(bangumi_id)
+        eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
     except Exception:
         return 0
     if not eps:
         return 0
 
     first_bgm_name = (eps[0].get("name") or "").strip()
-    bgm_ep_val = eps[0].get("sort") or eps[0].get("ep", 0)
-    if not first_bgm_name or not bgm_ep_val:
+    bgm_ep_val = eps[0].get("sort")
+    if not first_bgm_name or bgm_ep_val is None:
         return 0
 
     try:
-        eps_resp = await tvdb_client.get_series_episodes(tvdb_id)
-        eps_data = eps_resp.json().get("data", eps_resp.json())
-        all_eps = eps_data.get("episodes", [])
+        all_eps = await metadata_ctx.get_tvdb_matching_episodes(tvdb_id)
     except Exception:
         _emit("   ⚠️ 获取 TVDB 集数列表失败")
         return 0
 
     best_score = 0.0
-    best_num = 0
+    best_num = None
     for ep in all_eps:
         if ep.get("seasonNumber") != tvdb_season:
             continue
@@ -504,7 +507,7 @@ async def _compute_tvdb_ep_offset(
             best_score = score
             best_num = ep.get("number", 0)
 
-    if best_score >= 0.6 and best_num:
+    if best_score >= 0.6 and best_num is not None:
         offset = best_num - bgm_ep_val
         _emit(
             f"   📐 tvdb_ep_offset={offset} "
@@ -540,8 +543,8 @@ async def _compute_tmdb_ep_offset(
         return 0
 
     first_bgm_name = (eps[0].get("name") or "").strip()
-    bgm_ep_val = eps[0].get("sort") or eps[0].get("ep", 0)
-    if not first_bgm_name or not bgm_ep_val:
+    bgm_ep_val = eps[0].get("sort")
+    if not first_bgm_name or bgm_ep_val is None:
         return 0
 
     try:
@@ -558,7 +561,7 @@ async def _compute_tmdb_ep_offset(
         return 0
 
     best_score = 0.0
-    best_num = 0
+    best_num = None
     season_data = season_map.get(tmdb_season)
     if season_data:
         for ep in season_data.get("episodes", []):
@@ -570,7 +573,7 @@ async def _compute_tmdb_ep_offset(
                 best_score = score
                 best_num = ep.get("epNum", 0)
 
-    if best_score >= 0.6 and best_num:
+    if best_score >= 0.6 and best_num is not None:
         offset = best_num - bgm_ep_val
         _emit(
             f"   📐 tmdb_ep_offset={offset} "
@@ -680,7 +683,7 @@ async def enrich_subscription(
 
         # 2. Get sort range
         eps = await _get_bangumi_episodes(bangumi_id)
-        sorts = [e.get("sort") or e.get("ep", 0) for e in eps]
+        sorts = [e["sort"] for e in eps if e.get("sort") is not None]
         bgm_sortrange = [min(sorts), max(sorts)] if sorts else [0, 0]
         _emit(f"✅ bgm_sortrange={bgm_sortrange}")
 
@@ -763,11 +766,11 @@ async def enrich_subscription(
         #     Auto-infer already has the matched ep number; for known IDs
         #     we run the matching fresh to ensure offset is always accurate.
         tmdb_ep_offset = 0
-        if tmdb_id and tmdb_season:
+        if tmdb_id and tmdb_season is not None:
             if tmdb_auto_ep_number is not None:
                 eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
-                bgm_ep_v = eps[0].get("sort") or eps[0].get("ep", 0) if eps else 0
-                if bgm_ep_v:
+                bgm_ep_v = eps[0].get("sort") if eps else None
+                if bgm_ep_v is not None:
                     tmdb_ep_offset = tmdb_auto_ep_number - bgm_ep_v
                     _emit(f"   📐 tmdb_ep_offset={tmdb_ep_offset} (from auto-infer: bgm_sort={bgm_ep_v} → tmdb_ep={tmdb_auto_ep_number})")
             else:
@@ -776,16 +779,16 @@ async def enrich_subscription(
                 )
 
         tvdb_ep_offset = 0
-        if tvdb_id and tvdb_season:
+        if tvdb_id and tvdb_season is not None:
             if tvdb_auto_ep_number is not None:
                 eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
-                bgm_ep_v = eps[0].get("sort") or eps[0].get("ep", 0) if eps else 0
-                if bgm_ep_v:
+                bgm_ep_v = eps[0].get("sort") if eps else None
+                if bgm_ep_v is not None:
                     tvdb_ep_offset = tvdb_auto_ep_number - bgm_ep_v
                     _emit(f"   📐 tvdb_ep_offset={tvdb_ep_offset} (from auto-infer: bgm_sort={bgm_ep_v} → tvdb_ep={tvdb_auto_ep_number})")
             else:
                 tvdb_ep_offset = await _compute_tvdb_ep_offset(
-                    bangumi_id, tvdb_id, tvdb_season, _emit,
+                    bangumi_id, tvdb_id, tvdb_season, _emit, metadata_ctx=metadata_ctx,
                 )
 
         # 4c. Resolve series_name: TMDB zh-CN > TVDB zho > BGM chain root

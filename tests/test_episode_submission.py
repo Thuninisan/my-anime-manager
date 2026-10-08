@@ -11,6 +11,8 @@ from backend.api import routes_history
 
 class EpisodeSubmissionTests(unittest.IsolatedAsyncioTestCase):
     def mocks(self, stack, *, success=True, files=None):
+        for method, value in (("get_bgm_episodes", []), ("get_tmdb_season_map", {}), ("get_tvdb_series", {})):
+            stack.enter_context(patch.object(downloader.MetadataContext, method, AsyncMock(return_value=value)))
         values = {
             'get_tmdb_id': 0, 'get_tvdb_id': 0,
             'get_all_episodes': {'3': {'tmdb_ep': 17, 'tmdb_season': 0}},

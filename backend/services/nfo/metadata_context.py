@@ -4,6 +4,7 @@
 class MetadataContext:
     def __init__(self):
         self.preview_snapshot = None
+        self.rss_episode_catalogs = {}
         self.tvdb_episode_translations = {}
         self.tmdb_details = {}
         self.tmdb_season_maps = {}
@@ -64,3 +65,10 @@ class MetadataContext:
             payload = (await client.get_episode_translations(episode_id, language)).json()
             self.tvdb_episode_translations[key] = payload.get("data", payload)
         return self.tvdb_episode_translations[key]
+
+    async def get_tvdb_matching_episodes(self, tvdb_id: int) -> list[dict]:
+        """Enrichment view of the same normalized catalog used by matching/NFO."""
+        series = await self.get_tvdb_series(tvdb_id) or {}
+        return [{**episode, "seasonNumber": int(season), "number": episode.get("epNum")}
+                for season, value in series.get("seasons", {}).items()
+                for episode in value.get("episodes", [])]
