@@ -223,10 +223,12 @@ class AsyncResolverTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([ep['episode_mapping']['tmdb']['series_id'] for ep in episodes], [100, 110])
         self.assertEqual([ep['episode_mapping']['tvdb']['series_id'] for ep in episodes], [300, 310])
         context = generate.await_args.kwargs['metadata_ctx']
-        with patch('backend.services.tmdb.build_season_episode_map', AsyncMock()) as fetch:
+        with patch.object(context, 'get_tmdb_detail', AsyncMock(return_value={})), \
+             patch('backend.services.tmdb.build_season_episode_map', AsyncMock(return_value={})) as fetch:
             await context.get_tmdb_season_map(100, 'zh-CN')
             await context.get_tmdb_season_map(110, 'zh-CN')
-        fetch.assert_not_awaited()
+        self.assertEqual(fetch.await_count, 2)
+        self.assertTrue(all(call.kwargs["season_numbers"] == {1} for call in fetch.await_args_list))
 
     async def test_batch_manual_mapping_specials_and_metadata(self):
         ctx = MetadataContext()

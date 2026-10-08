@@ -8,6 +8,7 @@ class MetadataContext:
         self.tvdb_episode_translations = {}
         self.tmdb_details = {}
         self.tmdb_season_maps = {}
+        self.tmdb_selected_seasons = {}
         self.tmdb_images = {}
         self.tvdb_series = {}
         self.bgm_episodes = {}
@@ -26,9 +27,12 @@ class MetadataContext:
         from .. import tmdb as service
         key = (tmdb_id, language)
         if key not in self.tmdb_season_maps:
-            detail = await self.get_tmdb_detail(tmdb_id)
+            detail = {} if tmdb_id in self.tmdb_selected_seasons else await self.get_tmdb_detail(tmdb_id)
+            options = {}
+            if tmdb_id in self.tmdb_selected_seasons:
+                options = {"season_numbers": self.tmdb_selected_seasons[tmdb_id], "strict": True}
             self.tmdb_season_maps[key] = await service.build_season_episode_map(
-                tmdb_id, language=language, tv_detail=detail,
+                tmdb_id, language=language, tv_detail=detail, **options,
             )
         return self.tmdb_season_maps[key]
 
@@ -62,7 +66,13 @@ class MetadataContext:
         from ...clients import tvdb as client
         key = (episode_id, language)
         if key not in self.tvdb_episode_translations:
-            payload = (await client.get_episode_translations(episode_id, language)).json()
+            import httpx
+            try:
+                payload = (await client.get_episode_translations(episode_id, language)).json()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 404:
+                    raise
+                payload = {}
             self.tvdb_episode_translations[key] = payload.get("data", payload)
         return self.tvdb_episode_translations[key]
 

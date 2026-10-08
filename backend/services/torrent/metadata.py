@@ -83,7 +83,9 @@ async def pre_generate_nfo(
                 metadata_ctx = MetadataContext()
                 metadata_ctx.preview_snapshot = preview_snapshot
                 for mapping in (entry["episode_mapping"] for entry in nfo_episodes):
-                    metadata_ctx.tmdb_season_maps[(mapping["tmdb"]["series_id"], "zh-CN")] = {}
+                    tm = mapping["tmdb"]
+                    if tm["series_id"] and tm["season_number"] is not None:
+                        metadata_ctx.tmdb_selected_seasons.setdefault(tm["series_id"], set()).add(tm["season_number"])
                     metadata_ctx.tvdb_series[(mapping["tvdb"]["series_id"], "jpn")] = {}
                     metadata_ctx.bgm_episodes[mapping["bangumi"]["subject_id"]] = []
                 summary = await batch_nfo_generator(

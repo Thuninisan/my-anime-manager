@@ -80,7 +80,7 @@ def episode_path_parameters(file: dict) -> dict[str, int | float | None]:
 def seed_provider_catalogs(context, data: dict) -> None:
     """Provider acquisition boundary for request-local metadata caches."""
     for series_id, seasons in data.get("tmdb", {}).items():
-        context.tmdb_season_maps[(int(series_id), "zh-CN")] = seasons
+        context.tmdb_season_maps[(int(series_id), "ja")] = seasons
     for series_id, series in data.get("tvdb", {}).items():
         context.tvdb_series[(int(series_id), "jpn")] = series
     for subject_id, subject in data.get("bangumi", {}).items():

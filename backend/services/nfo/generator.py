@@ -130,6 +130,11 @@ async def batch_nfo_generator(
     unique_tvdb_ids = {mapping["tvdb"]["series_id"] for mapping in mappings if mapping["tvdb"]["series_id"]}
     unique_tmdb_ids = {mapping["tmdb"]["series_id"] for mapping in mappings if mapping["tmdb"]["series_id"]}
     unique_tmdb_seasons = unique_tmdb_ids
+    if metadata_ctx.preview_snapshot is not None:
+        for mapping in mappings:
+            tm = mapping["tmdb"]
+            if tm["series_id"] and tm["season_number"] is not None:
+                metadata_ctx.tmdb_selected_seasons.setdefault(tm["series_id"], set()).add(tm["season_number"])
 
     # ── Phase 2: Pre-fetch all data (parallel where possible) ─────────
     bgm_cache: dict[int, list[dict]] = {}
@@ -231,10 +236,18 @@ async def batch_nfo_generator(
         tmdb_title = show.get("title", str(tmdb_id))
 
         # Raw provider payloads stop at the catalog compatibility boundary.
-        season_map = await metadata_ctx.get_tmdb_season_map(tmdb_id, "zh-CN") if tmdb_id else {}
+        season_map = metadata_ctx.tmdb_season_maps.get((tmdb_id, "zh-CN"), {})
         if metadata_ctx.preview_snapshot is not None:
             from ..torrent.preview_session import metadata_candidates
             candidates = metadata_candidates(metadata_ctx.preview_snapshot, mapping)
+            localized = metadata_candidates_from_catalogs(mapping, season_map, {}, [])["tmdb"]
+            if localized is not None:
+                candidate = dict(candidates["tmdb"] or localized)
+                # Localized text supplements the matched Japanese metadata.
+                for field in ("title", "plot"):
+                    if localized[field]:
+                        candidate[field] = localized[field]
+                candidates["tmdb"] = candidate
         else:
             candidates = metadata_candidates_from_catalogs(
                 mapping, season_map, tvdb_cache.get(tvdb_id, {}),

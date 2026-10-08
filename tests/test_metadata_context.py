@@ -62,3 +62,67 @@ class MetadataContextTests(unittest.IsolatedAsyncioTestCase):
             detail.assert_not_awaited()
             tmdb_fetch.assert_not_awaited()
             tvdb_fetch.assert_not_awaited()
+
+
+    async def test_preview_japanese_plot_does_not_skip_chinese_lookup(self):
+        from tests.test_episode_metadata import mapping, candidates
+        ref = mapping()
+        available = candidates()
+        available['tmdb']['plot'] = 'これは日本語のあらすじです。'
+        ctx = MetadataContext()
+        ctx.preview_snapshot = {'episode_metadata': {
+            f"{provider}:{ref[provider]['episode_id']}": candidate
+            for provider, candidate in available.items() if candidate is not None
+        }}
+        ctx.tmdb_selected_seasons[100] = {1}
+        chinese = {1: {'episodes': [{'tmdbId': ref['tmdb']['episode_id'],
+                                    'epNum': 3, 'overview': '这是正确的中文简介。'}]}}
+        with patch.object(ctx, 'get_tmdb_detail', AsyncMock(return_value={})), \
+             patch.object(tmdb, 'build_season_episode_map', AsyncMock(return_value=chinese)) as build, \
+             patch.object(ctx, 'get_tvdb_episode_translation', AsyncMock()) as tvdb:
+            for _ in range(2):
+                result = await resolve_episode_plot(tmdb_id=100, tmdb_season=1, tmdb_ep_num=3,
+                    tvdb_id=300, tvdb_season=1, tvdb_episode_number=1,
+                    metadata_ctx=ctx, episode_mapping=ref)
+                self.assertEqual(result, '这是正确的中文简介。')
+            build.assert_awaited_once()
+            self.assertEqual(build.await_args.kwargs['season_numbers'], {1})
+            tvdb.assert_not_awaited()
+
+    async def test_selected_special_season_is_fetched_once(self):
+        from unittest.mock import Mock
+        response = Mock()
+        response.json.return_value = {'episodes': [{'id': 1, 'episode_number': 1,
+            'season_number': 0, 'name': '特别篇', 'overview': '特别篇中文简介。'}]}
+        with patch('backend.clients.tmdb.get_season_detail', AsyncMock(return_value=response)) as fetch:
+            result = await tmdb.build_season_episode_map(123, language='zh-CN',
+                tv_detail={'number_of_seasons': 3}, season_numbers={0}, strict=True)
+            self.assertEqual(set(result), {0})
+            fetch.assert_awaited_once_with(123, 0, language='zh-CN')
+
+    async def test_tvdb_missing_translation_is_cached_but_server_error_retries(self):
+        import httpx
+        request = httpx.Request('GET', 'https://example.test/translation')
+        missing = httpx.HTTPStatusError('missing', request=request,
+            response=httpx.Response(404, request=request))
+        ctx = MetadataContext()
+        with patch('backend.clients.tvdb.get_episode_translations', AsyncMock(side_effect=missing)) as fetch:
+            self.assertEqual(await ctx.get_tvdb_episode_translation(1), {})
+            self.assertEqual(await ctx.get_tvdb_episode_translation(1), {})
+            fetch.assert_awaited_once()
+        failure = httpx.HTTPStatusError('failed', request=request,
+            response=httpx.Response(500, request=request))
+        with patch('backend.clients.tvdb.get_episode_translations', AsyncMock(side_effect=failure)) as fetch:
+            for _ in range(2):
+                with self.assertRaises(httpx.HTTPStatusError):
+                    await ctx.get_tvdb_episode_translation(2)
+            self.assertEqual(fetch.await_count, 2)
+
+
+    async def test_preview_catalog_is_seeded_as_japanese(self):
+        from backend.domain.episode_metadata_adapters import seed_provider_catalogs
+        ctx = MetadataContext()
+        catalog = {1: {'episodes': [{'overview': '日本語のあらすじ'}]}}
+        seed_provider_catalogs(ctx, {'tmdb': {'123': catalog}})
+        self.assertIs(ctx.tmdb_season_maps[(123, 'ja')], catalog)
+        self.assertNotIn((123, 'zh-CN'), ctx.tmdb_season_maps)

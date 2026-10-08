@@ -309,7 +309,7 @@ class PreviewSessionTests(unittest.TestCase):
             body = self.request()
             body['preview_revision'] = row.revision
             restored = service.restore_download_request(body)
-            with patch('backend.services.tmdb.build_season_episode_map', AsyncMock(side_effect=AssertionError('duplicate TMDB catalog'))) as tmdb, \
+            with patch('backend.services.tmdb.build_season_episode_map', AsyncMock(return_value={})) as tmdb, \
                  patch('backend.services.tvdb.fetch_tvdb_series_episodes', AsyncMock(side_effect=AssertionError('duplicate TVDB catalog'))) as tvdb, \
                  patch('backend.services.enrich._get_bangumi_episodes', AsyncMock(side_effect=AssertionError('duplicate Bangumi catalog'))) as bangumi, \
                  patch('backend.clients.tmdb.get_tv_detail', AsyncMock()) as detail, \
@@ -320,7 +320,8 @@ class PreviewSessionTests(unittest.TestCase):
                 detail.return_value.json.return_value = {'name': 'A', 'overview': '作品中文简介。'}
                 result = await pre_generate_nfo(restored['preview_snapshot'], restored['files'], 'Test', str(self.root / 'nfo'), 'A')
                 self.assertTrue(result[1])
-                tmdb.assert_not_awaited()
+                tmdb.assert_awaited_once()
+                self.assertEqual(tmdb.await_args.kwargs["language"], "zh-CN")
                 tvdb.assert_not_awaited()
                 bangumi.assert_not_awaited()
         asyncio.run(run())
@@ -369,6 +370,7 @@ class PreviewSessionTests(unittest.TestCase):
             snapshot['episode_metadata']['bangumi:21']['title'] = '中文标题'
             ctx = MetadataContext()
             ctx.preview_snapshot = snapshot
+            ctx.tmdb_season_maps[(1, "zh-CN")] = {}
             candidates = service.metadata_candidates(snapshot, mapping)
             with patch('backend.clients.tvdb.get_series_episodes', AsyncMock(side_effect=AssertionError('whole catalog'))) as catalog, \
                  patch('backend.clients.tvdb.get_episode_translations', AsyncMock()) as translation:

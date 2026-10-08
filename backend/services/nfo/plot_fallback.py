@@ -56,20 +56,22 @@ async def resolve_episode_plot(
 
     # ── Tier 1: TMDB zh-CN ─────────────────────────────────────────
     if tmdb_id and tmdb_season is not None and tmdb_ep_num is not None:
-        if preview_candidates is not None:
-            candidate = preview_candidates["tmdb"]
-            plot = (candidate["plot"] or "").strip() if candidate else ""
-        elif metadata_ctx is None:
+        if metadata_ctx is None:
             plot = await _try_tmdb_zh(tmdb_id, tmdb_season, tmdb_ep_num)
         else:
             plot = ""
             try:
                 season_map = await metadata_ctx.get_tmdb_season_map(tmdb_id, "zh-CN")
-                season_data = season_map.get(tmdb_season, season_map.get(str(tmdb_season), {}))
-                for episode in season_data.get("episodes", []):
-                    if episode.get("epNum") == tmdb_ep_num:
-                        plot = (episode.get("overview") or "").strip()
-                        break
+                if episode_mapping is not None:
+                    from ...domain.episode_metadata_adapters import metadata_candidates_from_catalogs
+                    candidate = metadata_candidates_from_catalogs(episode_mapping, season_map, {}, [])["tmdb"]
+                    plot = (candidate["plot"] or "").strip() if candidate else ""
+                else:
+                    season_data = season_map.get(tmdb_season, season_map.get(str(tmdb_season), {}))
+                    for episode in season_data.get("episodes", []):
+                        if episode.get("epNum") == tmdb_ep_num:
+                            plot = (episode.get("overview") or "").strip()
+                            break
             except Exception:
                 logger.warning("TMDB cached plot lookup failed", exc_info=True)
         if is_chinese_plot(plot):

@@ -173,6 +173,7 @@ def find_best_episode_group(groups: list[dict]) -> dict | None:
 
 async def build_season_episode_map(
     tv_id: int, language: str = "", *, tv_detail: dict | None = None, strict: bool = False,
+    season_numbers: set[int] | None = None,
 ) -> dict[int, dict]:
     """Build a TMDB season→episodes mapping using the default Season API.
 
@@ -186,6 +187,7 @@ async def build_season_episode_map(
         tv_id: TMDB show ID.
         language: Optional language override for episode names (e.g. ``"ja"``,
                   ``"zh-CN"``).  When empty, uses the client default (``"ja"``).
+        season_numbers: Fetch only these provider seasons, including season zero.
 
     Returns:
         dict mapping season_number to {name, episodes: [{epNum, name, ...}]}
@@ -213,7 +215,7 @@ async def build_season_episode_map(
     # [1, total_seasons] already covers every regular season.
     logger.debug(f"   📡 TMDB 共 {total_seasons} 季，获取 S01–S{total_seasons:02d} 分季数据...")
 
-    for s in range(1, total_seasons + 1):
+    for s in sorted(season_numbers) if season_numbers is not None else range(1, total_seasons + 1):
         try:
             res = await tmdb_client.get_season_detail(tv_id, s, language=language)
         except Exception as exc:
@@ -290,7 +292,7 @@ async def build_season_episode_map(
         s.get("season_number") == 0
         for s in detail.get("seasons", [])
     )
-    if season_map and has_s00:
+    if season_numbers is None and season_map and has_s00:
         try:
             res = await tmdb_client.get_season_detail(tv_id, 0, language=language)
             data = res.json()
