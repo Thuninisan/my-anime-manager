@@ -1,4 +1,4 @@
-import { candidateIds, recommendedId } from '@/lib/episodeAdapters';
+import { manualVideoFiles, candidateIds, recommendedId } from '@/lib/episodeAdapters';
 import type { EpisodeCatalog, CatalogSeason, TmdbEpisodeRef } from '@/types/episode';
 import type { TorrentPreviewResponse } from '@/types/preview';
 import { createEpisodeMapping } from '@/lib/episodeAdapters';
@@ -83,7 +83,7 @@ export function useMatchOverrides(
   const computed = useMemo(() => {
     try {
       const regularRows = computeMatches(data);
-      const specials = data.specials || [];
+      const specials = manualVideoFiles(data.parsed_files);
       const spRows: MatchRow[] = specials.map(s => ({
         file_name: s.file_name, torrent_path: s.torrent_path || s.file_name, show_name: s.show_name || '-',
         mapping: createEpisodeMapping(s.parsed, null, null, null, null, data.episode_match_source ?? null),
@@ -101,9 +101,9 @@ export function useMatchOverrides(
 
   // ── Per-row overrides ──
   const [overridesByFile, setOverridesByFile] = useState<Record<string, MatchOverrides>>({});
-  const rowKey = useCallback((row: MatchRow) => [...data.parsed_files, ...(data.specials || [])]
+  const rowKey = useCallback((row: MatchRow) => data.parsed_files
     .find(file => file.torrent_path === row.torrent_path)?.file_id || row.torrent_path,
-  [data.parsed_files, data.specials]);
+  [data.parsed_files]);
   // MatchTable reports rows to its parent in an effect. Keep this projection
   // stable so a parent render does not trigger another rows notification.
   const overrides = useMemo(() => Object.fromEntries(initialRows.map((row, index) =>

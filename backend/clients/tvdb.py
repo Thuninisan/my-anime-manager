@@ -4,6 +4,7 @@ Authentication: POST /login with API key → JWT token (valid ~1 month).
 Token is cached in memory and auto-refreshed on 401.
 """
 
+import asyncio
 import json
 import logging
 
@@ -20,6 +21,7 @@ _BASE = "https://api4.thetvdb.com/v4"
 
 # Cached JWT token — cleared on 401 to trigger re-login.
 _token: str | None = None
+_login_lock = asyncio.Lock()
 
 
 async def login() -> str:
@@ -65,7 +67,10 @@ async def _ensure_auth() -> str:
         raise MissingAPIKeyError("TVDB_API_KEY")
     if _token:
         return _token
-    return await login()
+    async with _login_lock:
+        if _token:
+            return _token
+        return await login()
 
 
 async def _tvdb_request(

@@ -10,16 +10,14 @@ def search_views(snapshot: PreviewContextSnapshot) -> dict[str, PreviewSearchEnt
 def build_preview_view(snapshot: PreviewContextSnapshot, preview_id: str, revision: int, expires_at: str) -> TorrentPreviewResponse:
     def file_view(item) -> PreviewParsedFileView:
         return {"file_id": item["file_id"], "file_name": item["file_name"], "torrent_path": item["torrent_path"],
-                "show_name": item["show_key"], "parsed_episode": dict(item["parsed"])}
+                "show_name": item["show_key"], "parsed_episode": dict(item["parsed"]),
+                "type": item["type"], "category": item["category"],
+                "processing_status": item["processing_status"], "skip_reason": item["skip_reason"]}
     return {
             "preview_id": preview_id, "revision": revision, "expires_at": expires_at,
             "torrent_name": snapshot["torrent"]["name"],
             "resource_id": snapshot["torrent"]["resource_id"], "episode_match_source": snapshot["episode_match_source"],
-            "parsed_files": [file_view(f) for f in snapshot["parsed_files"] if f["kind"] == "video"],
-            "specials": [file_view(f) for f in snapshot["parsed_files"] if f["kind"] == "special"],
-            "subtitles": [f["torrent_path"] for f in snapshot["parsed_files"] if f["kind"] == "subtitle"],
-            "subtitle_files": [file_view(f) for f in snapshot["parsed_files"] if f["kind"] == "subtitle"],
-            "skipped_files": copy.deepcopy(snapshot["skipped_files"]),
+            "parsed_files": [file_view(f) for f in snapshot["parsed_files"]],
             "search_results": search_views(snapshot), "episode_catalog": copy.deepcopy(snapshot["episode_catalog"])}
 
 

@@ -8,6 +8,10 @@ import type { EpisodeMapping, CatalogEpisode, CatalogSeason, BangumiCatalogEpiso
 
 export interface ParsedFile {
   file_id?: string;
+  type: 'video' | 'subtitle' | 'font' | 'audio' | 'other';
+  category: 'regular' | 'special' | null;
+  processing_status: 'automatic' | 'manual' | 'associate' | 'ignored';
+  skip_reason: string | null;
   file_name: string;
   torrent_path: string;
   show_name: string;

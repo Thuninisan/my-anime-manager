@@ -64,7 +64,12 @@ export function normalizeTorrentPreview(value: unknown): TorrentPreviewResponse 
     const file = object(value);
     const coordinate = object(file.parsed_episode);
     return { file_id: str(file.file_id), file_name: str(file.file_name), torrent_path: str(file.torrent_path) || str(file.file_name),
-      show_name: str(file.show_name), parsed: {
+      show_name: str(file.show_name),
+      type: (['video', 'subtitle', 'font', 'audio', 'other'].includes(str(file.type)) ? file.type : 'other') as ParsedFile['type'],
+      category: file.category === 'regular' || file.category === 'special' ? file.category : null,
+      processing_status: (['automatic', 'manual', 'associate', 'ignored'].includes(str(file.processing_status)) ? file.processing_status : 'ignored') as ParsedFile['processing_status'],
+      skip_reason: typeof file.skip_reason === 'string' ? file.skip_reason : null,
+      parsed: {
         season_number: num(coordinate.season_number),
         episode_number: num(coordinate.episode_number) } };
   });
@@ -72,13 +77,10 @@ export function normalizeTorrentPreview(value: unknown): TorrentPreviewResponse 
     preview_id: str(raw.preview_id), revision: num(raw.revision) ?? 0, expires_at: str(raw.expires_at),
     search_results: object(raw.search_results) as TorrentPreviewResponse['search_results'],
     episode_match_source: raw.episode_match_source === 'tmdb' ? 'tmdb' : raw.episode_match_source === 'tvdb' ? 'tvdb' : undefined,
-    subtitles: list(raw.subtitles).map(str), subtitle_files: parsedFiles(raw.subtitle_files),
-    skipped_files: list(raw.skipped_files).map(value => { const file = object(value); return {
-      file_name: str(file.file_name), torrent_path: str(file.torrent_path), reason: str(file.reason) }; }),
     resource_id: num(raw.resource_id) ?? undefined,
     torrent_name: str(raw.torrent_name),
     episode_catalog: normalizeEpisodeCatalog(raw.episode_catalog),
-    parsed_files: parsedFiles(raw.parsed_files), specials: parsedFiles(raw.specials),
+    parsed_files: parsedFiles(raw.parsed_files),
   };
 }
 
@@ -111,3 +113,15 @@ export function candidateIds(entry: import('@/types/matchTable').SearchEntry | u
 export function recommendedId(entry: import('@/types/matchTable').SearchEntry | undefined, provider: 'tmdb' | 'bangumi' | 'tvdb'): number | null {
   return candidateIds(entry, provider)[0] ?? null;
 }
+
+/** Central selectors keep file classification out of matching components. */
+export const automaticVideoFiles = (files: ParsedFile[]): ParsedFile[] =>
+  files.filter(file => file.type === 'video' && file.processing_status === 'automatic');
+export const manualVideoFiles = (files: ParsedFile[]): ParsedFile[] =>
+  files.filter(file => file.type === 'video' && file.processing_status === 'manual');
+export const subtitleFiles = (files: ParsedFile[]): ParsedFile[] =>
+  files.filter(file => file.type === 'subtitle' && file.processing_status === 'associate');
+export const ignoredFiles = (files: ParsedFile[]): ParsedFile[] =>
+  files.filter(file => file.processing_status === 'ignored');
+export const processableVideoFiles = (files: ParsedFile[]): ParsedFile[] =>
+  files.filter(file => file.type === 'video' && file.processing_status !== 'ignored');

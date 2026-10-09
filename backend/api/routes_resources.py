@@ -4,8 +4,6 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
-from .. import data as data_store
-from ..clients import bangumi as bangumi_client
 
 from ..db import resources
 from ..db import resource_recognitions
@@ -124,13 +122,24 @@ async def preview_cached_torrent(resource_id: int):
     if path != expected or not path.is_file():
         raise HTTPException(404, "已保存的种子文件不存在")
     from ..services.torrent.preview import parse_and_search
-    result = await parse_and_search(str(path))
+    try:
+        result = await parse_and_search(str(path))
+    except RuntimeError as error:
+        provider_errors = {
+            "preview_provider_fetch_failed: tmdb": "TMDB",
+            "preview_provider_fetch_failed: bangumi": "Bangumi",
+            "preview_provider_fetch_failed: tvdb": "TVDB",
+        }
+        provider = provider_errors.get(str(error))
+        if provider:
+            raise HTTPException(502, f"{provider} 数据获取失败，请检查网络或代理设置后重试") from error
+        if str(error) == "resource_provider_request_failed":
+            raise HTTPException(502, "外部元数据服务请求失败，请检查网络或代理设置后重试") from error
+        raise
     result["resource_id"] = resource_id
 
     recognition = resource_recognitions.get(resource_id)
     candidates = (recognition or {}).get("resource_candidates", [])
-    provider_catalogs = result.setdefault("provider_catalogs", {})
-    bangumi_data = provider_catalogs.setdefault("bangumi", {})
     from ..services.resource_resolver import normalized_title
     for candidate in candidates:
         matching = [entry for key, entry in result["search_results"].items()
@@ -145,18 +154,8 @@ async def preview_cached_torrent(resource_id: int):
             if (context["media_type"] == "movie" and provider == "tvdb") or candidate["media_type"] not in (context["media_type"], "special", "unknown"):
                 continue
             context["candidates"][provider] = deduplicate_candidates(context["candidates"][provider] + [candidate])
-        if candidate["provider"] != "bangumi":
-            continue
-        bgm_id = candidate["provider_id"]
-        if str(bgm_id) in bangumi_data:
-            continue
-        entry = data_store.get_map_entry(bgm_id) or {}
-        try:
-            episodes = await bangumi_client.get_episodes(bgm_id, ep_type=0)
-        except Exception:
-            episodes = []
-        bangumi_data[str(bgm_id)] = {"name": entry.get("name") or str(bgm_id),
-                                     "episodes": episodes}
+        # Historical candidates remain selectable; their directories load on
+        # selection rather than extending the bounded initial discovery.
     from ..services.torrent.preview_session import create_preview_session
     from ..services.torrent.preview_view import session_view
     row = create_preview_session(result, str(path))

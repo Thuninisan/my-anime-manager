@@ -89,7 +89,8 @@ def candidate_context(key, entry, provider_catalogs):
                    "mapping_hints": [{"bangumi_subject_id": h.get("bangumi_id"), "name": h.get("name", ""),
                        "tvdb_series_id": h.get("tvdb_id"), "tvdb_season_number": h.get("tvdb_season"),
                        "tmdb_season_number": h.get("tmdb_season")} for h in hints]}
-    discover_mapping_candidates(context)
+    if not entry.get("discovery_complete"):
+        discover_mapping_candidates(context)
     return context
 
 
@@ -98,6 +99,8 @@ def discover_mapping_candidates(context):
     from ... import data as data_store
     from ...domain.resource_adapters import provider_candidates
     movie = context["media_type"] == "movie"
+    if movie:
+        return
     links = []
     for candidate in context["candidates"]["tmdb"]:
         links.extend(data_store.get_map_entries_by_tmdb_id(candidate["provider_id"]))
@@ -125,24 +128,13 @@ def discover_mapping_candidates(context):
 
 
 def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
-    files = []
-    for key, kind in (("parsed_files", "video"), ("specials", "special")):
-        for item in result.get(key, []):
-            path = item["torrent_path"]
-            # Files skipped before title parsing have no show affiliation.
-            # Preserve that state without weakening the canonical string contract.
-            show_key = item.get("show_name")
-            if show_key is None:
-                show_key = ""
-            files.append({"file_id": file_id(path), "file_name": item["file_name"],
-                          "torrent_path": path, "show_key": show_key,
-                          "parsed": item.get("parsed_episode", {"season_number": item.get("season"),
-                                                                "episode_number": item.get("episode")}),
-                          "kind": kind})
-    for path in result.get("subtitles", []):
-        files.append({"file_id": file_id(path), "file_name": posixpath.basename(path),
-                      "torrent_path": path, "show_key": "", "parsed": {
-                          "season_number": None, "episode_number": None}, "kind": "subtitle"})
+    from .preview_files import unify_files
+    result = unify_files(result)
+    files = [{"file_id": file_id(item["torrent_path"]), "file_name": item["file_name"],
+              "torrent_path": item["torrent_path"], "show_key": item["show_name"],
+              "parsed": item["parsed_episode"], "type": item["type"],
+              "category": item["category"], "processing_status": item["processing_status"],
+              "skip_reason": item["skip_reason"]} for item in result["parsed_files"]]
     series = {}
     for key, entry in result.get("search_results", {}).items():
         series[key] = candidate_context(key, entry, result.get("provider_catalogs", {}))
@@ -158,9 +150,6 @@ def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
             "parsed_files": files, "series_contexts": series,
             "episode_catalog": episode_catalog(result.get("provider_catalogs", {})),
             "episode_metadata": normalize_metadata(result.get("provider_catalogs", {})),
-            "skipped_files": [{"file_name": item["file_name"], "torrent_path": item["torrent_path"],
-                               "reason": item.get("reason") or item.get("skip_reason") or ""}
-                              for item in result.get("skipped_files", [])],
             "episode_match_source": result.get("index", "tvdb")}
 
 
@@ -343,6 +332,10 @@ def restore_download_request(body: dict) -> dict:
             source = files_by_id.get(item.get("file_id"))
             if source is None:
                 raise HTTPException(422, "invalid_file_id")
+            if source["type"] not in ("video", "subtitle") or source["processing_status"] == "ignored":
+                raise HTTPException(422, "file_not_processable")
+            if collection == "uploaded_subtitles" and source["type"] != "video":
+                raise HTTPException(422, "invalid_subtitle_target")
             try:
                 mapping = _MAPPING_ADAPTER.validate_python(item.get("mapping"), strict=True)
             except ValidationError:
@@ -363,7 +356,7 @@ def restore_download_request(body: dict) -> dict:
                     series = matching[0]
             if not series:
                 raise HTTPException(422, "invalid_resource_identity: select a series")
-            if source["kind"] != "subtitle":
+            if source["type"] != "subtitle":
                 if mapping["bangumi"]["subject_id"] is None:
                     raise HTTPException(422, "bangumi_subject_required")
                 if series.get("media_type") != "movie" and mapping["bangumi"]["episode_id"] is None:
@@ -381,13 +374,13 @@ def restore_download_request(body: dict) -> dict:
                 bangumi_subject_id=mapping["bangumi"]["subject_id"],
                 tmdb_series_id=mapping["tmdb"]["series_id"],
                 tvdb_series_id=mapping["tvdb"]["series_id"], tmdb_movie_id=movie_id) if series else None
-            if series.get("media_type") != "movie" and source["kind"] != "subtitle" and not any(
+            if series.get("media_type") != "movie" and source["type"] != "subtitle" and not any(
                     mapping[p]["season_number"] is not None and mapping[p]["episode_number"] is not None
                     and int(mapping[p]["episode_number"]) == mapping[p]["episode_number"] for p in (snapshot["episode_match_source"],)):
                 raise HTTPException(422, "invalid_episode_mapping")
             movie_candidate = next((c for c in series.get("candidates", {}).get("tmdb", []) if c["provider_id"] == movie_id), {})
             entry = {"identity_revision": None, "resource_identity": file_identity, "episode_mapping": mapping, "torrent_path": source["torrent_path"],
-                     "is_subtitle": source["kind"] == "subtitle", "tmdb_show_name": movie_candidate.get("title") or next((c["title"] for c in series.get("candidates", {}).get("tmdb", []) if c["provider_id"] == mapping["tmdb"]["series_id"]), None) or selected_series.get("display_name", ""),
+                     "is_subtitle": source["type"] == "subtitle", "tmdb_show_name": movie_candidate.get("title") or next((c["title"] for c in series.get("candidates", {}).get("tmdb", []) if c["provider_id"] == mapping["tmdb"]["series_id"]), None) or selected_series.get("display_name", ""),
                      "bangumi_show_name": snapshot["episode_catalog"]["bangumi"].get(str(mapping["bangumi"]["subject_id"]), {}).get("name", selected_series.get("bangumi_display_name", "")),
                      **{k: item[k] for k in ("subtitle_suffix", "stored_filename", "original_filename") if k in item}}
             restored[collection].append(entry)

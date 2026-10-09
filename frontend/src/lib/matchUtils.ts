@@ -1,4 +1,4 @@
-import { candidateIds, recommendedId } from './episodeAdapters';
+import { automaticVideoFiles, candidateIds, recommendedId } from './episodeAdapters';
 import type { EpisodeCatalog, CatalogSeason } from '@/types/episode';
 import type { TorrentPreviewResponse } from '@/types/preview';
 import { createEpisodeMapping, matchingBangumiAbsolute, catalogSeriesTitle } from './episodeAdapters';
@@ -542,8 +542,8 @@ export function matchEpisodeTitles<T extends { name: string; name_cn?: string }>
 }
 
 function computeIndexedMatches(data: TorrentPreviewResponse, index: 'tmdb' | 'tvdb'): MatchRow[] {
-  checkDuplicates(data.parsed_files || []);
-  return (data.parsed_files || []).map(pf => {
+  checkDuplicates(automaticVideoFiles(data.parsed_files || []));
+  return automaticVideoFiles(data.parsed_files || []).map(pf => {
     const scoped = isolateSeries(data, pf);
     const entry = scoped.search_results[pf.show_name];
     const catalog = scoped.episode_catalog;
@@ -599,7 +599,7 @@ export function computeMatches(data: TorrentPreviewResponse): MatchRow[] {
 /** Original Bangumi-first matching (legacy, used when data.episode_match_source is absent). */
 /** Original Bangumi-first strategy for previews without an index. */
 export function computeMatchesLegacy(data: TorrentPreviewResponse): MatchRow[] {
-  const parsedFiles: ParsedFile[] = data.parsed_files || [];
+  const parsedFiles: ParsedFile[] = automaticVideoFiles(data.parsed_files || []);
   const searchResults: Record<string, SearchEntry> = data.search_results || {};
   if (Object.keys(searchResults).length > 1) {
     checkDuplicates(parsedFiles);

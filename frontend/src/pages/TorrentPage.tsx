@@ -19,6 +19,10 @@ export default function TorrentPage() {
   const [resourceLoading, setResourceLoading] = useState(false);
   const [resourceAttempt, setResourceAttempt] = useState(0);
   const completedResourceRequest = useRef<string | null>(null);
+  const resourceRequest = useRef<{
+    key: string;
+    promise: Promise<TorrentPreviewResponse>;
+  } | null>(null);
   const [collections, setCollections] = useState<TorrentCollection[]>([]);
   const [collectionsError, setCollectionsError] = useState<string | null>(null);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
@@ -47,11 +51,17 @@ export default function TorrentPage() {
     // Activity reconnects effects on return; keep an already loaded preview intact.
     if (completedResourceRequest.current === requestKey) return;
     let active = true;
-    const controller = new AbortController();
     setResourceLoading(true);
     setError(null);
     setSearchResult(null);
-    void previewResourceTorrent(replacement.resourceId, controller.signal).then((result) => {
+    // StrictMode and Activity reconnect effects; share the pending request.
+    if (resourceRequest.current?.key !== requestKey) {
+      resourceRequest.current = {
+        key: requestKey,
+        promise: previewResourceTorrent(replacement.resourceId),
+      };
+    }
+    void resourceRequest.current.promise.then((result) => {
       if (!active) return;
       completedResourceRequest.current = requestKey;
       setSearchResult(result);
@@ -63,7 +73,6 @@ export default function TorrentPage() {
     });
     return () => {
       active = false;
-      controller.abort();
     };
   }, [replacement?.resourceId, location.key, resourceAttempt]);
 

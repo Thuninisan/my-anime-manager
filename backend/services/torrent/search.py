@@ -13,7 +13,7 @@ import logging
 from collections import Counter
 from pathlib import Path
 
-from .preview import _parse_file, _deduplicate_show_names, SKIP_EXTENSIONS
+from .preview import _parse_file, _deduplicate_show_names
 from ...utils.torrent_file_reader import read_torrent_file_list, read_torrent_name
 from ...clients import tmdb as tmdb_client
 from ...clients import bangumi as bgm_client
@@ -295,12 +295,14 @@ async def search_by_tmdb(
         torrent_name: Optional pre-read torrent name (avoids re-reading).
 
     Returns:
-        Nested dict with ``parsed_files``, ``specials``, ``skipped_files``,
+        Nested dict with the unified ``parsed_files`` inventory,
         ``show_names``, ``search_results``, and ``provider_catalogs``.
 
     Raises:
         RuntimeError: If no files can be parsed from the torrent.
     """
+    from .preview_files import exclude_paths, file_type, unify_files
+
     # ── Step 1: Read torrent ──
     if not torrent_name:
         torrent_name = read_torrent_name(torrent_path)
@@ -308,6 +310,9 @@ async def search_by_tmdb(
 
     logger.debug("📋 读取种子文件内容 (bencode)...")
     file_list: list[dict] = read_torrent_file_list(torrent_path)
+    original_files = list(file_list)
+    excluded_paths = exclude_paths(original_files, config.TORRENT_EXCLUDE_PATTERNS)
+    file_list = [file for file in file_list if file["name"] not in excluded_paths]
     logger.debug(f"   → {len(file_list)} 个文件")
 
     # ── Collect subtitle files before anitopy parsing ──
@@ -323,7 +328,7 @@ async def search_by_tmdb(
     before_ext = len(file_list)
     file_list = [
         f for f in file_list
-        if Path(f["name"]).suffix.lower() not in SKIP_EXTENSIONS
+        if file_type(f["name"]) == "video"
     ]
     ext_skipped = before_ext - len(file_list)
     if ext_skipped:
@@ -387,88 +392,15 @@ async def search_by_tmdb(
         "tvdb": {},
     }
 
-    for name in show_names:
-        file_count = file_counts.get(name, 0)
-        is_movie = file_count == 1  # ktnbytes: single file = movie
-        logger.info(
-            "torrent.tmdb_first search torrent=%r query=%r files=%d media_type=%s",
-            torrent_name, name, file_count, "movie" if is_movie else "tv",
-        )
-
-        recommendations = {}
-        if is_movie:
-            logger.debug(f'   🎬 搜索电影: "{name}"')
-            tmdb_info = await _search_tmdb_movie(name, recommendations)
-        else:
-            logger.debug(f'   🔎 搜索: "{name}"')
-            tmdb_info = await _search_tmdb_single(name, recommendations)
-
-        if tmdb_info is None:
-            search_results[name] = {
-                "tmdb": None,
-                "bangumi": None,
-                "media_type": "movie" if is_movie else None,
-                "map_entries": [],
-                "provider_recommendations": recommendations,
-            }
-            continue
-
-        tmdb_id = tmdb_info["id"]
-        logger.info(
-            "torrent.tmdb_first selected torrent=%r query=%r tmdb_id=%s title=%r original_name=%r",
-            torrent_name, name, tmdb_id, tmdb_info["name"], tmdb_info.get("original_name"),
-        )
-
-        if is_movie:
-            # Movie: reverse lookup map.json for Bangumi ID + name
-            map_entries = [e for e in data_store.get_map_entries_by_tmdb_id(tmdb_id) if e.get("tmdb_season") == -1]
-            logger.info(
-                "torrent.tmdb_first movie_episode_fetch_skipped tmdb_id=%s map_entries=%d; movie branch only resolves mapping",
-                tmdb_id, len(map_entries),
-            )
-            selected, recommendations["bangumi"] = _preview_provider_result("bangumi",
-                [dict(e, id=e["bangumi_id"]) for e in map_entries], name, media_type="movie", source="existing_mapping")
-            bangumi_id = selected["id"] if selected else None
-            bangumi_name = next((e["name"] for e in map_entries if e["bangumi_id"] == bangumi_id), "")
-
-            logger.debug(f"   ✅ TMDB 电影 {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
-            if map_entries:
-                logger.debug(f"   🗺 map.json: {len(map_entries)} 个关联条目")
-                for me in map_entries:
-                    logger.debug(f"     - Bangumi {me['bangumi_id']} ({me['name']})")
-
-            search_results[name] = {
-                "tmdb": tmdb_info,
-                "media_type": "movie",
-                "bangumi": {"id": bangumi_id, "name": bangumi_name} if bangumi_id else None,
-                "map_entries": [e for e in map_entries if e["bangumi_id"] == bangumi_id],
-            }
-        else:
-            # TV: existing episode data fetch
-            logger.debug(f"   ✅ TMDB {tmdb_id}: {tmdb_info['name']} ({tmdb_info.get('original_name', '')})")
-
-            from .preview import _search_bangumi_for_name, _fetch_provider_catalogs
-            bgm = await _search_bangumi_for_name(name, tmdb_id, tmdb_info.get("original_name"))
-            recommendations["bangumi"] = bgm["recommendation"]
-            entry = {"tmdb": tmdb_info, "bangumi": bgm["first"], "media_type": "tv"}
-            bid = (bgm["first"] or {}).get("id")
-            mapping = data_store.get_map_entry(bid) if bid else None
-            entry["map_entries"] = [dict(mapping, bangumi_id=bid)] if mapping else []
-            search_results[name] = entry
-            all_data = await _fetch_provider_catalogs({name: entry}, parsed_files)
-            for provider in ("tmdb", "bangumi", "tvdb"):
-                provider_catalogs[provider].update(all_data[provider])
-        entry = search_results[name]
-        if is_movie:
-            from .preview import _fetch_provider_catalogs
-            directories = await _fetch_provider_catalogs({name: entry}, parsed_files)
-            for provider in ("tmdb", "bangumi", "tvdb"):
-                provider_catalogs[provider].update(directories[provider])
-        entry["provider_recommendations"] = recommendations
+    # All torrent naming variants share discovery limits and concurrent catalogs.
+    from .preview import _parallel_search, _organize, _fetch_provider_catalogs
+    pairs = await _parallel_search(show_names, parsed_files)
+    search_results = _organize(pairs)["search_results"]
+    provider_catalogs = await _fetch_provider_catalogs(search_results, parsed_files)
     from .preview_session import candidate_context
     search_results = {key: candidate_context(key, entry, provider_catalogs) for key, entry in search_results.items()}
 
-    return {
+    return unify_files({
         "index": "tmdb" if provider_catalogs.get("tmdb") else "tvdb" if provider_catalogs.get("tvdb") else "tmdb",
         "torrent_name": torrent_name,
         "torrent_path": torrent_path,
@@ -492,4 +424,4 @@ async def search_by_tmdb(
         "search_results": search_results,
         "provider_catalogs": provider_catalogs,
         "episode_catalog": episode_catalog(provider_catalogs),
-    }
+    }, original_files, excluded_paths)

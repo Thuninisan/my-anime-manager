@@ -1,4 +1,4 @@
-import { candidateIds } from '@/lib/episodeAdapters';
+import { automaticVideoFiles, processableVideoFiles, ignoredFiles, subtitleFiles, candidateIds } from '@/lib/episodeAdapters';
 import type { TorrentPreviewResponse } from '@/types/preview';
 import type { EpisodeCatalog } from '@/types/episode';
 import { useMemo, useState, useCallback } from 'react';
@@ -18,8 +18,8 @@ interface TorrentPreviewProps {
 
 /** Compute stats from the parsed + matched data. */
 function computeStats(searchResult: TorrentPreviewResponse) {
-  const parsedFiles = searchResult?.parsed_files || [];
-  const skippedFiles = searchResult?.skipped_files || [];
+  const parsedFiles = automaticVideoFiles(searchResult.parsed_files);
+  const skippedFiles = ignoredFiles(searchResult.parsed_files);
   const total = parsedFiles.length;
 
   const searchResults = searchResult?.search_results || {};
@@ -30,7 +30,10 @@ function computeStats(searchResult: TorrentPreviewResponse) {
   }
 
   return {
-    total: total + skippedFiles.length,
+    total: searchResult.parsed_files.length,
+    videos: processableVideoFiles(searchResult.parsed_files).length,
+    subtitles: subtitleFiles(searchResult.parsed_files).length,
+    ignored: skippedFiles.length,
     mapped,
     pending: total - mapped,
   };
@@ -55,8 +58,7 @@ export default function TorrentPreview({
 
   const stats = useMemo(() => computeStats(searchResult), [searchResult]);
 
-  const parsedFiles = searchResult?.parsed_files || [];
-  const skippedFiles = searchResult?.skipped_files || [];
+  const parsedFiles = useMemo(() => automaticVideoFiles(searchResult.parsed_files), [searchResult.parsed_files]);
   const movieCount = useMemo(
     () => parsedFiles.filter((pf) => {
       const entry = searchResult?.search_results?.[pf.show_name];
@@ -110,7 +112,7 @@ export default function TorrentPreview({
         return subtitleDestinationSuffix(selected.find(s => s.id === id)!, selected);
       };
       const requiredFileId = (path: string): string => {
-        const file = [...searchResult.parsed_files, ...(searchResult.specials || []), ...(searchResult.subtitle_files || [])]
+        const file = searchResult.parsed_files
           .find(file => file.torrent_path === path);
         if (!file?.file_id) throw new Error('Preview file identity missing; please preview again.');
         return file.file_id;
@@ -193,7 +195,7 @@ export default function TorrentPreview({
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-bold">{stats.total}</span>
               <span className="text-xs text-slate-500">
-                {skippedFiles.length} skipped
+                {stats.videos} videos · {stats.subtitles} subtitles · {stats.ignored} ignored
               </span>
             </div>
           </div>
@@ -350,7 +352,7 @@ export default function TorrentPreview({
                   </svg>
                   <span className="font-bold text-lg tracking-tight">Begin Processing All Matches</span>
                   <span className="text-xs bg-white/20 px-2 py-1 rounded-md font-mono">
-                    {effectiveRows.filter((r) => r.matched).length} / {parsedFiles.length} Files
+                    {effectiveRows.filter((r) => r.matched).length} / {stats.videos} Videos
                   </span>
                 </>
               )}

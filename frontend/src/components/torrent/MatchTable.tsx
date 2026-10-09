@@ -1,4 +1,4 @@
-import { candidateIds, recommendedId } from '@/lib/episodeAdapters';
+import { subtitleFiles as getSubtitleFiles, candidateIds, recommendedId } from '@/lib/episodeAdapters';
 import type { TorrentPreviewResponse } from '@/types/preview';
 /** Matching logic: parsed_files → search_results → episode_catalog → table.
 
@@ -19,7 +19,7 @@ import type { TorrentPreviewResponse } from '@/types/preview';
      types/matchTable.ts          — shared type definitions
 */
 
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import SubtitlePanel from '@/components/torrent/SubtitlePanel';
 import { subtitleStatus, type SubtitleAssociations, type SubtitleFilter } from '@/lib/subtitleMatching';
 import MappingCard from '@/components/torrent/MappingCard';
@@ -47,7 +47,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
 }) {
   const searchResults = data.search_results || {};
   const episodeData = data.episode_catalog || { tmdb: {}, bangumi: {} };
-  const subtitles: string[] = data.subtitles || [];
+  const subtitles = useMemo(() => getSubtitleFiles(data.parsed_files).map(file => file.torrent_path), [data.parsed_files]);
   const torrentName: string = data.torrent_name || '';
 
   // ── Matching state + handlers ──

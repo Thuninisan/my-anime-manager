@@ -33,7 +33,7 @@ function candidates(tmdb, bangumi, tvdb) {
 function fixture({ parsedSeason = 1, parsedEpisode = 3, tmdbSeason = 1, tmdbEpisode = 3,
   tvdbSeason = 1, tvdbEpisode = 3, bgmEp = 3, bgmSort = 3, index = 'tvdb', tvdb = true } = {}) {
   return normalizeTorrentPreview({ episode_match_source: index, torrent_name: 'Show', torrent_path: '/tmp/show.torrent',
-    parsed_files: [{ file_name: 'Show.mkv', torrent_path: 'Show.mkv', show_name: 'Show', parsed_episode: { season_number: parsedSeason, episode_number: parsedEpisode } }],
+    parsed_files: [{ type: 'video', category: 'regular', processing_status: 'automatic', skip_reason: null, file_name: 'Show.mkv', torrent_path: 'Show.mkv', show_name: 'Show', parsed_episode: { season_number: parsedSeason, episode_number: parsedEpisode } }],
     search_results: { Show: { show_key: 'Show', media_type: 'tv', candidates: candidates(100, 200, 300), display_name: 'Show', bangumi_display_name: 'Show',
       mapping_hints: [{ bangumi_subject_id: 200, name: 'Show', tvdb_series_id: 300 }] } },
     episode_catalog: {
@@ -359,3 +359,30 @@ const unsortedSeason = { 1: { episodes: [
 ] } };
 assert.deepEqual(buildTmdbEpOptions(1, unsortedSeason).map(ep => ep.episode_number), [21, 30]);
 assert.deepEqual(unsortedSeason[1].episodes.map(ep => ep.episode_number), [30, 21]);
+
+// One inventory contains videos, manual specials, subtitles and ignored files.
+{
+  const mixed = fixture();
+  const base = mixed.parsed_files[0];
+  mixed.parsed_files.push(
+    { ...base, file_id: 'special', torrent_path: 'SPs/extra.mkv', category: 'special', processing_status: 'manual' },
+    { ...base, file_id: 'subtitle', torrent_path: 'Show.ass', type: 'subtitle', category: null, processing_status: 'associate' },
+    { ...base, file_id: 'font', torrent_path: 'Fonts.zip', type: 'font', category: null, processing_status: 'ignored' },
+    { ...base, file_id: 'excluded', torrent_path: 'Excluded.mkv', processing_status: 'ignored', skip_reason: 'exclude_pattern' },
+  );
+  assert.equal(computeMatches(mixed).length, 1);
+  function MixedInventoryHarness() {
+    const state = useMatchOverrides(mixed, mixed.search_results, mixed.episode_catalog);
+    assert.equal(state.rows.length, 2);
+    assert.equal(state.tvRows.length, 1);
+    assert.equal(state.spRows.length, 1);
+    assert.equal(state.spRows[0].matched, false);
+    return null;
+  }
+  renderToString(React.createElement(MixedInventoryHarness));
+  const { subtitleFiles, ignoredFiles } = await import(adaptersUrl);
+  assert.deepEqual(subtitleFiles(mixed.parsed_files).map(file => file.torrent_path), ['Show.ass']);
+  assert.equal(ignoredFiles(mixed.parsed_files).length, 2);
+  assert.equal(normalizeTorrentPreview({ parsed_files: [{ type: 'future_type', processing_status: 'unknown' }] }).parsed_files[0].processing_status, 'ignored');
+}
+console.log('Unified file inventory: automatic/manual videos, subtitles and ignored files passed');

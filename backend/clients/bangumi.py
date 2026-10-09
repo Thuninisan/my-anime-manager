@@ -2,6 +2,7 @@
 
 import logging
 import asyncio
+import time
 from urllib.parse import quote
 
 import httpx
@@ -24,9 +25,19 @@ def _post(path: str, **kwargs):
     )
 
 
+_request_gate = asyncio.Lock()
+_last_request_started = 0.0
+
+
 async def _delay() -> None:
-    """Rate-limit delay for Bangumi API."""
-    await asyncio.sleep(config.API_DELAY_MS / 1000.0)
+    """Space request starts globally while allowing responses to overlap."""
+    global _last_request_started
+    async with _request_gate:
+        delay = config.API_DELAY_MS / 1000.0
+        remaining = delay - (time.monotonic() - _last_request_started)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+        _last_request_started = time.monotonic()
 
 
 async def _retry(fn, *args, max_retries: int = 3, **kwargs):
@@ -34,6 +45,7 @@ async def _retry(fn, *args, max_retries: int = 3, **kwargs):
     last_err = None
     for attempt in range(max_retries):
         try:
+            await _delay()
             return await fn(*args, **kwargs)
         except Exception as e:
             last_err = e
@@ -52,7 +64,6 @@ async def search_subjects(keyword: str) -> list[dict]:
     Returns:
         List of subject dicts
     """
-    await _delay()
     try:
         res = await _retry(
             _post,
@@ -100,7 +111,6 @@ async def get_subject(subject_id: int) -> dict:
     Raises:
         RuntimeError: If the API request fails
     """
-    await _delay()
     try:
         res = await _retry(_get, f"/v0/subjects/{subject_id}")
         res.raise_for_status()
@@ -117,7 +127,6 @@ async def get_subject(subject_id: int) -> dict:
 
 async def get_calendar() -> list[dict]:
     """Get Bangumi's public weekly anime broadcast calendar."""
-    await _delay()
     response = await _retry(_get, "/calendar")
     response.raise_for_status()
     return response.json()
@@ -132,7 +141,6 @@ async def get_relations(subject_id: int) -> list[dict]:
     Returns:
         List of relation dicts
     """
-    await _delay()
     try:
         res = await _retry(_get, f"/v0/subjects/{subject_id}/subjects")
         return res.json()
@@ -150,7 +158,6 @@ async def get_episode_total(subject_id: int) -> int:
     Returns:
         Total episode count, or 0 on failure
     """
-    await _delay()
     try:
         res = await _retry(
             _get,
@@ -174,7 +181,6 @@ async def get_episodes(subject_id: int, ep_type: int | None = 0) -> list[dict]:
     Returns:
         Sorted list of episode dicts.
     """
-    await _delay()
     all_eps = []
     offset = 0
     limit = 100
@@ -201,7 +207,6 @@ async def get_episodes(subject_id: int, ep_type: int | None = 0) -> list[dict]:
         if len(eps) < limit:
             break
         offset += limit
-        await _delay()
 
     # Sort: prefer sort field, ep field as fallback
     all_eps.sort(key=lambda e: (e.get("sort") or e.get("ep") or 0))

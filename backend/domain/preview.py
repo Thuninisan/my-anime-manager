@@ -1,11 +1,14 @@
 """Canonical, JSON-serializable short-lived torrent preview context."""
-from typing import NotRequired
+from typing import Literal, NotRequired
 from typing_extensions import TypedDict
 from pydantic import ConfigDict
 from .resource import ResourceCandidate
 from .episode import EpisodeCatalog, EpisodeMetadata, ParsedEpisodeRef, EpisodeMapping
 
-PREVIEW_SCHEMA_VERSION = 3
+PREVIEW_SCHEMA_VERSION = 4
+PreviewFileType = Literal["video", "subtitle", "font", "audio", "other"]
+PreviewFileCategory = Literal["regular", "special"]
+PreviewProcessingStatus = Literal["automatic", "manual", "associate", "ignored"]
 EpisodeMetadataStore = dict[str, EpisodeMetadata]
 
 
@@ -22,7 +25,10 @@ class PreviewParsedFile(TypedDict):
     torrent_path: str
     show_key: str
     parsed: ParsedEpisodeRef
-    kind: str
+    type: PreviewFileType
+    category: PreviewFileCategory | None
+    processing_status: PreviewProcessingStatus
+    skip_reason: str | None
 
 
 class ProviderCandidates(TypedDict):
@@ -48,7 +54,6 @@ class PreviewContextSnapshot(TypedDict):
     series_contexts: dict[str, SeriesContext]
     episode_catalog: EpisodeCatalog
     episode_metadata: EpisodeMetadataStore
-    skipped_files: list[dict[str, str]]
     episode_match_source: str
 
 
@@ -81,6 +86,10 @@ class PreviewParsedFileView(TypedDict):
     torrent_path: str
     show_name: str
     parsed_episode: ParsedEpisodeRef
+    type: PreviewFileType
+    category: PreviewFileCategory | None
+    processing_status: PreviewProcessingStatus
+    skip_reason: str | None
 
 
 class PreviewSearchEntry(SeriesContext):
@@ -95,9 +104,5 @@ class TorrentPreviewResponse(TypedDict):
     resource_id: int | None
     episode_match_source: str
     parsed_files: list[PreviewParsedFileView]
-    specials: list[PreviewParsedFileView]
-    subtitles: list[str]
-    subtitle_files: list[PreviewParsedFileView]
-    skipped_files: list[dict[str, str]]
     search_results: dict[str, PreviewSearchEntry]
     episode_catalog: EpisodeCatalog

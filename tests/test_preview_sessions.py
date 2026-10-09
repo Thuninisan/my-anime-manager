@@ -76,6 +76,34 @@ class PreviewSessionTests(unittest.TestCase):
         with self.assertRaises(HTTPException):
             service.restore_download_request(request)
 
+    def test_unified_inventory_rejects_ignored_files_and_nonvideo_upload_targets(self):
+        from backend.services.torrent.preview_files import unify_files
+        result = unify_files(self.result)
+        result['parsed_files'].append({
+            'file_name': 'Fonts.zip', 'torrent_path': 'Fonts.zip', 'show_name': '',
+            'type': 'font', 'category': None, 'processing_status': 'ignored',
+            'skip_reason': 'unsupported_processing',
+            'parsed_episode': {'season_number': None, 'episode_number': None}})
+        self.row = service.create_preview_session(result, str(self.source))
+        view = session_view(self.row)
+        self.assertEqual(len(view['parsed_files']), 4)
+        self.assertFalse({'specials', 'subtitles', 'subtitle_files', 'skipped_files'} & view.keys())
+        body = self.request()
+        body['files'][0]['file_id'] = service.file_id('Fonts.zip')
+        with self.assertRaises(HTTPException) as error:
+            service.restore_download_request(body)
+        self.assertEqual(error.exception.detail, 'file_not_processable')
+        body = self.request()
+        body['uploaded_subtitles'] = [{
+            'file_id': service.file_id('a.ass'), 'mapping': self.mapping,
+            'stored_filename': 'uploaded.ass', 'original_filename': 'uploaded.ass'}]
+        with self.assertRaises(HTTPException) as error:
+            service.restore_download_request(body)
+        self.assertEqual(error.exception.detail, 'invalid_subtitle_target')
+        body = self.request()
+        body['files'].append({'file_id': service.file_id('a.ass'), 'mapping': self.mapping})
+        self.assertTrue(service.restore_download_request(body)['files'][1]['is_subtitle'])
+
     def test_invalid_download(self):
         for field, value, code, detail in [('preview_id', 'unknown', 404, 'preview_not_found'),
                                           ('preview_revision', 2, 409, 'preview_revision_conflict')]:
@@ -137,13 +165,14 @@ class PreviewSessionTests(unittest.TestCase):
         row = service.create_preview_session(self.result, str(self.source))
         _, snapshot = service.load_preview_session(row.id)
         view = session_view(row)
-        specials = [item for item in snapshot['parsed_files'] if item['kind'] == 'special']
+        specials = [item for item in snapshot['parsed_files'] if item['category'] == 'special']
         self.assertEqual(len(specials), 34)
         self.assertTrue(all(item['show_key'] == '' for item in specials))
-        self.assertEqual(len(view['specials']), 34)
-        self.assertTrue(all(item['show_name'] == '' for item in view['specials']))
+        special_views = [item for item in view['parsed_files'] if item['category'] == 'special']
+        self.assertEqual(len(special_views), 34)
+        self.assertTrue(all(item['show_name'] == '' for item in special_views))
         self.assertEqual(snapshot['series_contexts'], self.snapshot['series_contexts'])
-        self.assertEqual([item['show_name'] for item in view['parsed_files']], ['A', 'B'])
+        self.assertEqual([item['show_name'] for item in view['parsed_files'] if item['processing_status'] == 'automatic'], ['A', 'B'])
 
     def test_unknown_show_name_does_not_mask_invalid_types(self):
         from pydantic import ValidationError

@@ -10,6 +10,7 @@ class ResourceRecognitionFlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_known_tmdb_link_skips_bangumi_title_search(self):
         linked = [{'bangumi_id': 5, 'name': 'A', 'name_original': 'Original', 'tmdb_season': 1}]
         with patch.object(preview.data_store, 'get_map_entries_by_tmdb_id', return_value=linked), \
+             patch.object(preview.tvdb_client, 'search_series', AsyncMock(return_value=SimpleNamespace(json=lambda: {'data': []}))), \
              patch.object(preview.bangumi_service, 'search_bangumi', AsyncMock()) as search:
             result = await preview._search_bangumi_for_name('A', tmdb_id=10)
         self.assertEqual(result['first']['id'], 5)
@@ -58,6 +59,7 @@ class PreviewCandidateTests(unittest.IsolatedAsyncioTestCase):
                   {'bangumi_id': 2, 'name': 'Season 2'},
                   {'bangumi_id': 1, 'name': 'Season 1'}]
         with patch.object(preview.data_store, 'get_map_entries_by_tmdb_id', return_value=linked), \
+             patch.object(preview.tvdb_client, 'search_series', AsyncMock(return_value=SimpleNamespace(json=lambda: {'data': []}))), \
              patch.object(preview.bangumi_service, 'search_bangumi', AsyncMock()) as search:
             result = await preview._search_bangumi_for_name('Show', 100)
         self.assertEqual(result['first']['id'], 1)
@@ -82,6 +84,7 @@ class PreviewCandidateTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(preview.tmdb_client, 'search_tv', AsyncMock(return_value=response)), \
              patch.object(preview.tmdb_client, 'search_movie', AsyncMock(side_effect=[movie, empty])), \
              patch.object(preview.data_store, 'get_map_entries_by_tmdb_id', return_value=linked), \
+             patch.object(preview.tvdb_client, 'search_series', AsyncMock(return_value=SimpleNamespace(json=lambda: {'data': []}))), \
              patch.object(preview.bangumi_service, 'search_bangumi', AsyncMock(return_value=[])):
             pairs = await preview._parallel_search(['TV', 'Movie', 'Missing'], files)
         entries = preview._organize(pairs)['search_results']
@@ -113,6 +116,7 @@ class PreviewCandidateTests(unittest.IsolatedAsyncioTestCase):
              patch('backend.utils.torrent_file_reader.read_torrent_name', return_value='Show'), \
              patch.object(preview.tmdb_client, 'search_tv', AsyncMock(return_value=response)), \
              patch.object(preview.data_store, 'get_map_entries_by_tmdb_id', return_value=linked), \
+             patch.object(preview.tvdb_client, 'search_series', AsyncMock(return_value=SimpleNamespace(json=lambda: {'data': []}))), \
              patch.object(preview.data_store, 'list_subscriptions', return_value=[]), \
              patch.object(preview.tmdb_service, 'build_season_episode_map', AsyncMock(return_value={})), \
              patch.object(preview.bgm_client, 'get_subject', AsyncMock(return_value={'name': 'Season'})), \

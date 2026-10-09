@@ -102,3 +102,34 @@ Additional bugs fixed: catalog aggregation could leak provider identities across
 No history/resource-table schema was changed. Permanent persistence must define how confirmed identity/provenance attaches to existing legacy rows and how edits invalidate cached bindings. Existing legacy resource-monitor candidate persistence does not store the new runtime resolution envelope. Old PreviewSession v1 contexts may lack canonical fields and use the explicit compatibility projection until expiration. These are Phase 6 design inputs, not silently performed migrations.
 
 Separate retained capability boundaries: Batch's single-tvshow response and movie processing's single-movie context do not support mixed-resource execution. They now report explicit errors rather than cross-bind identities. Extending those contracts requires a separate scoped change. The legacy file-count movie heuristic and chronological chain fallback also remain follow-up TODOs; no fuzzy framework, provider-client rewrite, NFO-policy change or path-template redesign was introduced.
+
+## Torrent preview file inventory (schema 4)
+
+The public preview returns one `parsed_files` array for all torrent files. Each file has
+`file_id`, `file_name`, `torrent_path`, `show_name`, `parsed_episode`, `type`, `category`,
+`processing_status`, and `skip_reason`. `type` is video/subtitle/font/audio/other;
+video `category` is regular/special. `processing_status` is automatic/manual/associate/ignored.
+Filtered files remain in the inventory with a reason, and manual specials are not duplicated
+as skipped files. The public response no longer exposes specials/subtitles/subtitle_files/skipped_files.
+Only automatic videos enter episode matching; manual videos remain selectable, and associate
+subtitles use the existing subtitle workflow. Downloads reject ignored files and unsupported types.
+Schema 3 sessions require a fresh preview. Provider candidates and episode catalogs are unchanged.
+
+## Torrent preview discovery and catalog loading
+
+All torrent naming variants share the same discovery flow. Deduplicated show names
+with at most two parsed files use TMDB movie search; larger groups use TV search.
+TMDB searches run concurrently. The selected TV candidate discovers mapping links;
+Bangumi and TVDB fall back independently when their IDs are missing. TVDB searches
+use the parsed show name and retain the first series. Bangumi searches use the TMDB
+Chinese title (or original title/parsed name when absent), retaining five distinct
+results for TV and two non-TV results for movies, in provider order. Movies never
+consult mapping or request TVDB. Mapping links are not subject to search limits.
+
+All discovered directories are deduplicated by provider ID and loaded concurrently
+across providers, with bounded concurrency per provider. Initial loading does not
+expand Bangumi relation chains. Bangumi request starts, including retries and pages,
+share the configured interval while responses can overlap. TVDB authentication is
+serialized to avoid duplicate logins. Historical resource candidates remain available
+but do not cause extra initial directory requests; manual selection loads them.
+Provider request failures retain the existing explicit error behavior.

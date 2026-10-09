@@ -1,14 +1,8 @@
-"""Torrent file parsing and parallel TMDB + Bangumi search.
+"""Torrent preview: parse files, discover candidates, load provider catalogs.
 
-Independent of batch_service.py — this is a standalone pipeline for
-the ``POST /api/torrent/parse-and-search`` endpoint.
-
-Flow:
-  1. Bencode-extract file list from .torrent
-  2. Parse each video file with anitopy (skip .ass / skip-dirs)
-  3. Deduplicate show names (case-insensitive, frequency-ordered)
-  4. Parallel TMDB + Bangumi search for each show name
-  5. Organise into {default, backup} per source
+TMDB searches run concurrently. TV candidates discover mapping links before
+missing-provider searches; movies search Bangumi directly. Catalog requests
+are deduplicated and run concurrently across providers.
 """
 
 from ...domain.episode_adapters import episode_catalog, parsed_episode_ref
@@ -23,6 +17,7 @@ from ...utils.torrent_file_reader import read_torrent_file_list
 from ...vendor.anitopy import parse as anitopy_parse
 from ...clients import tmdb as tmdb_client
 from ...clients import bangumi as bgm_client
+from ...clients import tvdb as tvdb_client
 from .. import tmdb as tmdb_service
 from .. import bangumi as bangumi_service
 from ... import data as data_store
@@ -273,7 +268,7 @@ async def _search_tmdb_for_name(show_name: str, search_as_movie: bool = False) -
     # Also preserve original_title / original_name for frontend movie matching.
     if first:
         first_name = first.get("title") or first.get("name", "")
-        logger.debug(f"   ✅ batch NFO complete: {first_name}")
+        logger.debug("TMDB search selected: %s", first_name)
         first_clean = {"id": first["id"], "name": first_name}
         if search_as_movie:
             ot = first.get("original_title", "")
@@ -446,117 +441,86 @@ async def _search_bangumi_for_name(
     }
 
 
+async def _gather_provider_requests(*requests):
+    """Cancel unfinished sibling requests when a provider fails or preview is cancelled."""
+    tasks = [asyncio.create_task(request) for request in requests]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
+def _discovered_source(provider: str, rows: list[dict], keyword: str, media_type: str, *, source=None) -> dict:
+    """Keep discovery order; search limits apply before any recommendation ranking."""
+    from ...domain.resource_adapters import provider_candidates
+    candidates = provider_candidates(provider, rows, media_type, source)
+    projected = [{"id": c["provider_id"], "name": c["title"] or c["original_title"] or ""}
+                 for c in candidates]
+    return {"searchby": keyword, "first": projected[0] if projected else None,
+            "rest": projected[1:], "recommendation": {
+                "candidates": candidates, "status": "suggested" if candidates else "unresolved"}}
+
+
 async def _parallel_search(show_names: list[str], parsed_files: list[dict] | None = None) -> list[dict]:
-    """Search TMDB + Bangumi for every show name concurrently.
-
-    Within each show name, TMDB and Bangumi run in parallel.
-    Across show names, Bangumi calls are serialised via a semaphore
-    to respect the Bangumi client's built-in rate limiting.
-
-    When a show name has ≤ 2 parsed files, TMDB uses /search/movie
-    instead of /search/tv (movies typically have 1–2 files while TV
-    series have many more).
-
-    Args:
-        show_names: Unique show names (frequency-ordered).
-        parsed_files: Parsed file dicts (for per-show file counts).
-
-    Returns:
-        List of per-name search dicts, one per show name in order.
-    """
-    # Count files per show name to decide TV vs movie search
-    file_counts: dict[str, int] = {}
-    if parsed_files:
-        for pf in parsed_files:
-            sn = pf.get("show_name", "")
-            file_counts[sn] = file_counts.get(sn, 0) + 1
-
-    # Semaphore ensures only one Bangumi request is in-flight at a time.
-    # Bangumi's internal _delay() sleeps before each HTTP call; without the
-    # semaphore all concurrent calls would sleep in parallel then fire
-    # simultaneously.
-    bangumi_sem = asyncio.Semaphore(1)
-
-    async def _search_pair(name: str) -> dict:
-        """TMDB-first, then Bangumi.  Movies use TMDB original_title → Bangumi."""
-        # Step 1: TMDB search (movie if ≤ 2 files, otherwise TV)
-        count = file_counts.get(name, 0)
-        search_as_movie = count <= 2
-        tmdb_result = await _search_tmdb_for_name(name, search_as_movie=search_as_movie)
-
-        # Step 2: Bangumi search
-        if search_as_movie and tmdb_result["first"]:
-            # Movie: search Bangumi with TMDB original_title, exclude TV platform
-            original_title = tmdb_result["first"].get("original_title", "")
-            if original_title:
-                async with bangumi_sem:
-                    bgm_raw = await bangumi_service.search_bangumi(original_title)
-                # Filter: exclude TV platform entries only
-                bgm_raw = [
-                    r for r in bgm_raw
-                    if r.get("platform", "") != "TV"
-                ]
-
-                first, recommendation = _preview_provider_result("bangumi", bgm_raw, original_title, media_type="movie")
-                if first:
-                    bangumi_result: dict = {
-                        "searchby": original_title,
-                        "recommendation": recommendation,
-                        "first": {
-                            "id": first["id"],
-                            "name": first.get("name", ""),
-                            "eps": first.get("eps", 0),
-                        },
-                        "rest": [],
-                    }
-                    if first.get("name_cn"):
-                        bangumi_result["first"]["name_cn"] = first["name_cn"]
-                else:
-                    bangumi_result = {"searchby": original_title, "first": None, "rest": [], "recommendation": recommendation}
-            else:
-                bangumi_result = {"searchby": name, "first": None, "rest": []}
-        else:
-            # TV: existing fallback chain (primary name → map → tmdb_name)
-            async def _do_bangumi():
-                tmdb_first = tmdb_result["first"]
-                tmdb_id = tmdb_first["id"] if tmdb_first else None
-                tmdb_name = tmdb_first["name"] if tmdb_first else None
-                async with bangumi_sem:
-                    return await _search_bangumi_for_name(
-                        name, tmdb_id=tmdb_id, tmdb_name=tmdb_name, media_type=tmdb_result["media_type"],
-                    )
-
-            bangumi_result = await _do_bangumi()
-
-        if "recommendation" not in bangumi_result:
-            bangumi_result["recommendation"] = {"candidates": [], "status": "unresolved"}
-        return {
-            "show_name": name,
-            "tmdb": tmdb_result,
-            "bangumi": bangumi_result,
-        }
-
-    # Launch all pairs concurrently — Bangumi serialisation is handled
-    # inside each pair by the semaphore.
-    raw = await asyncio.gather(
-        *[_search_pair(name) for name in show_names],
-        return_exceptions=True,
-    )
-
-    # Separate successes from failures
-    pairs: list[dict] = []
-    for i, result in enumerate(raw):
+    """TMDB discovery, TV mapping, then parallel searches for missing sources."""
+    counts = Counter(pf.get("show_name", "").lower() for pf in parsed_files or [])
+    tmdb_results = await asyncio.gather(*[
+        _search_tmdb_for_name(name, search_as_movie=counts[name.lower()] <= 2)
+        for name in show_names], return_exceptions=True)
+    for result in tmdb_results:
+        if isinstance(result, (asyncio.CancelledError, ValueError)):
+            raise result
         if isinstance(result, BaseException):
-            logger.warning(f"   ⚠️ 搜索 '{show_names[i]}' 异常: {result}")
-            if isinstance(result, asyncio.CancelledError):
-                raise result
-            if isinstance(result, ValueError):
-                raise result
             raise RuntimeError("resource_provider_request_failed") from result
-        else:
-            pairs.append(result)
 
-    return pairs
+    async def discover(name, tmdb):
+        media_type = tmdb["media_type"]
+        first = tmdb["first"] or {}
+        links = []
+        if media_type == "tv" and first.get("id"):
+            links = [dict(row) for row in data_store.get_map_entries_by_tmdb_id(first["id"])
+                     if row.get("tmdb_season") != -1]
+        bgm_rows = list({row["bangumi_id"]: dict(row, id=row["bangumi_id"],
+                        name_cn=row.get("name", ""), name=row.get("name_original") or row.get("name", ""))
+                        for row in links if row.get("bangumi_id")}.values())
+        tvdb_rows = list({row["tvdb_id"]: row for row in links if row.get("tvdb_id")}.values())
+        keyword = first.get("name") or first.get("original_title") or first.get("original_name") or name
+
+        async def bangumi():
+            if bgm_rows:
+                return _discovered_source("bangumi", bgm_rows, keyword, media_type, source="existing_mapping")
+            rows = await bangumi_service.search_bangumi(keyword)
+            if media_type == "movie":
+                rows = [row for row in rows if row.get("platform") != "TV"]
+            rows = list({row["id"]: row for row in rows if row.get("id")}.values())
+            return _discovered_source("bangumi", rows[:2 if media_type == "movie" else 5], keyword, media_type)
+
+        async def tvdb():
+            if media_type == "movie":
+                return _discovered_source("tvdb", [], name, media_type)
+            if tvdb_rows:
+                return _discovered_source("tvdb", tvdb_rows, name, media_type, source="existing_mapping")
+            response = await tvdb_client.search_series(name)
+            rows = [dict(row, id=row.get("tvdb_id") or row.get("id"))
+                    for row in response.json().get("data", [])
+                    if row.get("type", "series") == "series"]
+            rows = [row for row in rows if str(row.get("id", "")).isdigit() and int(row["id"]) > 0]
+            return _discovered_source("tvdb", rows[:1], name, media_type)
+
+        bgm, tv = await _gather_provider_requests(bangumi(), tvdb())
+        return {"show_name": name, "tmdb": tmdb, "bangumi": bgm, "tvdb": tv, "map_entries": links}
+
+    results = await asyncio.gather(*[discover(name, result) for name, result in zip(show_names, tmdb_results)],
+                                   return_exceptions=True)
+    for result in results:
+        if isinstance(result, (asyncio.CancelledError, ValueError)):
+            raise result
+        if isinstance(result, BaseException):
+            raise RuntimeError("resource_provider_request_failed") from result
+    return results
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -593,7 +557,12 @@ def _organize(pairs: list[dict]) -> dict:
             "tmdb": tmdb_src["first"],
             "bangumi": bgm_src["first"],
             "media_type": tmdb_src.get("media_type", "tv"),
-            "provider_recommendations": {"tmdb": tmdb_src["recommendation"], "bangumi": bgm_src["recommendation"]},
+            "provider_recommendations": {"tmdb": tmdb_src["recommendation"], "bangumi": bgm_src["recommendation"],
+                **({"tvdb": p["tvdb"]["recommendation"]} if "tvdb" in p else {})},
+            "map_entries": p.get("map_entries", []),
+            "discovery_complete": True,
+            "bangumi_ids": [c["provider_id"] for c in bgm_src["recommendation"]["candidates"]],
+            "tvdb_ids": [c["provider_id"] for c in p.get("tvdb", {}).get("recommendation", {}).get("candidates", [])],
         }
         # Collect rest, dedup by id
         for entry in tmdb_src["rest"]:
@@ -621,85 +590,42 @@ def _organize(pairs: list[dict]) -> dict:
 # ═══════════════════════════════════════════════════════════════════════
 
 async def _fetch_provider_catalogs(search_results: dict, parsed_files: list[dict]) -> dict:
-    """Fetch TMDB season→episode maps and Bangumi episode lists.
+    """Load discovered directories concurrently, without expanding relation chains.
 
-    Collects every unique TMDB / Bangumi ID from *search_results*
-    (first results only, NOT backup).
-
-    If a Bangumi entry's ``eps`` is less than the number of parsed files
-    for that show name, the sequel's episodes are fetched and stored under
-    the sequel's own Bangumi ID.
-
-    Args:
-        search_results: Keyed by search term.
-        parsed_files: List of parsed file dicts (for per-show file counts).
-
-    Returns:
-        ``{tmdb: {id: {season: …}}, bangumi: {id: {name, episodes}}}``
+    Legacy callers can still supply TMDB IDs and mapping hints directly.
+    Movie discovery never queries mapping or loads TVDB/ TMDB seasons.
     """
-    # ── Per-show file counts (exclude OVA/OAD + S0 specials — they are
-    #     not regular TV episodes and should not trigger sequel expansion) ──
-    _OVA_OAD_TYPES: set[str] = {"OVA", "OAD", "OAV"}
-    file_counts: dict[str, int] = {}
-    ova_show_names: set[str] = set()  # show_names that have OVA/OAD files
-    for pf in parsed_files:
-        sn = pf.get("show_name", "")
-        # Season 0 = specials, not regular episodes
-        if pf.get("season") == 0:
-            continue
-        # anitopy stores anime_type in the parsed dict; it may be a string
-        # ("OVA") or a list (["OVA"]) when multiple types are detected.
-        parsed = pf.get("parsed") or {}
-        at = parsed.get("anime_type", "")
-        if isinstance(at, list):
-            at = at[0] if at else ""
-        if at and str(at).upper() in _OVA_OAD_TYPES:
-            ova_show_names.add(sn)  # track for 番外篇 expansion below
-            continue  # OVA/OAD files don't count toward regular TV episode totals
-        file_counts[sn] = file_counts.get(sn, 0) + 1
-
-    # ── Collect unique IDs from search_results only ──
-    tmdb_ids: set[int] = set()
-    # Track media_type per TMDB ID so we know which ones are movies
-    tmdb_media_types: dict[int, str] = {}
-    bangumi_ids: set[int] = set()
-    # Track which bangumi IDs need sequel expansion: bangumi_id → set of show_names
-    sequel_map: dict[int, list[str]] = {}
-
-    for key, entry in search_results.items():
-        t = entry.get("tmdb")
-        b = entry.get("bangumi")
-        mt = entry.get("media_type", "tv")
-        # Explicit series linkage supplies episode directories, not a primary Subject.
-        if t and t.get("id"):
-            linked = list({e["bangumi_id"]: e for e in data_store.get_map_entries_by_tmdb_id(t["id"])
-                if (e.get("tmdb_season") == -1 if mt == "movie" else e.get("tmdb_season") != -1)}.values())
-            if linked:
-                entry["bangumi_ids"] = sorted(set(entry.get("bangumi_ids", [])) | {e["bangumi_id"] for e in linked})
-                entry["map_entries"] = linked
-        bangumi_ids.update(entry.get("bangumi_ids", []))
-        if t and t.get("id"):
+    tmdb_ids, bangumi_ids, tvdb_ids = set(), set(), set()
+    for entry in search_results.values():
+        movie = entry.get("media_type") == "movie"
+        t, b = entry.get("tmdb") or {}, entry.get("bangumi") or {}
+        if t.get("id") and not movie:
             tmdb_ids.add(t["id"])
-            tmdb_media_types[t["id"]] = mt
-        if b and b.get("id"):
-            bid = b["id"]
-            bangumi_ids.add(bid)
-            eps = b.get("eps", 0)
-            fc = file_counts.get(key, 0)
-            if eps > 0 and fc > eps:
-                sequel_map.setdefault(bid, []).append(key)
+        # Legacy callers may still supply only TMDB and mapping hints.
+        if not movie and not entry.get("discovery_complete") and t.get("id"):
+            links = [row for row in data_store.get_map_entries_by_tmdb_id(t["id"])
+                     if row.get("tmdb_season") != -1]
+            entry["map_entries"] = links or entry.get("map_entries", [])
+        if b.get("id"):
+            bangumi_ids.add(b["id"])
+        bangumi_ids.update(entry.get("bangumi_ids", []))
+        if not movie:
+            tvdb_ids.update(entry.get("tvdb_ids", []))
+            for row in entry.get("map_entries", []):
+                if row.get("bangumi_id"):
+                    bangumi_ids.add(row["bangumi_id"])
+                if row.get("tvdb_id"):
+                    tvdb_ids.add(row["tvdb_id"])
+            entry["bangumi_ids"] = sorted(set(entry.get("bangumi_ids", [])) |
+                {row["bangumi_id"] for row in entry.get("map_entries", []) if row.get("bangumi_id")})
 
     # ── Fetch TMDB season maps (TV) or movie pseudo-seasons ──
     tmdb_data: dict = {}
-    for tid in sorted(tmdb_ids):
+    tmdb_sem = asyncio.Semaphore(4)
+
+    async def _fetch_one_tmdb(tid):
         try:
-            mt = tmdb_media_types.get(tid, "tv")
-            if mt == "movie":
-                # Movies don't have seasons/episodes — the frontend
-                # matches via direct name comparison instead.
-                logger.debug(f"   TMDB movie {tid}: 跳过章节获取（前端名称匹配）")
-                continue
-            else:
+            async with tmdb_sem:
                 season_map = await tmdb_service.build_season_episode_map(tid, strict=True)
                 # TMDB now uses language=ja as the base, so episode names are
                 # already Japanese originals — no second fetch needed.
@@ -730,12 +656,11 @@ async def _fetch_provider_catalogs(search_results: dict, parsed_files: list[dict
                 total_eps = sum(len(v["episodes"]) for v in season_map.values())
                 logger.debug(f"   TMDB {tid}: {len(season_map)} 季, {total_eps} 集")
         except Exception as exc:
-            logger.warning(f"   ⚠️ TMDB {tid} 剧集获取失败: {exc}")
             raise RuntimeError("preview_provider_fetch_failed: tmdb") from exc
 
-    # ── Fetch Bangumi episode lists (serial via semaphore) ──
+    # ── Fetch Bangumi episode lists with bounded concurrency ──
     bangumi_data: dict = {}
-    bgm_sem = asyncio.Semaphore(1)
+    bgm_sem = asyncio.Semaphore(2)
 
     async def _fetch_one_bgm(bid: int):
         async with bgm_sem:
@@ -778,120 +703,27 @@ async def _fetch_provider_catalogs(search_results: dict, parsed_files: list[dict
 
         return str(bid), {"name": name, "episodes": clean_eps}
 
-    tasks = [_fetch_one_bgm(bid) for bid in sorted(bangumi_ids)]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for r in results:
-        if isinstance(r, asyncio.CancelledError):
-            raise r
-        if isinstance(r, BaseException):
-            raise RuntimeError("preview_provider_fetch_failed: bangumi") from r
-        else:
-            bid_str, data = r
-            bangumi_data[bid_str] = data
-            logger.debug(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
-
-    # ── Sequel expansion: if parsed file count > eps, fetch sequel episodes ──
-    for primary_bid, show_keys in sequel_map.items():
-        # All sequel branches are candidates; none requires a binding confirmation.
-        try:
-            async with bgm_sem:
-                relations = await bgm_client.get_relations(primary_bid)
-        except Exception as exc:
-            logger.warning("Bangumi %s sequel relations unavailable: %s", primary_bid, exc)
-            continue
-        sequel_ids = sorted({r["id"] for r in relations if r.get("relation") == "续集" and r.get("id")})
-        for sequel_bid in sequel_ids:
-            for show_key in show_keys:
-                search_results[show_key].setdefault("bangumi_ids", []).append(sequel_bid)
-            if str(sequel_bid) in bangumi_data:
-                continue
-            try:
-                bid_str, directory = await _fetch_one_bgm(sequel_bid)
-                bangumi_data[bid_str] = directory
-            except Exception as exc:
-                raise RuntimeError("preview_provider_fetch_failed: bangumi") from exc
-
-    # ── OVA/OAD special expansion: fetch 番外篇 episodes ──
-    # When torrent contains OVA/OAD files, automatically pull episode data
-    # from the primary Bangumi entry's related 番外篇 (side-story) subjects
-    # so the frontend can match OVA/OAD files against them.
-    if ova_show_names:
-        # Map primary Bangumi ID → show_names that have OVA/OAD files
-        ova_bgm_map: dict[int, set[str]] = {}
-        for key, entry in search_results.items():
-            if key in ova_show_names:
-                b = entry.get("bangumi")
-                if b and b.get("id"):
-                    ova_bgm_map.setdefault(b["id"], set()).add(key)
-
-        for primary_bid, show_keys in ova_bgm_map.items():
-            # Find 番外篇 via relations
-            special_bids: list[int] = []
-            try:
-                async with bgm_sem:
-                    relations = await bgm_client.get_relations(primary_bid)
-                for rel in relations:
-                    if rel.get("relation") == "番外篇":
-                        sid = rel.get("id")
-                        if sid:
-                            special_bids.append(sid)
-            except Exception as exc:
-                logger.warning(f"   ⚠️ Bangumi {primary_bid} 关系获取失败 (番外篇): {exc}")
-
-            if not special_bids:
-                logger.warning(f"   ⚠️ Bangumi {primary_bid} 有OVA/OAD文件但没有番外篇关联条目")
-                continue
-
-            for special_bid in special_bids:
-                for show_key in show_keys:
-                    search_results[show_key].setdefault("bangumi_ids", []).append(special_bid)
-                if str(special_bid) in bangumi_data:
-                    continue  # Cached catalog still needs explicit per-show availability.
-
-                logger.debug(f"   ↳ Bangumi {primary_bid} 有OVA/OAD文件，获取番外篇 {special_bid}")
-                try:
-                    bid_str, data = await _fetch_one_bgm(special_bid)
-                    bangumi_data[bid_str] = data
-                    logger.debug(f"   Bangumi {bid_str} ({data['name']}): {len(data['episodes'])} 集")
-                except Exception as exc:
-                    logger.warning(f"   ⚠️ 番外篇 {special_bid} 剧集获取失败: {exc}")
-                    raise RuntimeError("preview_provider_fetch_failed: bangumi") from exc
-
-    # ── Fetch TVDB episode data (via map entries from Bangumi IDs) ──
     tvdb_data: dict = {}
-    tvdb_ids: set[int] = set()
     from ..tvdb import fetch_tvdb_series_episodes
+    tvdb_sem = asyncio.Semaphore(2)
 
-    for key, entry in search_results.items():
-        if entry.get("media_type") == "movie":
-            continue
-        bgm_id = entry.get("bangumi", {}).get("id") if entry.get("bangumi") else None
-        for hint in entry.get("map_entries", []):
-            if hint.get("tvdb_id"):
-                tvdb_ids.add(hint["tvdb_id"])
-        if bgm_id:
-            map_entry = data_store.get_map_entry(bgm_id)
-            if map_entry and map_entry.get("tvdb_id"):
-                tvdb_ids.add(map_entry["tvdb_id"])
+    async def _fetch_one_tvdb(tid):
+        async with tvdb_sem:
+            result = await fetch_tvdb_series_episodes(tid)
+        if result is None:
+            raise RuntimeError("preview_provider_fetch_failed: tvdb")
+        tvdb_data[str(tid)] = result
 
-    if tvdb_ids:
-        tvdb_sem = asyncio.Semaphore(1)
-        async def _fetch_one_tvdb(tid: int):
-            async with tvdb_sem:
-                return str(tid), await fetch_tvdb_series_episodes(tid)
+    async def _store_bgm(bid):
+        key, result = await _fetch_one_bgm(bid)
+        bangumi_data[key] = result
+        logger.debug("Bangumi %s (%s): %d episodes", key, result["name"], len(result["episodes"]))
 
-        tvdb_tasks = [_fetch_one_tvdb(tid) for tid in sorted(tvdb_ids)]
-        tvdb_results = await asyncio.gather(*tvdb_tasks, return_exceptions=True)
-        for r in tvdb_results:
-            if isinstance(r, asyncio.CancelledError):
-                raise r
-            if isinstance(r, BaseException):
-                raise RuntimeError("preview_provider_fetch_failed: tvdb") from r
-            elif r[1] is not None:
-                tid_str, data = r
-                tvdb_data[tid_str] = data
-            else:
-                raise RuntimeError("preview_provider_fetch_failed: tvdb")
+    await _gather_provider_requests(
+        *[_fetch_one_tmdb(tid) for tid in sorted(tmdb_ids)],
+        *[_store_bgm(bid) for bid in sorted(bangumi_ids)],
+        *[_fetch_one_tvdb(tid) for tid in sorted(tvdb_ids)],
+    )
 
     return {
         "tmdb": tmdb_data,
@@ -913,8 +745,7 @@ async def parse_and_search(torrent_path: str) -> dict:
         torrent_path: Filesystem path to a .torrent file.
 
     Returns:
-        Nested dict with parsed_files, skipped_files, show_names,
-        and search_results.  See module docstring for the full shape.
+        Unified parsed_files inventory, show_names, search_results and provider catalogs.
 
     Raises:
         RuntimeError: If no files can be parsed from the torrent.
@@ -929,9 +760,13 @@ async def parse_and_search(torrent_path: str) -> dict:
         from .search import search_by_tmdb
         return await search_by_tmdb(torrent_path, torrent_name=torrent_name)
 
+    from .preview_files import exclude_paths, file_type, unify_files
+
     # ── Step 1: Bencode extraction ──
     logger.debug("📋 读取种子文件内容 (bencode)...")
     file_list: list[dict] = read_torrent_file_list(torrent_path)
+    original_files = list(file_list)
+    excluded_paths: set[str] = set()
     logger.debug(f"   → {len(file_list)} 个文件")
 
     # ── Collect subtitle files (before anitopy parsing skips them) ──
@@ -946,23 +781,10 @@ async def parse_and_search(torrent_path: str) -> dict:
     # ── Exclude-pattern filtering (before anitopy parsing) ──
     # Uses word-boundary matching so short keywords like "iv" don't
     # accidentally match inside words like "Live" or "Archive".
-    raw_patterns: list[str] = [
-        p.strip().lower()
-        for p in config.TORRENT_EXCLUDE_PATTERNS.split(",")
-        if p.strip()
-    ]
-    if raw_patterns:
-        before = len(file_list)
-        file_list = [
-            f for f in file_list
-            if not any(
-                re.search(rf"(?:^|[^a-zA-Z]){re.escape(p)}(?:$|[^a-zA-Z])", f["name"].lower())
-                for p in raw_patterns
-            )
-        ]
-        excluded = before - len(file_list)
-        if excluded:
-            logger.info("排除关键词过滤: %d 个文件被排除", excluded)
+    excluded_paths = exclude_paths(original_files, config.TORRENT_EXCLUDE_PATTERNS)
+    file_list = [file for file in file_list if file["name"] not in excluded_paths]
+    if excluded_paths:
+        logger.info("排除关键词过滤: %d 个文件被排除", len(excluded_paths))
 
     # ── Filter out subtitle / font-archive / audio-only files ──
     # Subtitle files were already collected above; font archives and .mka
@@ -970,7 +792,7 @@ async def parse_and_search(torrent_path: str) -> dict:
     before_ext = len(file_list)
     file_list = [
         f for f in file_list
-        if Path(f["name"]).suffix.lower() not in SKIP_EXTENSIONS
+        if file_type(f["name"]) == "video"
     ]
     ext_skipped = before_ext - len(file_list)
     if ext_skipped:
@@ -1008,7 +830,7 @@ async def parse_and_search(torrent_path: str) -> dict:
         logger.debug(f"   [{i + 1}] {name} ({count} 个文件)")
 
     # ── Step 4: Parallel TMDB + Bangumi search ──
-    logger.debug("🔍 并行搜索 TMDB + Bangumi...")
+    logger.debug("Parallel TMDB search, mapping discovery and missing-provider searches")
     pairs: list[dict] = await _parallel_search(show_names, parsed_files=parsed_files)
 
     # Log summary
@@ -1030,7 +852,7 @@ async def parse_and_search(torrent_path: str) -> dict:
     from ... import data as data_store
 
     for key, entry in search_results.items():
-        if entry["tmdb"] is None and entry["bangumi"] is not None:
+        if entry.get("media_type") != "movie" and entry["tmdb"] is None and entry["bangumi"] is not None:
             bgm_id = entry["bangumi"]["id"]
             mapped_tmdb_id = data_store.get_tmdb_id(bgm_id)
             if mapped_tmdb_id and entry.get("media_type") != "movie":
@@ -1050,34 +872,8 @@ async def parse_and_search(torrent_path: str) -> dict:
         logger.debug(f"   [{key}] {t_info}")
         logger.debug(f"            {b_info}")
 
-    for key, entry in search_results.items():
-        bgm_id = (entry.get("bangumi") or {}).get("id")
-        mapped = data_store.get_map_entry(bgm_id) if bgm_id else None
-        entry["map_entries"] = [dict(mapped, bangumi_id=bgm_id)] if mapped else []
-    # ── Step 5.5: Fetch episode listings ──
-    logger.info("📡 获取剧集数据...")
+    logger.info("Fetching TMDB, TVDB and Bangumi episode catalogs concurrently")
     provider_catalogs = await _fetch_provider_catalogs(search_results, parsed_files)
-
-    # ── Add map_entries to each search result (for frontend BGM→TVDB lookup) ──
-    for key, entry in search_results.items():
-        if entry.get("bangumi_ids"):
-            continue
-        bgm_id = entry.get("bangumi", {}).get("id") if entry.get("bangumi") else None
-        if bgm_id:
-            map_entry = data_store.get_map_entry(bgm_id)
-            if map_entry:
-                entry["map_entries"] = [{
-                    "bangumi_id": bgm_id,
-                    "name": map_entry.get("name", ""),
-                    "name_original": map_entry.get("name_original"),
-                    "tvdb_id": map_entry.get("tvdb_id"),
-                    "tvdb_season": map_entry.get("tvdb_season"),
-                    "tmdb_season": map_entry.get("tmdb_season"),
-                }]
-            else:
-                entry["map_entries"] = []
-        else:
-            entry["map_entries"] = []
 
     # Default to an available index; explicit user switches remain strict.
     available_index = "tvdb" if provider_catalogs.get("tvdb") else "tmdb"
@@ -1100,7 +896,7 @@ async def parse_and_search(torrent_path: str) -> dict:
     from .preview_session import candidate_context
     search_results = {key: candidate_context(key, entry, provider_catalogs) for key, entry in search_results.items()}
 
-    return {
+    return unify_files({
         "index": available_index,
         "torrent_name": torrent_name,
         "torrent_path": torrent_path,
@@ -1125,7 +921,7 @@ async def parse_and_search(torrent_path: str) -> dict:
         "search_results_backup": search_results_backup,
         "provider_catalogs": provider_catalogs,
         "episode_catalog": episode_catalog(provider_catalogs),
-    }
+    }, original_files, excluded_paths)
 
 
 # ═════════════════════════════════════════════════════════════════════
