@@ -194,8 +194,6 @@ export interface AppConfig {
 
 /** Normalized preview used by the torrent UI; raw wire payloads stop in adapters. */
 export interface TorrentPreviewResponse {
-  series?: { show_key: string; display_name: string; tmdb_series_id: number | null; tmdb_movie_id: number | null;
-    tvdb_series_id: number | null; bangumi_subject_id: number | null }[];
   preview_id: string;
   revision: number;
   expires_at: string;
@@ -209,5 +207,4 @@ export interface TorrentPreviewResponse {
   subtitles?: string[]; torrent_name: string;
   error?: string;
   resource_id?: number;
-  resource_candidates?: import("./episode").ResourceCandidate[];
 }

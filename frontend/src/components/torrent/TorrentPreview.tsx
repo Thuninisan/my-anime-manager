@@ -1,3 +1,4 @@
+import { candidateIds } from '@/lib/episodeAdapters';
 import type { TorrentPreviewResponse } from '@/types/preview';
 import type { EpisodeCatalog } from '@/types/episode';
 import { useMemo, useState, useCallback } from 'react';
@@ -25,7 +26,7 @@ function computeStats(searchResult: TorrentPreviewResponse) {
   let mapped = 0;
   for (const pf of parsedFiles) {
     const entry = searchResults[pf.show_name];
-    if (entry?.tmdb_series_id && entry?.bangumi_subject_id) mapped++;
+    if (candidateIds(entry, 'tmdb').length && candidateIds(entry, 'bangumi').length) mapped++;
   }
 
   return {
@@ -115,10 +116,10 @@ export default function TorrentPreview({
         return file.file_id;
       };
       for (const row of matchedRows) {
-        files.push({ file_id: requiredFileId(row.torrent_path), mapping: row.mapping });
+        files.push({ file_id: requiredFileId(row.torrent_path), mapping: row.mapping, ...(row.tmdb_movie_id ? { tmdb_movie_id: row.tmdb_movie_id } : {}) });
         for (const sub of associations[row.torrent_path]?.selected || []) {
           if (sub.source !== 'torrent') continue;
-          files.push({ file_id: requiredFileId(sub.path), mapping: row.mapping, subtitle_suffix: subtitleSuffix(row, sub.id) });
+          files.push({ file_id: requiredFileId(sub.path), mapping: row.mapping, ...(row.tmdb_movie_id ? { tmdb_movie_id: row.tmdb_movie_id } : {}), subtitle_suffix: subtitleSuffix(row, sub.id) });
         }
       }
 
@@ -133,7 +134,7 @@ export default function TorrentPreview({
             file_id: requiredFileId(matchingRow.torrent_path),
             stored_filename: usub.storedFilename,
             original_filename: usub.originalFilename,
-            mapping: matchingRow.mapping,
+            mapping: matchingRow.mapping, ...(matchingRow.tmdb_movie_id ? { tmdb_movie_id: matchingRow.tmdb_movie_id } : {}),
           });
         }
       }
@@ -230,19 +231,6 @@ export default function TorrentPreview({
         </div>
 
         {/* ── Metadata Source Overrides ── */}
-        {(searchResult.resource_candidates?.length ?? 0) > 0 && (
-          <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-sm">
-            <p className="font-semibold">资源预识别的 Bangumi 候选</p>
-            <p className="mt-1 text-muted-foreground">请在下方逐文件确认剧集对应关系。</p>
-            <ul className="mt-2 flex flex-wrap gap-2">
-              {searchResult.resource_candidates?.map((candidate) => (
-                <li key={`${candidate.provider}-${candidate.provider_id}-${candidate.media_type}`} className="rounded-md border border-border px-2 py-1">
-                  {candidate.provider.toUpperCase()} {candidate.provider_id} · {candidate.media_type === 'movie' ? '电影' : '剧集'} · {candidate.title || candidate.source}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
         <InfoCards
           searchResult={searchResult}
           episodeDataOverride={mergedResult.episode_catalog}

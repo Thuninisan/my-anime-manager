@@ -231,12 +231,12 @@ class PersistenceTests(unittest.TestCase):
             data.update_subscription(10, {'tmdb': {'id':99, 'season':0}})
             new_row = preview_session.create_preview_session(result(data.list_subscriptions()[0]), str(source))
             _, new_snapshot = preview_session.load_preview_session(new_row.id)
-            self.assertEqual(old_snapshot['series_contexts']['Show']['resource_identity']['tmdb_series_id'],20)
-            self.assertEqual(new_snapshot['series_contexts']['Show']['resource_identity']['tmdb_series_id'],99)
+            self.assertEqual(old_snapshot['series_contexts']['Show']['candidates']['tmdb'][0]['provider_id'],20)
+            self.assertEqual(new_snapshot['series_contexts']['Show']['candidates']['tmdb'][0]['provider_id'],99)
             self.assertEqual(preview_session.load_preview_session(old_row.id)[1], old_snapshot)
             episode = create_episode_mapping({'season_number':0,'episode_number':0}, bangumi={
                 'subject_id':10,'episode_id':2000,'episode_number':0,'episode_absolute':0}, tmdb={
-                'series_id':20,'episode_id':1000,'season_number':0,'episode_number':0})
+                'series_id':20,'episode_id':1000,'season_number':0,'episode_number':0}, match_source='tmdb')
             restored = preview_session.restore_download_request({'preview_id':old_row.id,'preview_revision':old_row.revision,
                 'files':[{'file_id':old_snapshot['parsed_files'][0]['file_id'],'mapping':episode}]})
             self.assertEqual(restored['files'][0]['episode_mapping']['tmdb']['series_id'],20)
@@ -266,7 +266,7 @@ class PersistenceTests(unittest.TestCase):
                                  resource_identity=resource_identity(bangumi_subject_id=10,tmdb_series_id=99))
         self.assertEqual(data.get_all_episodes(10)['0'],before)
 
-    def test_preview_catalog_uses_canonical_tvdb_instead_of_community_hint(self):
+    def test_preview_catalog_discovers_candidates_without_using_old_identity(self):
         import asyncio
         from backend.services.torrent.preview import _fetch_provider_catalogs
         entry = {'tmdb':None,'bangumi':None,'identity_revision':2,
@@ -274,9 +274,9 @@ class PersistenceTests(unittest.TestCase):
                  'map_entries':[{'tvdb_id':30}]}
         with patch('backend.services.tvdb.fetch_tvdb_series_episodes', AsyncMock(return_value={'seasons':{}})) as fetch:
             result = asyncio.run(_fetch_provider_catalogs({'Show':entry}, []))
-        fetch.assert_awaited_once_with(99)
-        self.assertIn('99',result['tvdb'])
-        self.assertNotIn('30',result['tvdb'])
+        fetch.assert_awaited_once_with(30)
+        self.assertIn('30',result['tvdb'])
+        self.assertNotIn('99',result['tvdb'])
 
     def test_monitor_candidates_remain_candidates(self):
         from backend.domain.resource_adapters import monitor_resource_candidates

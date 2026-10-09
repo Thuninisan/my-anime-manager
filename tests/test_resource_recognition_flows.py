@@ -15,15 +15,15 @@ class ResourceRecognitionFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['first']['id'], 5)
         search.assert_not_awaited()
 
-    async def test_preview_multiple_exact_titles_require_confirmation(self):
+    async def test_preview_multiple_exact_titles_rank_all_candidates(self):
         response = SimpleNamespace(json=lambda: {'results': [
             {'id': 1, 'name': 'A'}, {'id': 2, 'name': 'A'}]})
         with patch.object(preview.tmdb_client, 'search_tv', AsyncMock(return_value=response)):
             result = await preview._search_tmdb_for_name('A')
-        self.assertIsNone(result["first"])
-        self.assertEqual(result["resolution"]["status"], "ambiguous")
-        self.assertIsNone(result["resolution"]["identity"])
-        self.assertEqual(len(result["resolution"]["candidates"]), 2)
+        self.assertEqual(result["first"]["id"], 1)
+        self.assertEqual(result["recommendation"]["status"], "suggested")
+        self.assertNotIn("identity", result["recommendation"])
+        self.assertEqual(len(result["recommendation"]["candidates"]), 2)
 
     async def test_preview_year_selects_resource_without_first_result(self):
         response = SimpleNamespace(json=lambda: {'results': [
@@ -52,7 +52,7 @@ class ResourceRecognitionFlowTests(unittest.IsolatedAsyncioTestCase):
             batch_service._find_entry_in_chain('Missing', rows)
 
 
-class PreviewAmbiguityTests(unittest.IsolatedAsyncioTestCase):
+class PreviewCandidateTests(unittest.IsolatedAsyncioTestCase):
     async def test_mapping_deduplicates_without_confirming_seasons(self):
         linked = [{'bangumi_id': 1, 'name': 'Season 1'},
                   {'bangumi_id': 2, 'name': 'Season 2'},
@@ -60,10 +60,10 @@ class PreviewAmbiguityTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(preview.data_store, 'get_map_entries_by_tmdb_id', return_value=linked), \
              patch.object(preview.bangumi_service, 'search_bangumi', AsyncMock()) as search:
             result = await preview._search_bangumi_for_name('Show', 100)
-        self.assertIsNone(result['first'])
-        self.assertEqual(result['resolution']['status'], 'ambiguous')
-        self.assertEqual({c['provider_id'] for c in result['resolution']['candidates']}, {1, 2})
-        self.assertEqual(len(result['resolution']['candidates']), 2)
+        self.assertEqual(result['first']['id'], 1)
+        self.assertEqual(result['recommendation']['status'], 'suggested')
+        self.assertEqual({c['provider_id'] for c in result['recommendation']['candidates']}, {1, 2})
+        self.assertEqual(len(result['recommendation']['candidates']), 2)
         search.assert_not_awaited()
 
     async def test_mapping_exact_title_selects_own_subject(self):
@@ -71,7 +71,7 @@ class PreviewAmbiguityTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(preview.data_store, 'get_map_entries_by_tmdb_id', return_value=linked):
             result = await preview._search_bangumi_for_name('Season 2', 100)
         self.assertEqual(result['first']['id'], 2)
-        self.assertEqual(result['resolution']['identity']['bangumi_subject_id'], 2)
+        self.assertNotIn('identity', result['recommendation'])
 
     async def test_mixed_resolved_ambiguous_unresolved_shows(self):
         response = SimpleNamespace(json=lambda: {'results': [{'id': 100, 'name': 'TV'}]})
@@ -85,12 +85,12 @@ class PreviewAmbiguityTests(unittest.IsolatedAsyncioTestCase):
              patch.object(preview.bangumi_service, 'search_bangumi', AsyncMock(return_value=[])):
             pairs = await preview._parallel_search(['TV', 'Movie', 'Missing'], files)
         entries = preview._organize(pairs)['search_results']
-        tv = entries['TV']['resource_resolution']
-        self.assertEqual(tv['status'], 'ambiguous')
-        self.assertEqual(tv['identity']['tmdb_series_id'], 100)
-        self.assertIsNone(tv['identity']['bangumi_subject_id'])
-        self.assertEqual(entries['Movie']['resource_resolution']['identity']['tmdb_movie_id'], 200)
-        self.assertEqual(entries['Missing']['resource_resolution']['status'], 'unresolved')
+        tv = entries['TV']['provider_recommendations']
+        self.assertEqual(len(tv['bangumi']['candidates']), 2)
+        self.assertEqual(tv['tmdb']['candidates'][0]['provider_id'], 100)
+        self.assertEqual(entries['Movie']['provider_recommendations']['tmdb']['candidates'][0]['provider_id'], 200)
+        self.assertEqual(entries['Missing']['provider_recommendations']['tmdb']['status'], 'unresolved')
+        self.assertTrue(all('resource_identity' not in entry for entry in entries.values()))
 
     async def test_provider_errors_are_not_uncertainty(self):
         import asyncio
@@ -118,24 +118,23 @@ class PreviewAmbiguityTests(unittest.IsolatedAsyncioTestCase):
              patch.object(preview.bgm_client, 'get_subject', AsyncMock(return_value={'name': 'Season'})), \
              patch.object(preview.bgm_client, 'get_episodes', AsyncMock(return_value=[])) as episodes:
             result = await preview.parse_and_search('/tmp/input.torrent')
-        resolution = result['search_results']['Show']['resource_resolution']
-        self.assertEqual(resolution['status'], 'ambiguous')
-        self.assertEqual(resolution['identity']['tmdb_series_id'], 100)
-        self.assertIsNone(resolution['identity']['bangumi_subject_id'])
-        self.assertEqual(len(resolution['candidates']), 3)
-        self.assertEqual(result['search_results']['Show']['bangumi_ids'], [1, 2])
-        self.assertEqual(len(result['search_results']['Show']['map_entries']), 2)
+        entry = result['search_results']['Show']
+        self.assertNotIn('resource_identity', entry)
+        self.assertNotIn('resource_resolution', entry)
+        self.assertEqual([c['provider_id'] for c in entry['candidates']['tmdb']], [100])
+        self.assertEqual({c['provider_id'] for c in entry['candidates']['bangumi']}, {1, 2})
+        self.assertEqual(len(entry['mapping_hints']), 2)
         self.assertEqual(episodes.await_count, 2)
 
-    async def test_tmdb_first_path_retains_ambiguous_tmdb_candidates(self):
+    async def test_tmdb_first_path_retains_all_tmdb_candidates(self):
         from backend.services.torrent import search
         response = SimpleNamespace(json=lambda: {'results': [
             {'id': 1, 'name': 'A', 'genre_ids': [16]}, {'id': 2, 'name': 'A', 'genre_ids': [16]}]})
         resolutions = {}
         with patch.object(search.tmdb_client, 'search_tv', AsyncMock(return_value=response)):
             selected = await search._search_tmdb_single('A', resolutions)
-        self.assertIsNone(selected)
-        self.assertEqual(resolutions['tmdb']['status'], 'ambiguous')
+        self.assertEqual(selected['id'], 1)
+        self.assertEqual(resolutions['tmdb']['status'], 'suggested')
         self.assertEqual(len(resolutions['tmdb']['candidates']), 2)
 
     async def test_movie_fallback_never_uses_tv_mapping(self):
@@ -144,14 +143,14 @@ class PreviewAmbiguityTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(preview.data_store, 'get_map_entries_by_tmdb_id', return_value=linked):
             result = await preview._search_bangumi_for_name('Movie', 100, media_type='movie')
         self.assertEqual(result['first']['id'], 2)
-        self.assertEqual(result['resolution']['identity']['media_type'], 'movie')
-        self.assertEqual([c['provider_id'] for c in result['resolution']['candidates']], [2])
+        self.assertEqual(result['recommendation']['candidates'][0]['media_type'], 'movie')
+        self.assertEqual([c['provider_id'] for c in result['recommendation']['candidates']], [2])
 
     async def test_no_valid_link_continues_normal_search(self):
         with patch.object(preview.data_store, 'get_map_entries_by_tmdb_id', return_value=[]), \
              patch.object(preview.bangumi_service, 'search_bangumi', AsyncMock(return_value=[])) as search:
             result = await preview._search_bangumi_for_name('A', 100)
-        self.assertEqual(result['resolution']['status'], 'unresolved')
+        self.assertEqual(result['recommendation']['status'], 'unresolved')
         search.assert_awaited_once_with('A')
 
     async def test_bangumi_timeout_in_pair_is_provider_failure(self):

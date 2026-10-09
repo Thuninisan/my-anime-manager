@@ -1,3 +1,4 @@
+import { candidateIds, recommendedId } from './episodeAdapters';
 import type { EpisodeCatalog, CatalogSeason } from '@/types/episode';
 import type { TorrentPreviewResponse } from '@/types/preview';
 import { createEpisodeMapping, matchingBangumiAbsolute, catalogSeriesTitle } from './episodeAdapters';
@@ -225,19 +226,13 @@ export function buildTmdbSeasonOptions(
   searchResults: Record<string, SearchEntry>,
   episodeData: EpisodeCatalog,
 ): { seasons: Record<string, TmdbSeason>; opts: TmdbSeasonOption[] } {
-  const tmdbSeriesId = searchResults[showName]?.tmdb_series_id;
-  const autoSeasons: Record<string, TmdbSeason> =
-    (tmdbSeriesId && episodeData.tmdb?.[String(tmdbSeriesId)]) || {};
-  const seasons: Record<string, TmdbSeason> =
-    Object.keys(autoSeasons).length > 0
-      ? autoSeasons
-      : mergeAllTmdbSeasons(episodeData);
-  const opts: TmdbSeasonOption[] = Object.entries(seasons)
-    .filter(([, sdata]) => sdata?.episodes)
-    .map(([skey, sdata]) => ({
-      value: String(Number(skey)),
-      label: sdata.name || `Season ${skey}`,
-    }));
+  const ids = candidateIds(searchResults[showName], 'tmdb');
+  const scoped = Object.fromEntries(Object.entries(episodeData.tmdb).filter(([id]) => ids.includes(Number(id))));
+  const seasons = mergeAllTmdbSeasons({ ...episodeData, tmdb: scoped });
+  const opts = Object.entries(scoped).flatMap(([id, seasons]) => Object.entries(seasons)
+    .map(([season, detail]) => ({ value: `${id}:${season}`,
+      label: `${searchResults[showName]?.candidates.tmdb.find(candidate => candidate.provider_id === Number(id))?.title || catalogSeriesTitle(episodeData, id) || `TMDB ${id}`} · ${detail.name || `Season ${season}`}` })));
+
   return { seasons, opts };
 }
 
@@ -248,11 +243,13 @@ export function buildTmdbEpOptions(
 ): TmdbEpOption[] {
   const key = season != null ? String(season) : '';
   const seasonData = key ? seasons[key] : null;
-  let opts: TmdbEpOption[] = (seasonData?.episodes || [])
-    .sort((a, b) => a.episode_number - b.episode_number);
-  if (opts.length === 0) {
-    opts = buildFlattenedEpisodes(seasons);
-  }
+  const seen = new Set<string>();
+  const opts: TmdbEpOption[] = (seasonData?.episodes || []).filter(ep => {
+    const identity = `${ep.series_id}:${ep.season_number}:${ep.episode_id ?? `number:${ep.episode_number}`}`;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  }).sort((a, b) => a.episode_number - b.episode_number);
   return opts;
 }
 
@@ -269,13 +266,13 @@ export function buildTvdbSeasonOptions(
   const mapEntries = entry?.mapping_hints || [];
   const mapEntry = mapEntries.find(me => me.bangumi_subject_id === currentEntryId);
   const tvdbData = episodeData?.tvdb || {};
-  const allowed = entry ? new Set([entry.tvdb_series_id, ...mapEntries.map(hint => hint.tvdb_series_id)])
+  const allowed = entry ? new Set(candidateIds(entry, 'tvdb'))
     : new Set(Object.keys(tvdbData).map(Number));
   const scoped = Object.fromEntries(Object.entries(tvdbData).filter(([id]) => allowed.has(Number(id))));
   const onlyId = Object.keys(scoped).length === 1 ? Number(Object.keys(scoped)[0]) : undefined;
-  const effectiveTvdbId = overrideTvdbShowId ?? entry?.tvdb_series_id ?? mapEntry?.tvdb_series_id ?? onlyId;
+  const effectiveTvdbId = overrideTvdbShowId ?? recommendedId(entry, 'tvdb') ?? mapEntry?.tvdb_series_id ?? onlyId;
   const seasons: Record<string, CatalogSeason> = effectiveTvdbId != null && scoped[String(effectiveTvdbId)]
-    ? scoped[String(effectiveTvdbId)].seasons : mergeAllTvdbSeasons(scoped);
+    ? scoped[String(effectiveTvdbId)].seasons : {};
   const opts = Object.entries(scoped).flatMap(([id, series]) => Object.entries(series.seasons)
     .filter(([, season]) => season.episodes)
     .map(([season, detail]) => ({ value: `${id}:${season}`,
@@ -291,12 +288,15 @@ export function buildTvdbEpOptions(
 ): { opts: TmdbEpOption[]; title: string } {
   const key = season != null ? String(season) : '';
   const seasonData = key ? seasons[key] : null;
-  let opts: TmdbEpOption[] = (seasonData?.episodes || [])
-    .sort((a, b) => a.episode_number - b.episode_number);
-  if (opts.length === 0) {
-    opts = buildFlattenedEpisodes(seasons);
-  }
-  const title = seasonData?.episodes?.[0]?.name || '-';
+  const seen = new Set<string>();
+  const opts: TmdbEpOption[] = (seasonData?.episodes || []).filter(ep => {
+    const identity = `${ep.series_id}:${ep.season_number}:${ep.episode_id ?? `number:${ep.episode_number}`}`;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  }).sort((a, b) => a.episode_number - b.episode_number);
+  const title = season == null ? '请先选择 TVDB 季' : opts.length === 0
+    ? '该季暂无集数' : opts[0].name || '-';
   return { opts, title };
 }
 
@@ -311,10 +311,11 @@ export function buildSpSeasonOptions(
 
   for (const idStr of Object.keys(dataMap)) {
     const showId = Number(idStr);
+    if (!Object.values(searchResults).some(entry => candidateIds(entry, source).includes(showId))) continue;
     let showLabel = '';
     if (source === 'tmdb') {
       for (const [, entry] of Object.entries(searchResults)) {
-        if (entry.tmdb_series_id === showId) {
+        if (recommendedId(entry, 'tmdb') === showId) {
           showLabel = entry.display_name;
           break;
         }
@@ -510,15 +511,13 @@ export function fuzzyMatchTvdb(
 function isolateSeries(data: TorrentPreviewResponse, file: ParsedFile): TorrentPreviewResponse {
   const entry = data.search_results[file.show_name];
   const catalog = data.episode_catalog;
-  const bgmIds = new Set([entry?.bangumi_subject_id, ...(entry?.bangumi_subject_ids ?? []),
-    ...(entry?.mapping_hints ?? []).map(hint => hint.bangumi_subject_id)]);
-  const tvdbIds = new Set([entry?.tvdb_series_id, ...(entry?.mapping_hints ?? []).map(hint => hint.tvdb_series_id)]);
   return { ...data, parsed_files: [file], search_results: entry ? { [file.show_name]: entry } : {},
     episode_catalog: { ...catalog,
-      tmdb: Object.fromEntries(Object.entries(catalog.tmdb ?? {}).filter(([id]) => Number(id) === entry?.tmdb_series_id)),
-      bangumi: Object.fromEntries(Object.entries(catalog.bangumi ?? {}).filter(([id]) => bgmIds.has(Number(id)))),
-      tvdb: Object.fromEntries(Object.entries(catalog.tvdb ?? {}).filter(([id]) => tvdbIds.has(Number(id)))),
+      tmdb: Object.fromEntries(Object.entries(catalog.tmdb ?? {}).filter(([id]) => candidateIds(entry, 'tmdb').includes(Number(id)))),
+      bangumi: Object.fromEntries(Object.entries(catalog.bangumi ?? {}).filter(([id]) => candidateIds(entry, 'bangumi').includes(Number(id)))),
+      tvdb: Object.fromEntries(Object.entries(catalog.tvdb ?? {}).filter(([id]) => candidateIds(entry, 'tvdb').includes(Number(id)))),
     } };
+
 }
 
 export type EpisodeMatchStatus = 'matched' | 'ambiguous' | 'missing';
@@ -549,11 +548,11 @@ function computeIndexedMatches(data: TorrentPreviewResponse, index: 'tmdb' | 'tv
     const entry = scoped.search_results[pf.show_name];
     const catalog = scoped.episode_catalog;
     if (entry?.media_type === 'movie') {
-      return { mapping: createEpisodeMapping(pf.parsed, entry.bangumi_subject_id, null, null, null, index),
+      return { mapping: createEpisodeMapping(pf.parsed, recommendedId(entry, 'bangumi'), null, null, null, index),
         file_name: pf.file_name, torrent_path: pf.torrent_path, show_name: pf.show_name,
-        bgm_entry: entry.bangumi_display_name || '-', bgm_ep_name: entry.bangumi_display_name || '-',
-        bgm_ep_name_cn: '', tmdb_ep_name: entry.display_name || '-',
-        matched: !!(entry.tmdb_movie_id && entry.bangumi_subject_id), media_type: 'movie' };
+        bgm_entry: entry.candidates.bangumi[0]?.title || entry.bangumi_display_name || '-', bgm_ep_name: entry.candidates.bangumi[0]?.title || entry.bangumi_display_name || '-',
+        bgm_ep_name_cn: '', tmdb_ep_name: entry.candidates.tmdb[0]?.title || entry.display_name || '-',
+        tmdb_movie_id: recommendedId(entry, 'tmdb') ?? undefined, matched: !!(recommendedId(entry, 'tmdb') && recommendedId(entry, 'bangumi')), media_type: 'movie' };
     }
     const tmdbEpisodes = Object.values(catalog.tmdb || {}).flatMap(seasons =>
       Object.values(seasons).flatMap(season => season.episodes || []));
@@ -575,7 +574,7 @@ function computeIndexedMatches(data: TorrentPreviewResponse, index: 'tmdb' | 'tv
       file_name: pf.file_name, torrent_path: pf.torrent_path, show_name: pf.show_name,
       bgm_entry: bgm.selected?.subject_name || '-', bgm_ep_name: bgm.selected?.name || '-',
       bgm_ep_name_cn: bgm.selected?.name_cn || '', tmdb_ep_name: tmdb?.name || '-',
-      matched: anchor !== null && bgm.selected !== null && tmdb !== null,
+      matched: anchor !== null && bgm.selected !== null,
       match_status: statuses,
       match_candidates: { [index]: coordinates, [index === 'tmdb' ? 'tvdb' : 'tmdb']: other.candidates,
         bangumi: bgm.candidates }, media_type: 'tv' };
@@ -611,7 +610,7 @@ export function computeMatchesLegacy(data: TorrentPreviewResponse): MatchRow[] {
   return parsedFiles.map((pf) => {
     const searchEntry = searchResults[pf.show_name];
 
-    const tmdbSeriesId = searchEntry?.tmdb_series_id;
+    const tmdbSeriesId = recommendedId(searchEntry, 'tmdb');
     const autoSeasons: Record<string, TmdbSeason> =
       (tmdbSeriesId && episodeData.tmdb?.[String(tmdbSeriesId)]) || {};
     const tmdbSeasons: Record<string, TmdbSeason> =
@@ -626,14 +625,14 @@ export function computeMatchesLegacy(data: TorrentPreviewResponse): MatchRow[] {
     let tmdbMatch: { season: number; episode_number: number; name: string; reference: TmdbEpisode } | null = null;
 
     if (searchEntry?.media_type === "movie") {
-      const matched = !!(searchEntry.tmdb_movie_id && searchEntry.bangumi_subject_id);
+      const matched = !!(recommendedId(searchEntry, 'tmdb') && recommendedId(searchEntry, 'bangumi'));
       return {
-        mapping: createEpisodeMapping(pf.parsed, searchEntry.bangumi_subject_id ?? null, null, null, null, data.episode_match_source ?? null),
+        mapping: createEpisodeMapping(pf.parsed, recommendedId(searchEntry, 'bangumi') ?? null, null, null, null, data.episode_match_source ?? null),
         file_name: pf.file_name, torrent_path: pf.torrent_path, show_name: pf.show_name,
-        bgm_entry: searchEntry.bangumi_display_name || (searchEntry.bangumi_subject_id ? `ID ${searchEntry.bangumi_subject_id}` : '-'),
+        bgm_entry: searchEntry.bangumi_display_name || (recommendedId(searchEntry, 'bangumi') ? `ID ${recommendedId(searchEntry, 'bangumi')}` : '-'),
         bgm_ep_name: searchEntry.bangumi_display_name || '-',
         bgm_ep_name_cn: searchEntry.bangumi_display_name || '', tmdb_ep_name: searchEntry.display_name || '-',
-        matched, media_type: "movie",
+        tmdb_movie_id: recommendedId(searchEntry, 'tmdb') ?? undefined, matched, media_type: "movie",
       };
     }
 
@@ -654,7 +653,7 @@ export function computeMatchesLegacy(data: TorrentPreviewResponse): MatchRow[] {
     }
 
     if (!bgmEp) {
-      const preferredBgmId = searchEntry?.bangumi_subject_id;
+      const preferredBgmId = recommendedId(searchEntry, 'bangumi');
       const preferredEntry: BgmEntry | undefined =
         (preferredBgmId != null && episodeData.bangumi?.[String(preferredBgmId)]) || undefined;
       if (preferredEntry) {
@@ -685,7 +684,7 @@ export function computeMatchesLegacy(data: TorrentPreviewResponse): MatchRow[] {
     if (bgmEp && matchedBgmId != null) {
       const mapEntries = searchEntry?.mapping_hints || [];
       const mapEntry = mapEntries.find((me) => me.bangumi_subject_id === matchedBgmId);
-      const tvdbSeriesId: number | undefined = searchEntry?.tvdb_series_id ?? mapEntry?.tvdb_series_id ?? undefined;
+      const tvdbSeriesId: number | undefined = recommendedId(searchEntry, 'tvdb') ?? mapEntry?.tvdb_series_id ?? undefined;
       if (tvdbSeriesId != null) {
         const tvdbSeries = episodeData?.tvdb?.[String(tvdbSeriesId)];
         const seasons: Record<string, CatalogSeason> = tvdbSeries?.seasons || {};
@@ -702,9 +701,9 @@ export function computeMatchesLegacy(data: TorrentPreviewResponse): MatchRow[] {
     }
 
     return {
-      mapping: createEpisodeMapping(pf.parsed, matchedBgmId ?? searchEntry?.bangumi_subject_id ?? null, bgmEp, tmdbMatch?.reference, tvdbReference, data.episode_match_source ?? null),
+      mapping: createEpisodeMapping(pf.parsed, matchedBgmId ?? recommendedId(searchEntry, 'bangumi') ?? null, bgmEp, tmdbMatch?.reference, tvdbReference, data.episode_match_source ?? null),
       file_name: pf.file_name, torrent_path: pf.torrent_path, show_name: pf.show_name,
-      bgm_entry: matchedBgmName || (searchEntry?.bangumi_subject_id ? `ID ${searchEntry.bangumi_subject_id}` : '-'),
+      bgm_entry: matchedBgmName || (recommendedId(searchEntry, 'bangumi') ? `ID ${recommendedId(searchEntry, 'bangumi')}` : '-'),
       bgm_ep_name: bgmEp?.name || '-',
       bgm_ep_name_cn: bgmEp?.name_cn || '', tmdb_ep_name: tmdbMatch?.name || '-', matched: tmdbMatch !== null, media_type: "tv",
     };

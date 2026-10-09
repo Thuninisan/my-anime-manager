@@ -2,18 +2,24 @@
  * Unified fetch wrapper with timeout, error extraction, and HTML detection.
  */
 
-async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
+async function apiFetch<T>(url: string, opts?: RequestInit, timeoutMs = 15_000): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const abort = () => controller.abort(opts?.signal?.reason);
+  if (opts?.signal?.aborted) abort();
+  else opts?.signal?.addEventListener('abort', abort, { once: true });
+  const timeout = setTimeout(() => controller.abort(new Error(`请求超时（${timeoutMs / 1000} 秒），请重试`)), timeoutMs);
 
   const res = await fetch(url, {
     ...opts,
-    signal: opts?.signal ?? controller.signal,
+    signal: controller.signal,
     headers: {
       'Accept': 'application/json',
       ...opts?.headers,
     },
-  }).finally(() => clearTimeout(timeout));
+  }).finally(() => {
+    clearTimeout(timeout);
+    opts?.signal?.removeEventListener('abort', abort);
+  });
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));

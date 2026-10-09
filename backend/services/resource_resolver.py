@@ -114,3 +114,19 @@ def resolve_episode_link_scores(provider: str, scores: dict[int, float]) -> Reso
     if result["status"] == "resolved":
         result["reason"] = "legacy_episode_name_link"
     return result
+
+
+def rank_resource_candidates(candidates, *, title=None, year=None):
+    """Rank preview evidence without constructing or confirming identities."""
+    query = normalized_title(title)
+    unique = {}
+    for candidate in candidates:
+        key = (candidate["provider"], candidate["provider_id"])
+        if key in unique:
+            sources = set(unique[key]["source"].split("|")) | set(candidate["source"].split("|"))
+            unique[key]["source"] = "|".join(sorted(sources))
+        else:
+            unique[key] = dict(candidate)
+    return sorted(unique.values(), key=lambda c: (
+        not (year is not None and c["year"] == int(year)),
+        not (query and query in {normalized_title(t) for t in [c["title"], c["original_title"], *c["alternative_titles"]]})))

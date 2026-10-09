@@ -93,6 +93,7 @@ export async function parseAndSearchTorrent(file: File): Promise<TorrentPreviewR
 export interface DownloadFileEntry {
   file_id: string;
   mapping: EpisodeMapping;
+  tmdb_movie_id?: number;
   subtitle_suffix?: string;
 }
 
@@ -232,7 +233,7 @@ export async function augmentPreview(preview: TorrentPreviewResponse, provider: 
   const res = await fetch(`${API_BASE}/torrent/previews/${encodeURIComponent(preview.preview_id)}/augment`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ preview_revision: preview.revision, show_key: target,
-      provider, ...(provider === 'bangumi' ? { subject_id: id } : { series_id: id }) }),
+      provider, provider_id: id }),
   });
   if (!res.ok) { const body = await res.json(); throw new Error(body.detail || `HTTP ${res.status}`); }
   return normalizeTorrentPreview(await res.json());
@@ -243,6 +244,15 @@ export async function setPreviewMatchSource(preview: TorrentPreviewResponse, sou
   const res = await fetch(`${API_BASE}/torrent/previews/${encodeURIComponent(preview.preview_id)}/match-source`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ preview_revision: preview.revision, source }),
+  });
+  if (!res.ok) { const body = await res.json(); throw new Error(body.detail || `HTTP ${res.status}`); }
+  return normalizeTorrentPreview(await res.json());
+}
+
+export async function removePreviewCandidate(preview: TorrentPreviewResponse, provider: 'tmdb' | 'tvdb' | 'bangumi', id: number, showKey: string): Promise<TorrentPreviewResponse> {
+  const res = await fetch(`${API_BASE}/torrent/previews/${encodeURIComponent(preview.preview_id)}/remove-candidate`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preview_revision: preview.revision, show_key: showKey, provider, provider_id: id }),
   });
   if (!res.ok) { const body = await res.json(); throw new Error(body.detail || `HTTP ${res.status}`); }
   return normalizeTorrentPreview(await res.json());

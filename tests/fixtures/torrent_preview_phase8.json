@@ -1,0 +1,156 @@
+{
+  "preview_id": "8f1b5f79-29b3-4922-9e1e-997fc6ff977a",
+  "revision": 1,
+  "expires_at": "2026-10-12T08:02:58.629184+00:00",
+  "torrent_name": "Test",
+  "resource_id": null,
+  "episode_match_source": "tmdb",
+  "parsed_files": [
+    {
+      "file_id": "b6433e76a56156718e923cca",
+      "file_name": "a.mkv",
+      "torrent_path": "a.mkv",
+      "show_name": "A",
+      "parsed_episode": {
+        "season_number": 0,
+        "episode_number": 0
+      }
+    },
+    {
+      "file_id": "1521e6cc8a185992d7457d3b",
+      "file_name": "b.mkv",
+      "torrent_path": "b.mkv",
+      "show_name": "B",
+      "parsed_episode": {
+        "season_number": 1,
+        "episode_number": 1
+      }
+    }
+  ],
+  "specials": [],
+  "subtitles": [
+    "a.ass"
+  ],
+  "subtitle_files": [
+    {
+      "file_id": "a4fdbc92c500e1c30a000337",
+      "file_name": "a.ass",
+      "torrent_path": "a.ass",
+      "show_name": "",
+      "parsed_episode": {
+        "season_number": null,
+        "episode_number": null
+      }
+    }
+  ],
+  "skipped_files": [],
+  "search_results": {
+    "A": {
+      "show_key": "A",
+      "display_name": "A",
+      "bangumi_display_name": "A",
+      "media_type": "tv",
+      "candidates": {
+        "tmdb": [
+          {
+            "provider": "tmdb",
+            "provider_id": 1,
+            "media_type": "tv",
+            "title": "A",
+            "original_title": null,
+            "alternative_titles": [],
+            "year": null,
+            "source": "tmdb_search"
+          }
+        ],
+        "bangumi": [
+          {
+            "provider": "bangumi",
+            "provider_id": 2,
+            "media_type": "tv",
+            "title": "A",
+            "original_title": "A",
+            "alternative_titles": [],
+            "year": null,
+            "source": "bangumi_search"
+          }
+        ],
+        "tvdb": []
+      },
+      "mapping_hints": []
+    },
+    "B": {
+      "show_key": "B",
+      "display_name": "B",
+      "bangumi_display_name": "",
+      "media_type": "tv",
+      "candidates": {
+        "tmdb": [
+          {
+            "provider": "tmdb",
+            "provider_id": 3,
+            "media_type": "tv",
+            "title": "B",
+            "original_title": null,
+            "alternative_titles": [],
+            "year": null,
+            "source": "tmdb_search"
+          }
+        ],
+        "bangumi": [],
+        "tvdb": []
+      },
+      "mapping_hints": []
+    }
+  },
+  "episode_catalog": {
+    "tmdb": {
+      "1": {
+        "0": {
+          "name": "Specials",
+          "episodes": [
+            {
+              "series_id": 1,
+              "episode_id": 11,
+              "season_number": 0,
+              "episode_number": 0,
+              "episode_absolute": null,
+              "name": "zero"
+            }
+          ]
+        }
+      },
+      "3": {
+        "1": {
+          "name": "Season",
+          "episodes": [
+            {
+              "series_id": 3,
+              "episode_id": 31,
+              "season_number": 1,
+              "episode_number": 1,
+              "episode_absolute": null,
+              "name": "B"
+            }
+          ]
+        }
+      }
+    },
+    "bangumi": {
+      "2": {
+        "name": "A",
+        "episodes": [
+          {
+            "subject_id": 2,
+            "episode_id": 21,
+            "episode_number": 0,
+            "episode_absolute": 0,
+            "matching_absolute": 0,
+            "name": "A"
+          }
+        ]
+      }
+    },
+    "tvdb": {}
+  }
+}

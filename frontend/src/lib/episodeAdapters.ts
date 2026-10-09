@@ -76,8 +76,6 @@ export function normalizeTorrentPreview(value: unknown): TorrentPreviewResponse 
     skipped_files: list(raw.skipped_files).map(value => { const file = object(value); return {
       file_name: str(file.file_name), torrent_path: str(file.torrent_path), reason: str(file.reason) }; }),
     resource_id: num(raw.resource_id) ?? undefined,
-    series: raw.series as TorrentPreviewResponse['series'],
-    resource_candidates: raw.resource_candidates as TorrentPreviewResponse['resource_candidates'],
     torrent_name: str(raw.torrent_name),
     episode_catalog: normalizeEpisodeCatalog(raw.episode_catalog),
     parsed_files: parsedFiles(raw.parsed_files), specials: parsedFiles(raw.specials),
@@ -104,4 +102,12 @@ export function catalogSeriesTitle(catalog: EpisodeCatalog, id: string): string 
 /** Preserve the pre-existing sort→ep fallback only inside legacy matching. */
 export function matchingBangumiAbsolute(episode: BangumiCatalogEpisode): number | null {
   return episode.matching_absolute ?? episode.episode_absolute ?? episode.episode_number;
+}
+
+/** Provisional recommendation only; final provider references live in each mapping. */
+export function candidateIds(entry: import('@/types/matchTable').SearchEntry | undefined, provider: 'tmdb' | 'bangumi' | 'tvdb'): number[] {
+  return (entry?.candidates[provider] ?? []).map(candidate => candidate.provider_id);
+}
+export function recommendedId(entry: import('@/types/matchTable').SearchEntry | undefined, provider: 'tmdb' | 'bangumi' | 'tvdb'): number | null {
+  return candidateIds(entry, provider)[0] ?? null;
 }

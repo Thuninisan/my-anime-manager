@@ -343,8 +343,8 @@ async def torrent_parse_and_search(file: UploadFile = File(...)):
     + parallel TMDB/Bangumi search results.
 
     Returns:
-        JSON with torrent_name, parsed_files, skipped_files, show_names,
-        and search_results (tmdb / bangumi each with default + backup).
+        Versioned preview with parsed files, scoped provider candidates and
+        episode catalogs. Search never confirms a resource identity.
     """
     if not file.filename or not file.filename.endswith(".torrent"):
         raise HTTPException(400, "请上传 .torrent 文件")
@@ -537,7 +537,7 @@ async def torrent_download(body: dict):
         logger.warning("设置文件优先级失败 (将继续下载所有文件): %s", e)
 
     # ── Derive series name for path template ──
-    series_name = derive_series_name(preview_snapshot)
+    series_name = derive_series_name(preview_snapshot, files)
 
     # ── Generate NFO + images BEFORE resuming (if metadata provided) ──
     # pre_generate_nfo also detects movies — is_movie drives the monitor's
@@ -620,10 +620,18 @@ async def get_preview(preview_id: str):
 async def augment_preview(preview_id: str, body: dict):
     from ..services.torrent.preview_session import augment_preview_session
     provider = body.get("provider")
-    provider_id = body.get("subject_id" if provider == "bangumi" else "series_id")
+    provider_id = body.get("provider_id", body.get("subject_id" if provider == "bangumi" else "series_id"))
     if type(provider_id) is not int or provider_id <= 0 or type(body.get("preview_revision")) is not int:
         raise HTTPException(422, "invalid_preview_augment")
     return await augment_preview_session(preview_id, body["preview_revision"], body.get("show_key", ""), provider, provider_id)
+
+
+@router.post("/api/torrent/previews/{preview_id}/remove-candidate")
+async def remove_candidate(preview_id: str, body: dict):
+    from ..services.torrent.preview_session import remove_preview_candidate
+    if type(body.get("preview_revision")) is not int or type(body.get("provider_id")) is not int:
+        raise HTTPException(422, "invalid_preview_candidate")
+    return remove_preview_candidate(preview_id, body["preview_revision"], body.get("show_key", ""), body.get("provider"), body["provider_id"])
 
 
 @router.get("/api/torrent/catalogs/tmdb/{series_id}")

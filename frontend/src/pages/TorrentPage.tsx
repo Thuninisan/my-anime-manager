@@ -1,6 +1,6 @@
 import type { TorrentPreviewResponse } from '@/types/preview';
 import type { EpisodeCatalog } from '@/types/episode';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import TorrentUpload from '@/components/torrent/TorrentUpload';
 import TorrentPreview from '@/components/torrent/TorrentPreview';
 import FontinassStatus from '@/components/torrent/FontinassStatus';
@@ -17,6 +17,8 @@ export default function TorrentPage() {
   const [augmentedEpData, setAugmentedEpData] = useState<EpisodeCatalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resourceLoading, setResourceLoading] = useState(false);
+  const [resourceAttempt, setResourceAttempt] = useState(0);
+  const completedResourceRequest = useRef<string | null>(null);
   const [collections, setCollections] = useState<TorrentCollection[]>([]);
   const [collectionsError, setCollectionsError] = useState<string | null>(null);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
@@ -41,12 +43,17 @@ export default function TorrentPage() {
 
   useEffect(() => {
     if (!replacement?.resourceId) return;
+    const requestKey = `${location.key}:${replacement.resourceId}:${resourceAttempt}`;
+    // Activity reconnects effects on return; keep an already loaded preview intact.
+    if (completedResourceRequest.current === requestKey) return;
     let active = true;
+    const controller = new AbortController();
     setResourceLoading(true);
     setError(null);
     setSearchResult(null);
-    void previewResourceTorrent(replacement.resourceId).then((result) => {
+    void previewResourceTorrent(replacement.resourceId, controller.signal).then((result) => {
       if (!active) return;
+      completedResourceRequest.current = requestKey;
       setSearchResult(result);
       setAugmentedEpData(null);
     }).catch((cause) => {
@@ -54,8 +61,11 @@ export default function TorrentPage() {
     }).finally(() => {
       if (active) setResourceLoading(false);
     });
-    return () => { active = false; };
-  }, [replacement?.resourceId]);
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [replacement?.resourceId, location.key, resourceAttempt]);
 
   // Parse-and-search handler for the upload dropzone
   const handleParseTorrent = async (file: File) => {
@@ -135,7 +145,7 @@ export default function TorrentPage() {
               className="inline-flex items-center gap-2 rounded-lg bg-primary text-primary-foreground px-5 py-2.5 text-sm font-semibold hover:bg-primary/85 shadow-md shadow-primary/15 transition cursor-pointer"
               onClick={() => {
                 setError(null);
-                if (replacement?.resourceId) navigate('/torrent', { replace: true, state: null });
+                if (replacement?.resourceId) setResourceAttempt((attempt) => attempt + 1);
               }}
             >
               Try Again

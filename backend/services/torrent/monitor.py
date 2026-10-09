@@ -60,8 +60,7 @@ def build_processing(context: dict) -> dict:
             "target_path": str(destination(item, Path(item["torrent_path"]).suffix, is_subtitle=is_subtitle)),
             "action": "copy" if is_subtitle else "hardlink",
         }
-        if (not is_subtitle and item.get("episode_mapping") is not None
-                and (item.get("resource_identity") or {}).get("media_type") != "movie"):
+        if not is_subtitle and item.get("episode_mapping") is not None:
             from ...domain.persistence import episode_mapping_snapshot
             operation["episode_mapping_snapshot"] = episode_mapping_snapshot(
                 item["episode_mapping"], item.get("resource_identity"), revision=item.get("identity_revision"))
@@ -141,7 +140,7 @@ def _make_sub_for_path(f: dict, series_name: str = "") -> dict:
     bgm_name = f.get("bangumi_show_name", "")
     return {
         "name": bgm_name,
-        "series_name": series_name or bgm_name,
+        "series_name": series_name or f.get("tmdb_show_name") or bgm_name,
         "bgm": {
             "subject_name": bgm_name,
             "season": 1,

@@ -4,25 +4,14 @@ from ...domain.preview import PreviewContextSnapshot, TorrentPreviewResponse, Pr
 
 
 def search_views(snapshot: PreviewContextSnapshot) -> dict[str, PreviewSearchEntry]:
-    return {key: {
-        "provider_resolutions": copy.deepcopy(series.get("provider_resolutions", {})),
-        "resource_identity": copy.deepcopy(series["resource_identity"]),
-        "resource_resolution": copy.deepcopy(series["resource_resolution"]),
-        "display_name": series["display_name"], "bangumi_display_name": series["bangumi_display_name"],
-        "tmdb_series_id": series["resource_identity"]["tmdb_series_id"] if series["resource_identity"] else None,
-        "tmdb_movie_id": series["resource_identity"]["tmdb_movie_id"] if series["resource_identity"] else None,
-        "bangumi_subject_id": series["bangumi_subject_id"],
-        "tvdb_series_id": series["tvdb_series_id"], "media_type": series["media_type"],
-        "bangumi_subject_ids": series["bangumi_subject_ids"],
-        "mapping_hints": copy.deepcopy(series["mapping_hints"]),
-    } for key, series in snapshot["series_contexts"].items()}
+    return copy.deepcopy(snapshot["series_contexts"])
 
 
 def build_preview_view(snapshot: PreviewContextSnapshot, preview_id: str, revision: int, expires_at: str) -> TorrentPreviewResponse:
     def file_view(item) -> PreviewParsedFileView:
         return {"file_id": item["file_id"], "file_name": item["file_name"], "torrent_path": item["torrent_path"],
                 "show_name": item["show_key"], "parsed_episode": dict(item["parsed"])}
-    return {"resource_candidates": copy.deepcopy(snapshot.get("resource_candidates", [])),
+    return {
             "preview_id": preview_id, "revision": revision, "expires_at": expires_at,
             "torrent_name": snapshot["torrent"]["name"],
             "resource_id": snapshot["torrent"]["resource_id"], "episode_match_source": snapshot["episode_match_source"],
@@ -30,8 +19,6 @@ def build_preview_view(snapshot: PreviewContextSnapshot, preview_id: str, revisi
             "specials": [file_view(f) for f in snapshot["parsed_files"] if f["kind"] == "special"],
             "subtitles": [f["torrent_path"] for f in snapshot["parsed_files"] if f["kind"] == "subtitle"],
             "subtitle_files": [file_view(f) for f in snapshot["parsed_files"] if f["kind"] == "subtitle"],
-            "series": [{key: series[key] for key in ("show_key", "display_name", "tmdb_series_id", "tmdb_movie_id", "tvdb_series_id", "bangumi_subject_id")}
-                       for series in snapshot["series_contexts"].values()],
             "skipped_files": copy.deepcopy(snapshot["skipped_files"]),
             "search_results": search_views(snapshot), "episode_catalog": copy.deepcopy(snapshot["episode_catalog"])}
 

@@ -135,7 +135,7 @@ class CanonicalPreviewContractTests(unittest.TestCase):
     def test_invalid_v2_context_does_not_restore_legacy_identifiers(self):
         from backend.db import preview_sessions
         invalid=copy.deepcopy(self.snapshot)
-        del invalid['series_contexts']['A']['resource_identity']
+        del invalid['series_contexts']['A']['candidates']
         preview_sessions.update(self.row.id,1,context_json=json.dumps(invalid))
         with self.assertRaises(HTTPException) as raised:
             preview_session.load_preview_session(self.row.id)
@@ -153,9 +153,10 @@ class CanonicalPreviewContractTests(unittest.TestCase):
         view=session_view(row)
         TypeAdapter(TorrentPreviewResponse).validate_python(view,strict=True)
         entry=view['search_results']['A']
-        self.assertIsNone(entry['tmdb_series_id'])
-        self.assertEqual(entry['tmdb_movie_id'],1)
-        self.assertIsNone(view['series'][0]['tmdb_series_id'])
+        self.assertEqual(entry['candidates']['tmdb'][0]['provider_id'],1)
+        self.assertEqual(entry['candidates']['tmdb'][0]['media_type'],'movie')
+        self.assertNotIn('tmdb_series_id',entry)
+        self.assertNotIn('series',view)
 
     def test_python_wire_and_frontend_download_fields_agree(self):
         schema = TypeAdapter(PreviewDownloadRequest).json_schema()

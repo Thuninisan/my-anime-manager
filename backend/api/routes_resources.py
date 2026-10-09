@@ -128,10 +128,23 @@ async def preview_cached_torrent(resource_id: int):
     result["resource_id"] = resource_id
 
     recognition = resource_recognitions.get(resource_id)
-    result["resource_candidates"] = (recognition or {}).get("resource_candidates", [])
+    candidates = (recognition or {}).get("resource_candidates", [])
     provider_catalogs = result.setdefault("provider_catalogs", {})
     bangumi_data = provider_catalogs.setdefault("bangumi", {})
-    for candidate in result["resource_candidates"]:
+    from ..services.resource_resolver import normalized_title
+    for candidate in candidates:
+        matching = [entry for key, entry in result["search_results"].items()
+                    if len(result["search_results"]) == 1 or normalized_title(key) in {
+                        normalized_title(candidate["title"]), normalized_title(candidate["original_title"]),
+                        *(normalized_title(title) for title in candidate["alternative_titles"])}]
+        if not matching:
+            continue
+        from ..services.torrent.preview_session import deduplicate_candidates
+        for context in matching:
+            provider = candidate["provider"]
+            if (context["media_type"] == "movie" and provider == "tvdb") or candidate["media_type"] not in (context["media_type"], "special", "unknown"):
+                continue
+            context["candidates"][provider] = deduplicate_candidates(context["candidates"][provider] + [candidate])
         if candidate["provider"] != "bangumi":
             continue
         bgm_id = candidate["provider_id"]

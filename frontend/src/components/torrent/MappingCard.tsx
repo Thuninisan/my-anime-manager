@@ -8,6 +8,9 @@ export interface TmdbSeasonOption {
 }
 
 export interface TmdbEpOption {
+  series_id?: number | null;
+  season_number?: number | null;
+  episode_id?: number | null;
   episode_number: number;
   name: string;
   name_cn?: string;
@@ -245,13 +248,17 @@ export default function MappingCard({
               title={tmdbEpTitle}
             >
               {(tmdbEpOptions || []).length === 0 && (
-                <option value="" disabled>{tmdbEpTitle || '-'}</option>
+                <option value="" disabled>{row.mapping.tmdb.season_number == null ? '请先选择 TMDB 季' : '该季暂无集数'}</option>
               )}
-              {(tmdbEpOptions || []).map((ep) => (
-                <option key={`${i}-tmdb-${ep.episode_number}`} value={ep.episode_number}>
-                  E{ep.episode_number} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
-                </option>
-              ))}
+              {(tmdbEpOptions || []).map((ep) => {
+                const ambiguous = tmdbEpOptions!.some(other => other !== ep && other.episode_number === ep.episode_number);
+                return <option
+                  key={`${ep.series_id}-${ep.season_number}-${ep.episode_id ?? `number:${ep.episode_number}`}`}
+                  value={ep.episode_number} disabled={ambiguous}
+                >
+                  E{ep.episode_number} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}{ambiguous ? '（集号重复，暂不可选）' : ''}
+                </option>;
+              })}
             </select>
           </div>
         )}
@@ -281,11 +288,15 @@ export default function MappingCard({
                 {(tvdbEpOptions || []).length === 0 && (
                   <option value="" disabled>{tvdbEpTitle || '-'}</option>
                 )}
-                {(tvdbEpOptions || []).map((ep) => (
-                  <option key={`${i}-tvdb-${ep.episode_number}`} value={ep.episode_number}>
-                    E{ep.episode_number} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}
-                  </option>
-                ))}
+                {(tvdbEpOptions || []).map((ep) => {
+                  const ambiguous = tvdbEpOptions!.some(other => other !== ep && other.episode_number === ep.episode_number);
+                  return <option
+                    key={`${ep.series_id}-${ep.season_number}-${ep.episode_id ?? `number:${ep.episode_number}`}`}
+                    value={ep.episode_number} disabled={ambiguous}
+                  >
+                    E{ep.episode_number} {ep.name}{ep.name_cn ? ` / ${ep.name_cn}` : ''}{ambiguous ? '（集号重复，暂不可选）' : ''}
+                  </option>;
+                })}
               </select>
             </div>
           </>

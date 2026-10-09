@@ -31,7 +31,6 @@ async def pre_generate_nfo(
     if not preview_snapshot:
         return is_movie, nfo_generated, movie_meta
 
-    series_contexts = preview_snapshot["series_contexts"]
     selected_resources = [f["resource_identity"] for f in files if not f.get("is_subtitle") and f.get("resource_identity")]
     is_movie = bool(selected_resources) and all(i["media_type"] == "movie" for i in selected_resources)
 
@@ -40,16 +39,12 @@ async def pre_generate_nfo(
             # ── Movie mode: extract metadata + generate movie.nfo ──
             selected_movie_ids = {f["resource_identity"]["tmdb_movie_id"] for f in files
                                   if f.get("resource_identity") and f["resource_identity"]["media_type"] == "movie"}
-            movie_entries = [v for v in series_contexts.values() if v["resource_identity"]
-                             and v["resource_identity"]["media_type"] == "movie"
-                             and v["resource_identity"]["tmdb_movie_id"] in selected_movie_ids]
-            if len(movie_entries) != 1:
+            if len(selected_movie_ids) != 1:
                 raise ValueError("ambiguous_resource: movie_nfo_context")
-            movie_entry, = movie_entries
-            identity = next(i for i in selected_resources if i["tmdb_movie_id"] == movie_entry["tmdb_movie_id"])
+            identity = selected_resources[0]
             tmdb_id = identity["tmdb_movie_id"]
             from ..nfo.generator import sanitize_path_name
-            tmdb_name = sanitize_path_name(movie_entry["display_name"])
+            tmdb_name = sanitize_path_name(next(f["tmdb_show_name"] for f in files if not f.get("is_subtitle")))
             bangumi_id = identity["bangumi_subject_id"] or 0
             # Movie output path: {MOVIE_HARDLINK_PATH}/{tmdb_name}/
             movie_output_dir = Path(config.MOVIE_HARDLINK_PATH) / tmdb_name
