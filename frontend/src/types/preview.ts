@@ -85,18 +85,26 @@ export interface BgmMeta {
   season?: number;
   sortrange?: number[];
   subject_name?: string;
+  subject_title_cn?: string | null;
+  subject_title_jp?: string | null;
   rating?: number;
   air_date?: string;
 }
 
 export interface TvdbMeta {
   season?: number | null;
-  ep_offset?: number;
+  /** 平台季内集数 = Bangumi sort + ep_offset；null=未知，0=已确认编号相同。 */
+  ep_offset?: number | null;
+  series_title_cn?: string | null;
+  series_title_jp?: string | null;
 }
 
 export interface TmdbMeta {
   season?: number | null;
-  ep_offset?: number;
+  /** 平台季内集数 = Bangumi sort + ep_offset；与 RSS 来源 offset 独立。 */
+  ep_offset?: number | null;
+  series_title_cn?: string | null;
+  series_title_jp?: string | null;
 }
 
 export interface RssSourceMeta {

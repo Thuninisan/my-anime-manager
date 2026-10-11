@@ -47,6 +47,21 @@ def get_engine() -> Engine:
             _engine.dispose()
         path.parent.mkdir(parents=True, exist_ok=True)
         _copy_legacy_database(path)
+        # SQLite backup includes WAL data. Preserve the pre-migration database once.
+        if path.exists():
+            with sqlite3.connect(path) as source:
+                columns = {row[1] for row in source.execute("PRAGMA table_info(rss_subscriptions)")}
+                backup = path.with_name(f"{path.stem}.before-mapping-enrichment.sqlite3")
+                if columns and "mapping_migrated" not in columns and not backup.exists():
+                    fd, temporary = tempfile.mkstemp(prefix=".mam-mapping-backup-", suffix=".sqlite3", dir=path.parent)
+                    os.close(fd)
+                    try:
+                        with sqlite3.connect(temporary) as target:
+                            source.backup(target)
+                        os.replace(temporary, backup)
+                    finally:
+                        if os.path.exists(temporary):
+                            os.unlink(temporary)
         engine = create_engine(f"sqlite:///{path}", connect_args={"timeout": 30})
 
         @event.listens_for(engine, "connect")
@@ -94,6 +109,8 @@ def get_engine() -> Engine:
                     migration_session.flush()
                 connection.exec_driver_sql("ALTER TABLE resource_sources DROP COLUMN downloadtag")
             migrate_nodes(connection)
+            from .persistence_migration import migrate_subscription_mappings
+            migrate_subscription_mappings(connection)
         _engine, _engine_path = engine, path
         return engine
 

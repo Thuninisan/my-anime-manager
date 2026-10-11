@@ -24,6 +24,7 @@ class RssMappingContext(TypedDict):
 
 
 def normalize_episode_number(ref: RssEpisodeRef, offset: int | None) -> int | None:
+    """来源规则：Bangumi sort = RSS 集数 + feed offset；None 表示尚未确定。"""
     number = ref["rss_episode_number"]
     return number + offset if number is not None and offset is not None else None
 
@@ -49,7 +50,9 @@ def build_episode_mapping(ref: RssEpisodeRef, context: RssMappingContext,
         season = rule.get("season_number")
         number = rule.get("episode_number")
         if number is None and series_id is not None:
-            number = logical + rule.get("episode_offset", 0)
+            # 平台规则：季内集数 = Bangumi sort + mapping ep_offset。
+            # 未知时仅在本次运行回退为 0，不能把回退值持久化成已确认的偏移。
+            number = logical + (rule.get("episode_offset") or 0)
         series = catalog[provider].get(str(series_id), {})
         seasons = series.get("seasons", {}) if provider == "tvdb" else series
         selected = seasons.get(str(season), {})
@@ -86,7 +89,7 @@ async def subscription_episode_mapping(ref: RssEpisodeRef, sub: dict, subject_id
             rules[provider] = {"series_id": series_id,
                 "season_number": (override["tmdb_season_number"] if override.get("tmdb_season_number") is not None else season) if provider == "tmdb" else season,
                 "episode_number": override.get("tmdb_episode_number") if provider == "tmdb" else tvdb_episode_number,
-                "episode_offset": settings.get("ep_offset", 0)}
+                "episode_offset": settings.get("ep_offset") or 0}
             if series_id is not None:
                 provider_catalogs[provider][str(series_id)] = (
                     await metadata_ctx.get_tmdb_season_map(series_id, "zh-CN") if provider == "tmdb"

@@ -1,6 +1,6 @@
 """API request/response Pydantic models."""
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from ..domain.resource import ResourceIdentity
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -90,18 +90,25 @@ class BgmMeta(BaseModel):
     season: int = 1
     sortrange: list[int] = []
     subject_name: str = ""
+    subject_title_cn: str | None = None
+    subject_title_jp: str | None = None
     rating: float = 0.0
     air_date: str = ""
 
 
 class TvdbMeta(BaseModel):
     season: int | None = None
-    ep_offset: int = 0
+    # 平台季内集数 = Bangumi sort + ep_offset；None=未知，0=确认相同。
+    ep_offset: int | None = None
+    series_title_cn: str | None = None
+    series_title_jp: str | None = None
 
 
 class TmdbMeta(BaseModel):
     season: int | None = None
-    ep_offset: int = 0
+    ep_offset: int | None = None
+    series_title_cn: str | None = None
+    series_title_jp: str | None = None
 
 
 class RssSource(BaseModel):
@@ -156,6 +163,26 @@ class TmdbSearchResult(BaseModel):
 class SetTmdbRequest(BaseModel):
     tmdb_id: int
     tmdb_season: int | None = None
+
+
+class MappingPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    title_cn: str | None = None
+    title_jp: str | None = None
+    mikan_id: int | None = None
+    tmdb_id: int | None = None
+    tvdb_id: int | None = None
+    tmdb_season: int | None = None
+    tvdb_season: int | None = None
+    tmdb_series_title_cn: str | None = None
+    tmdb_series_title_jp: str | None = None
+    tvdb_series_title_cn: str | None = None
+    tvdb_series_title_jp: str | None = None
+    bangumi_subject_title_cn: str | None = None
+    bangumi_subject_title_jp: str | None = None
+    # 平台季内集数 = Bangumi sort + ep_offset；显式 null 用于清除，0 为已确认相同。
+    tmdb_ep_offset: int | None = None
+    tvdb_ep_offset: int | None = None
 
 
 class IntervalBody(BaseModel):

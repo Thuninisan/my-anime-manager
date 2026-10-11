@@ -1,6 +1,11 @@
 """Transactional, repeatable SQLite upgrades and explicit backfill."""
 import json
+import logging
 from sqlalchemy import select
+
+from .mapping_fields import LOCAL_FIELDS, merge_mapping
+
+logger = logging.getLogger(__name__)
 
 IDENTITY_COLUMNS = {"resource_identity_json": "TEXT", "identity_source": "TEXT",
                     "identity_updated_at": "TEXT", "identity_revision": "INTEGER",
@@ -17,6 +22,9 @@ def upgrade(connection):
                 connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
 
     _upgrade_torrent_cards(connection)
+    columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(rss_subscriptions)")}
+    if "mapping_migrated" not in columns:
+        connection.exec_driver_sql("ALTER TABLE rss_subscriptions ADD COLUMN mapping_migrated BOOLEAN NOT NULL DEFAULT 0")
 
 
 def _upgrade_torrent_cards(connection):
@@ -78,17 +86,83 @@ def _upgrade_mappings(connection):
     # Rebuild old nullable season definitions to give direct inserts the same default.
     info = {row[1]: row for row in connection.exec_driver_sql("PRAGMA table_info(bangumi_mappings_v2)")}
     if not info["tmdb_season"][3] or str(info["tmdb_season"][4]) != "1":
-        connection.exec_driver_sql("""CREATE TABLE bangumi_mappings_upgrade (
+        local_definitions = ", ".join(f"{field} {'INTEGER' if field.endswith('_ep_offset') else 'TEXT'}"
+                                      for field in LOCAL_FIELDS)
+        connection.exec_driver_sql(f"""CREATE TABLE bangumi_mappings_upgrade (
             bangumi_id INTEGER NOT NULL PRIMARY KEY, title_cn TEXT, title_jp TEXT,
             mikan_id INTEGER, tmdb_id INTEGER, tvdb_id INTEGER,
             tmdb_season INTEGER NOT NULL DEFAULT 1, tvdb_season INTEGER,
-            override BOOLEAN NOT NULL DEFAULT 0)""")
+            override BOOLEAN NOT NULL DEFAULT 0, {local_definitions})""")
         fields = "bangumi_id,title_cn,title_jp,mikan_id,tmdb_id,tvdb_id,tmdb_season,tvdb_season,override"
+        fields += "".join(f",{field}" for field in LOCAL_FIELDS if field in info)
         connection.exec_driver_sql(f"INSERT INTO bangumi_mappings_upgrade ({fields}) SELECT {fields} FROM bangumi_mappings_v2")
         connection.exec_driver_sql("DROP TABLE bangumi_mappings_v2")
         connection.exec_driver_sql("ALTER TABLE bangumi_mappings_upgrade RENAME TO bangumi_mappings_v2")
         connection.exec_driver_sql("CREATE INDEX idx_bangumi_mappings_tmdb ON bangumi_mappings_v2 (tmdb_id)")
         connection.exec_driver_sql("CREATE INDEX idx_bangumi_mappings_tvdb ON bangumi_mappings_v2 (tvdb_id)")
+    # Add after legacy table rebuilding, otherwise the old rebuild loses new fields.
+    columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(bangumi_mappings_v2)")}
+    for field in LOCAL_FIELDS:
+        if field not in columns:
+            kind = "INTEGER" if field.endswith("_ep_offset") else "TEXT"
+            connection.exec_driver_sql(f"ALTER TABLE bangumi_mappings_v2 ADD COLUMN {field} {kind}")
+
+
+def migrate_subscription_mappings(connection):
+    """Backfill once, after legacy extension migration; preserve confirmed bindings."""
+    from sqlalchemy.orm import Session
+    from .models import Subscription, BangumiMapping
+    from .identity import read_resource_identity
+    from .mapping_fields import MAPPING_FIELDS
+    with Session(bind=connection) as session:
+        for sub in session.scalars(select(Subscription).where(Subscription.mapping_migrated.is_(False))):
+            identity = read_resource_identity(sub)
+            # Movie identity needs a separate typed mapping; do not treat movie IDs as series IDs.
+            if identity["media_type"] != "tv":
+                continue
+            row = session.get(BangumiMapping, sub.bangumi_id)
+            current = {field: getattr(row, field) for field in MAPPING_FIELDS} if row else {}
+            changes = {}
+            for provider in ("tmdb", "tvdb"):
+                provider_id = identity[f"{provider}_series_id"]
+                if provider_id is None:
+                    continue
+                changes[f"{provider}_id"] = provider_id
+                for suffix in ("season", "ep_offset"):
+                    value = getattr(sub, f"{provider}_{suffix}")
+                    if value is not None:
+                        changes[f"{provider}_{suffix}"] = value
+            conflicts = [field for field, value in changes.items()
+                         if row and row.override and current.get(field) is not None
+                         and current[field] != value]
+            if conflicts:
+                logger.warning("订阅映射迁移保留旧配置: bangumi_id=%s override 冲突字段=%s",
+                               sub.bangumi_id, conflicts)
+                continue
+            binding_changed = any(current.get(field) != value for field, value in changes.items()
+                                  if field.endswith("_id") or field.endswith("_season"))
+            if row is None:
+                row = BangumiMapping(bangumi_id=sub.bangumi_id,
+                                     title_cn=sub.name or str(sub.bangumi_id))
+                session.add(row)
+            merged = merge_mapping(current, changes)
+            for field, value in merged.items():
+                setattr(row, field, value)
+            if row.tmdb_season is None:
+                row.tmdb_season = 1
+            # Protect a confirmed subscription binding that differs from community data.
+            if binding_changed:
+                row.override = True
+            for provider in ("tmdb", "tvdb"):
+                setattr(sub, f"{provider}_season", None)
+                setattr(sub, f"{provider}_ep_offset", None)
+                extras = dict(getattr(sub, f"{provider}_extra_data") or {})
+                for field in ("id", "season", "ep_offset"):
+                    extras.pop(field, None)
+                setattr(sub, f"{provider}_extra_data", extras)
+            # Old subject_name mixes languages. Keep it only as an unmigrated display fallback.
+            sub.mapping_migrated = True
+        session.flush()
 
 
 def backfill(session):

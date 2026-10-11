@@ -508,7 +508,7 @@ async def torrent_download(body: dict):
                 continue
             sort = int(item["episode_mapping"]["bangumi"]["episode_absolute"])
             sub, _, _ = bd_replacement.downloader.resolve_episode_paths(replace_bangumi_id, sort)
-            tvdb_episode_number = sort + sub.get("tvdb", {}).get("ep_offset", 0)
+            tvdb_episode_number = sort + (sub.get("tvdb", {}).get("ep_offset") or 0)
             rel = format_download_path(config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_episode_number).lstrip("/")
             item["replacement_target"] = str(Path(rel).with_suffix(Path(item["torrent_path"]).suffix))
 

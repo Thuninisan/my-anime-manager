@@ -27,6 +27,7 @@ from .models import (
     AssignMikanRequest,
     BangumiRssResponse,
     ManualSubscribeIn,
+    MappingPatch,
     MikanSearchResult,
     RssFeedResponse,
     SeasonInfo,
@@ -41,6 +42,26 @@ from .external_api_v1_adapter import V1SubscriptionOut
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+@router.get("/api/rss/bangumi/{bangumi_id}/mapping")
+async def get_bangumi_mapping(bangumi_id: int):
+    from ..db.mapping_fields import MAPPING_FIELDS
+    mapping = data.get_mapping(bangumi_id)
+    if not mapping:
+        raise HTTPException(404, "映射不存在")
+    return {"bangumi_id": bangumi_id, **{field: mapping.get(field) for field in MAPPING_FIELDS},
+            "override": mapping.get("override", False)}
+
+
+@router.patch("/api/rss/bangumi/{bangumi_id}/mapping")
+async def patch_bangumi_mapping(bangumi_id: int, body: MappingPatch):
+    try:
+        if not data.edit_mapping(bangumi_id, body.model_dump(exclude_unset=True)):
+            raise HTTPException(404, "映射不存在")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await get_bangumi_mapping(bangumi_id)
 
 
 @router.get("/api/rss/bangumi/{bangumi_id}/poster")
@@ -244,7 +265,6 @@ async def create_subscription(body: SubscriptionIn):
     for s in all_subs:
         if s["bangumi_id"] == body.bangumi_id and "bgm" in s:
             cached = {g: s[g] for g in ENRICH_GROUPS if g in s}
-            data.update_subscription(body.bangumi_id, cached, identity_source="existing_mapping")
             sub.update(cached)
             break
 
@@ -321,6 +341,16 @@ def _get_cached_enrichment(bangumi_id: int) -> dict | None:
         ):
             return None
         if has_eps or has_tvdb or has_tmdb:
+            mapping = data.get_mapping(bangumi_id)
+            if not mapping.get("bangumi_subject_title_cn") and not mapping.get("bangumi_subject_title_jp"):
+                return None
+            for provider in ("tmdb", "tvdb"):
+                if s["resource_identity"][f"{provider}_series_id"] is not None:
+                    if (mapping.get(f"{provider}_id") != s["resource_identity"][f"{provider}_series_id"]
+                            or mapping.get(f"{provider}_ep_offset") is None
+                            or not mapping.get(f"{provider}_series_title_cn")
+                            or not mapping.get(f"{provider}_series_title_jp")):
+                        return None
             return {g: s[g] for g in ENRICH_GROUPS if g in s}
         # Stale/failed enrichment — ignore and re-run
         return None
@@ -409,6 +439,7 @@ async def enrich_subscription_stream(bangumi_id: int):
                     primary_offset = result.pop("primary_offset", None)
                     backup_offset = result.pop("backup_offset", None)
                     data.update_subscription(bangumi_id, result, identity_source=(result.get("resource_resolution") or {}).get("reason", "legacy_unknown"))
+                    result = next((s for s in data.list_subscriptions() if s["bangumi_id"] == bangumi_id), {})
                     # Write offsets into nested primary/backup keys
                     if primary_offset is not None:
                         data.set_subscription_rss_offset(bangumi_id, "primary", primary_offset)
@@ -481,8 +512,7 @@ async def set_subscription_tmdb(bangumi_id: int, body: SetTmdbRequest):
     if not ok:
         raise HTTPException(404, f"Subscription not found: {bangumi_id}")
 
-    # Also persist to community mapping so future auto-lookups work
-    data.set_tmdb_id(bangumi_id, body.tmdb_id, body.tmdb_season)
+    # update_subscription commits the confirmed identity and mapping in one transaction.
 
     logger.info(
         "manual tmdb override: bangumi=%d → tmdb_id=%d season=%s",
@@ -782,6 +812,10 @@ async def activate_subscription(bangumi_id: int):
 @router.patch("/api/rss/subscriptions/{bangumi_id}")
 async def update_subscription_fields(bangumi_id: int, fields: dict[str, object]):
     """Update specific fields of a subscription (e.g. exclude_patterns)."""
+    from ..db.mapping_fields import MAPPING_FIELDS
+    if any(field.startswith("_") or field in {*MAPPING_FIELDS, "tmdb", "tvdb", "resource_identity"}
+           for field in fields):
+        raise HTTPException(422, "平台映射请通过 mapping 接口修改")
     try:
         ok = data.update_subscription(bangumi_id, fields)
     except ValueError as exc:

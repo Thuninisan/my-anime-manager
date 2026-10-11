@@ -119,6 +119,7 @@ class Subscription(Base):
     tvdb_id: Mapped[int | None] = mapped_column(Integer)
     tvdb_season: Mapped[int | None] = mapped_column(Integer)
     tvdb_ep_offset: Mapped[int | None] = mapped_column(Integer)
+    mapping_migrated: Mapped[bool] = mapped_column(nullable=False, default=False, server_default=text("0"))
 
 
 class SubscriptionFeed(Base):
@@ -130,6 +131,8 @@ class SubscriptionFeed(Base):
     rss_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
     subgroup_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     subgroup_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    # RSS 来源偏移：Bangumi sort = RSS 集数 + offset。主/备用 feed 各自计算；
+    # NULL 表示无法确定，0 表示编号相同。它不是平台之间的 ep_offset。
     offset: Mapped[int | None] = mapped_column(Integer)
 
     filter_tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
@@ -148,6 +151,17 @@ class BangumiMapping(Base):
     tvdb_id: Mapped[int | None] = mapped_column(Integer)
     tmdb_season: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     tvdb_season: Mapped[int | None] = mapped_column(Integer)
+    tmdb_series_title_cn: Mapped[str | None] = mapped_column(Text)
+    tmdb_series_title_jp: Mapped[str | None] = mapped_column(Text)
+    tvdb_series_title_cn: Mapped[str | None] = mapped_column(Text)
+    tvdb_series_title_jp: Mapped[str | None] = mapped_column(Text)
+    bangumi_subject_title_cn: Mapped[str | None] = mapped_column(Text)
+    bangumi_subject_title_jp: Mapped[str | None] = mapped_column(Text)
+    # 平台偏移以当前 Bangumi 条目的 sort 为基准：平台季内集数 = sort + ep_offset。
+    # 例如 sort=13 对应 S02E01，则 season=2、ep_offset=-12。
+    # NULL=未计算/匹配失败；0=已确认编号相同；允许负数。ID/季度变化后须失效。
+    tmdb_ep_offset: Mapped[int | None] = mapped_column(Integer)
+    tvdb_ep_offset: Mapped[int | None] = mapped_column(Integer)
     override: Mapped[bool] = mapped_column(nullable=False, default=False, server_default=text("0"))
 
 

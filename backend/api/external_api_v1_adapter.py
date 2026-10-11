@@ -5,10 +5,12 @@ from .models import SubscriptionOut, TmdbMeta, TvdbMeta
 
 class V1TmdbMeta(TmdbMeta):
     id: int = 0
+    ep_offset: int = 0
 
 
 class V1TvdbMeta(TvdbMeta):
     id: int = 0
+    ep_offset: int = 0
 
 
 class V1SubscriptionOut(SubscriptionOut):
@@ -23,8 +25,11 @@ class V1SubscriptionOut(SubscriptionOut):
         identity = value["resource_identity"]
         tmdb_id = identity["tmdb_movie_id"] if identity["media_type"] == "movie" else identity["tmdb_series_id"]
         return {**value,
-                "tmdb": {**value.get("tmdb", {}), "id": tmdb_id or 0},
-                "tvdb": {**value.get("tvdb", {}), "id": identity["tvdb_series_id"] or 0}}
+                # v1 keeps its old numeric fallback; v2 exposes unknown offsets as null.
+                "tmdb": {**value.get("tmdb", {}), "id": tmdb_id or 0,
+                         "ep_offset": value.get("tmdb", {}).get("ep_offset") or 0},
+                "tvdb": {**value.get("tvdb", {}), "id": identity["tvdb_series_id"] or 0,
+                         "ep_offset": value.get("tvdb", {}).get("ep_offset") or 0}}
 
 
 async def history_stream_v1(iterator):

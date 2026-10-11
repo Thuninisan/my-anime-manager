@@ -10,7 +10,7 @@ from ..clients import tvdb as tvdb_client
 from ..clients.bangumi import get_subject
 from ..data import (
     get_tmdb_id, get_tmdb_season, get_tvdb_id, get_tvdb_season,
-    set_tmdb_id as data_set_tmdb_id, set_tvdb_id,
+    get_mapping, list_subscriptions,
 )
 from . import rss as rss_service
 from ..utils.episode_name_match import fuzzy_match_episode
@@ -42,7 +42,7 @@ async def _get_bangumi_episodes(subject_id: int) -> list[dict]:
 
 
 def _compute_rss_offset(feed: dict, air_date: str) -> int | None:
-    """Compute the offset between RSS episode numbering and Bangumi sort.
+    """Find the first RSS number used to calculate the feed-specific offset.
 
     Finds the smallest *rss_episode_number* among items
     published on or after *air_date*, and returns that value.  The caller
@@ -50,6 +50,9 @@ def _compute_rss_offset(feed: dict, air_date: str) -> int | None:
     ``first_bangumi_sort - smallest_rss_ep``.
 
     Returns None when the feed is empty or has no items after *air_date*.
+    来源 offset = 首个 Bangumi sort - 最小 RSS 集数，sort = RSS 集数 + offset。
+    本函数返回最小 RSS 集数；调用方计算并保存各 feed 的 offset。
+    这与 mapping 中的“平台季内集数 = Bangumi sort + ep_offset”是两个独立步骤。
     """
     items = feed.get("items", [])
     if not items:
@@ -487,10 +490,11 @@ async def _compute_tvdb_ep_offset(
     bangumi_id: int, tvdb_id: int, tvdb_season: int,
     _emit: Callable[[str], None],
     metadata_ctx=None,
-) -> int:
+) -> int | None:
     """Compute TVDB episode offset via episode-name matching.
 
-    Returns ``tvdb_ep_number - bgm_ep_val``, or 0 on failure.
+    Returns ``tvdb_ep_number - bgm_ep_val``, or None on failure.
+    平台季内集数 = Bangumi sort + offset；NULL=未知，0=确认相同，允许负数。
     """
     from ..utils.episode_name_match import fuzzy_match_episode
 
@@ -499,20 +503,20 @@ async def _compute_tvdb_ep_offset(
     try:
         eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
     except Exception:
-        return 0
+        return None
     if not eps:
-        return 0
+        return None
 
     first_bgm_name = (eps[0].get("name") or "").strip()
     bgm_ep_val = eps[0].get("sort")
     if not first_bgm_name or bgm_ep_val is None:
-        return 0
+        return None
 
     try:
         all_eps = await metadata_ctx.get_tvdb_matching_episodes(tvdb_id)
     except Exception:
         _emit("   ⚠️ 获取 TVDB 集数列表失败")
-        return 0
+        return None
 
     best_score = 0.0
     best_num = None
@@ -525,7 +529,7 @@ async def _compute_tvdb_ep_offset(
         score = fuzzy_match_episode(first_bgm_name, tvdb_name)
         if score > best_score:
             best_score = score
-            best_num = ep.get("number", 0)
+            best_num = ep.get("number")
 
     if best_score >= 0.6 and best_num is not None:
         offset = best_num - bgm_ep_val
@@ -533,20 +537,21 @@ async def _compute_tvdb_ep_offset(
             f"   📐 tvdb_ep_offset={offset} "
             f"(bangumi_episode_sort={bgm_ep_val} → tvdb_episode_number={best_num}, score={best_score:.3f})"
         )
-        return offset
+        return int(offset) if float(offset).is_integer() else None
 
     _emit(f"   ⚠️ TVDB 集名匹配失败 (bgm=\"{first_bgm_name}\", score={best_score:.3f})")
-    return 0
+    return None
 
 
 async def _compute_tmdb_ep_offset(
     bangumi_id: int, tmdb_id: int, tmdb_season: int,
     _emit: Callable[[str], None],
     metadata_ctx=None,
-) -> int:
+) -> int | None:
     """Compute TMDB episode offset via episode-name matching.
 
-    Returns ``tmdb_ep_number - bgm_ep_val``, or 0 on failure.
+    Returns ``tmdb_ep_number - bgm_ep_val``, or None on failure.
+    平台季内集数 = Bangumi sort + offset；NULL=未知，0=确认相同，允许负数。
     """
     from .nfo.metadata_context import MetadataContext
     metadata_ctx = metadata_ctx or MetadataContext()
@@ -558,14 +563,14 @@ async def _compute_tmdb_ep_offset(
     try:
         eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
     except Exception:
-        return 0
+        return None
     if not eps:
-        return 0
+        return None
 
     first_bgm_name = (eps[0].get("name") or "").strip()
     bgm_ep_val = eps[0].get("sort")
     if not first_bgm_name or bgm_ep_val is None:
-        return 0
+        return None
 
     try:
         detail = await metadata_ctx.get_tmdb_detail(tmdb_id)
@@ -578,7 +583,7 @@ async def _compute_tmdb_ep_offset(
         season_map = await metadata_ctx.get_tmdb_season_map(tmdb_id, lang)
     except Exception:
         _emit("   ⚠️ 获取 TMDB 季数据失败")
-        return 0
+        return None
 
     best_score = 0.0
     best_num = None
@@ -591,7 +596,7 @@ async def _compute_tmdb_ep_offset(
             score = fuzzy_match_episode(first_bgm_name, tmdb_name)
             if score > best_score:
                 best_score = score
-                best_num = ep.get("epNum", 0)
+                best_num = ep.get("epNum")
 
     if best_score >= 0.6 and best_num is not None:
         offset = best_num - bgm_ep_val
@@ -599,10 +604,10 @@ async def _compute_tmdb_ep_offset(
             f"   📐 tmdb_ep_offset={offset} "
             f"(bangumi_episode_sort={bgm_ep_val} → tmdb_episode_payload={best_num}, score={best_score:.3f})"
         )
-        return offset
+        return int(offset) if float(offset).is_integer() else None
 
     _emit(f"   ⚠️ TMDB 集名匹配失败 (bgm=\"{first_bgm_name}\", score={best_score:.3f})")
-    return 0
+    return None
 
 
 async def enrich_subscription(
@@ -726,6 +731,10 @@ async def enrich_subscription(
         except Exception:
             _emit("⚠️ Failed to fetch Bangumi rating/air_date (non-fatal)")
 
+        # Prefer the subscription's confirmed identity over community changes.
+        stored = get_mapping(bangumi_id)
+        subscription = next((sub for sub in list_subscriptions() if sub["bangumi_id"] == bangumi_id), {})
+        confirmed = subscription.get("resource_identity", {})
         # 4. TMDB info from SQLite community mappings
         tmdb_id = get_tmdb_id(bangumi_id)
         tmdb_season = get_tmdb_season(bangumi_id)
@@ -734,6 +743,16 @@ async def enrich_subscription(
         tvdb_id = get_tvdb_id(bangumi_id)
         tvdb_season = get_tvdb_season(bangumi_id)
 
+        for provider in ("tmdb", "tvdb"):
+            provider_id = confirmed.get(f"{provider}_series_id")
+            if provider_id:
+                settings = subscription.get(provider, {})
+                if provider == "tmdb":
+                    tmdb_id = provider_id
+                    tmdb_season = settings.get("season")
+                else:
+                    tvdb_id = provider_id
+                    tvdb_season = settings.get("season")
         special_resolution = None
         if not tmdb_id or not tvdb_id:
             from .resource_resolver import resolve_primary_series_relation, resolve_special_binding
@@ -764,8 +783,6 @@ async def enrich_subscription(
                     tvdb_id = tvdb_result["tvdb_id"]
                     tvdb_season = tvdb_result["tvdb_season"]
                     tvdb_auto_ep_number = tvdb_result.get("tvdb_ep_number")
-                    from ..data import set_tvdb_id as _persist_tvdb
-                    _persist_tvdb(bangumi_id, tvdb_id, tvdb_season, manual=False)
                     _emit(
                         f"✅ TVDB 自动推断成功: "
                         f"tvdb_id={tvdb_id}, tvdb_season={tvdb_season}"
@@ -781,14 +798,12 @@ async def enrich_subscription(
             _emit("🔍 TMDB ID 缺失，启动自动推断...")
             try:
                 fallback_result = await _auto_infer_tmdb(
-                    bangumi_id, chain_ids, root_subject, _emit,
+                    bangumi_id, chain_ids, root_subject, _emit, metadata_ctx=metadata_ctx,
                 )
                 if fallback_result:
                     tmdb_id = fallback_result["tmdb_id"]
                     tmdb_season = fallback_result["tmdb_season"]
                     tmdb_auto_ep_number = fallback_result.get("tmdb_ep_number")
-                    # Persist so future lookups are instant
-                    data_set_tmdb_id(bangumi_id, tmdb_id, tmdb_season, manual=False)
                     _emit(
                         f"✅ TMDB 自动推断成功: "
                         f"tmdb_id={tmdb_id}, tmdb_season={tmdb_season}"
@@ -798,11 +813,12 @@ async def enrich_subscription(
             except Exception as e:
                 _emit(f"⚠️ TMDB 自动推断异常: {e}")
 
-        # 4b. Compute episode offsets via name matching ──
-        #     Auto-infer already has the matched ep number; for known IDs
-        #     we run the matching fresh to ensure offset is always accurate.
-        tmdb_ep_offset = 0
-        if tmdb_id and tmdb_season is not None:
+        # 4b. Reuse offsets for the same binding; match only missing offsets.
+        # 平台季内集数 = Bangumi sort + ep_offset（不是 RSS 原始集数）。
+        # 仅在 ID 和季度一致时复用；NULL 表示未知，失败不能持久化成 0。
+        tmdb_ep_offset = stored.get("tmdb_ep_offset") if (stored.get("tmdb_id") == tmdb_id
+            and stored.get("tmdb_season") == tmdb_season) else None
+        if tmdb_ep_offset is None and tmdb_id and tmdb_season is not None:
             if tmdb_auto_ep_number is not None:
                 eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
                 bgm_ep_v = eps[0].get("sort") if eps else None
@@ -814,8 +830,9 @@ async def enrich_subscription(
                     bangumi_id, tmdb_id, tmdb_season, _emit, metadata_ctx=metadata_ctx,
                 )
 
-        tvdb_ep_offset = 0
-        if tvdb_id and tvdb_season is not None:
+        tvdb_ep_offset = stored.get("tvdb_ep_offset") if (stored.get("tvdb_id") == tvdb_id
+            and stored.get("tvdb_season") == tvdb_season) else None
+        if tvdb_ep_offset is None and tvdb_id and tvdb_season is not None:
             if tvdb_auto_ep_number is not None:
                 eps = await metadata_ctx.get_bgm_episodes(bangumi_id)
                 bgm_ep_v = eps[0].get("sort") if eps else None
@@ -827,49 +844,64 @@ async def enrich_subscription(
                     bangumi_id, tvdb_id, tvdb_season, _emit, metadata_ctx=metadata_ctx,
                 )
 
-        # 4c. Resolve series_name: TMDB zh-CN > TVDB zho > BGM chain root
-        series_name = root_name  # BGM fallback
-        resolved = False  # tracks whether a higher-priority source succeeded
-        if tmdb_id:
-            try:
-                detail_zh = await metadata_ctx.get_tmdb_detail(tmdb_id, "zh-CN")
-                tmdb_name = detail_zh.get("name", "").strip()
-                if tmdb_name:
-                    series_name = tmdb_name
-                    resolved = True
-                    _emit(f"✅ series_name={series_name} (from TMDB zh-CN)")
-            except Exception:
-                pass
-        if not resolved and tvdb_id:
-            try:
-                resp = await tvdb_client.get_series_translations(tvdb_id, "zho")
-                data = resp.json()
-                translations = data.get("data", data)
-                if isinstance(translations, list):
-                    tvdb_name = translations[0].get("name", "").strip() if translations else ""
-                else:
-                    tvdb_name = translations.get("name", "").strip()
-                if tvdb_name:
-                    series_name = tvdb_name
-                    resolved = True
-                    _emit(f"✅ series_name={series_name} (from TVDB zho)")
-            except Exception:
-                pass
-        if not resolved:
-            _emit(f"✅ series_name={series_name} (from BGM chain root)")
+        # Persist platform titles separately; never copy a fallback into another language.
+        mapping_fields = {}
+        provider_titles = {}
+        for provider, provider_id, season, offset in (
+            ("tmdb", tmdb_id, tmdb_season, tmdb_ep_offset),
+            ("tvdb", tvdb_id, tvdb_season, tvdb_ep_offset),
+        ):
+            titles = {}
+            same_binding = stored.get(f"{provider}_id") == provider_id
+            if provider_id:
+                mapping_fields[f"{provider}_id"] = provider_id
+                if season is not None:
+                    mapping_fields[f"{provider}_season"] = season
+                if offset is not None and float(offset).is_integer():
+                    mapping_fields[f"{provider}_ep_offset"] = int(offset)
+                for language, api_language in (("cn", "zh-CN" if provider == "tmdb" else "zho"),
+                                               ("jp", "ja" if provider == "tmdb" else "jpn")):
+                    field = f"{provider}_series_title_{language}"
+                    title = stored.get(field) if same_binding else None
+                    if not title:
+                        try:
+                            if provider == "tmdb":
+                                detail = await metadata_ctx.get_tmdb_detail(provider_id, api_language)
+                                # TMDB may return the original title when translation is missing.
+                                title = (detail.get("name") or "").strip()
+                                if title == detail.get("original_name") and detail.get("original_language") not in (
+                                        ("ja",) if language == "jp" else ("zh",)):
+                                    title = None
+                            else:
+                                response = await tvdb_client.get_series_translations(provider_id, api_language)
+                                response.raise_for_status()
+                                translation = response.json()
+                                translation = translation.get("data", translation)
+                                if isinstance(translation, list):
+                                    translation = translation[0] if translation else {}
+                                title = (translation.get("name") or "").strip()
+                        except Exception:
+                            logger.warning("平台标题获取失败: provider=%s id=%s language=%s",
+                                           provider, provider_id, api_language, exc_info=True)
+                    if title:
+                        mapping_fields[field] = title
+                        titles[language] = title
+            provider_titles[provider] = titles
 
-        # 5. Extract this season's Bangumi subject name for file naming
         bgm_subject_name = ""
         try:
-            if bangumi_id == root_id:
-                sd = root_subject
-            else:
-                sd = await get_subject(bangumi_id)
-            bgm_subject_name = (
-                sd.get("name_cn") or sd.get("name") or ""
-            ).strip()
+            subject = root_subject if bangumi_id == root_id else await get_subject(bangumi_id)
+            for language, key in (("cn", "name_cn"), ("jp", "name")):
+                title = (subject.get(key) or "").strip()
+                if title:
+                    mapping_fields[f"bangumi_subject_title_{language}"] = title
+            bgm_subject_name = (mapping_fields.get("bangumi_subject_title_cn")
+                                or mapping_fields.get("bangumi_subject_title_jp") or "")
         except Exception:
-            pass
+            logger.warning("Bangumi 标题获取失败: subject=%s", bangumi_id, exc_info=True)
+        # Existing series_name is a stable naming choice, not a provider title mirror.
+        series_name = (subscription.get("series_name") or provider_titles["tmdb"].get("cn")
+                       or provider_titles["tvdb"].get("cn") or root_name)
 
         # 5a. Compute RSS episode offset for primary/backup feeds
         #     offset = first_bangumi_sort - smallest_rss_ep
@@ -911,6 +943,10 @@ async def enrich_subscription(
         if special_resolution is not None:
             resolution["reason"] = special_resolution["reason"]
         return {
+            "_mapping_fields": mapping_fields,
+            "_mapping_expected": {field: stored.get(field) for field in (
+                "tmdb_id", "tmdb_season", "tmdb_ep_offset", "tvdb_id", "tvdb_season", "tvdb_ep_offset", "override")},
+            "_identity_expected": subscription.get("identity_revision"),
             "resource_identity": identity,
             "resource_resolution": resolution,
             "series_name": series_name,

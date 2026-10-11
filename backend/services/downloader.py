@@ -792,7 +792,8 @@ def resolve_episode_paths(bangumi_id: int, sort: int) -> tuple[dict, str, str]:
     if download_path:
         season_dir = str(Path(download_path).parent)
         return sub, season_dir, str(Path(season_dir).parent)
-    tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
+    # TVDB 季内集数 = Bangumi sort + 平台偏移；未知仅在本次路径计算中回退为 0。
+    tvdb_ep_val = sort + (sub.get("tvdb", {}).get("ep_offset") or 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
     rel_path = format_download_path(
         config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_ep_val,

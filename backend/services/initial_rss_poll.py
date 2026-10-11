@@ -64,7 +64,7 @@ async def _run(bangumi_id: int) -> None:
             return
         primary_offset = result.pop("primary_offset", None)
         backup_offset = result.pop("backup_offset", None)
-        if not data.update_subscription(bangumi_id, result):
+        if not data.update_subscription(bangumi_id, result, identity_source=(result.get("resource_resolution") or {}).get("reason", "enrichment")):
             raise ValueError("订阅已删除")
         if primary_offset is not None:
             data.set_subscription_rss_offset(bangumi_id, "primary", primary_offset)

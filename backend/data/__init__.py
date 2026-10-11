@@ -86,6 +86,20 @@ def get_tmdb_id(bangumi_id: int) -> int | None:
     return entry.get("tmdb_id") if entry else None
 
 
+def get_mapping(bangumi_id: int) -> dict:
+    """Return a detached view of persisted community and enriched metadata."""
+    return dict(_mapping_cache().get(bangumi_id, {}))
+
+
+def edit_mapping(bangumi_id: int, fields: dict) -> bool:
+    global _mapping_data
+    saved = _store.edit_mapping(bangumi_id, fields)
+    if saved:
+        with _mapping_lock:
+            _mapping_data = None
+    return saved
+
+
 def get_tmdb_season(bangumi_id: int) -> int | None:
     """Get TMDB season number from the Bangumi→Mikan mapping.
 
@@ -299,7 +313,7 @@ def add_subscription(name: str, rss_url: str, bangumi_id: int, subgroup_id: int,
                 ("tvdb", get_tvdb_id(bangumi_id), get_tvdb_season(bangumi_id)),
             ):
                 if provider_id and not identity.get(f"{provider}_series_id"):
-                    record[provider] = {"id": provider_id, "season": season, "ep_offset": 0}
+                    record[provider] = {"id": provider_id, "season": season}
                     record["_identity_update_source"] = "existing_mapping"
                     from ..domain.resource_adapters import provider_binding_identity
                     identity = provider_binding_identity(
@@ -340,6 +354,23 @@ def remove_subscription(bangumi_id: int) -> bool:
 
 
 def update_subscription(bangumi_id: int, fields: dict, *, identity_source="explicit_user_mapping") -> bool:
+    global _mapping_data
+    fields = dict(fields)
+    # Only an enrichment payload or an explicit provider edit may persist mapping fields.
+    # Ordinary assembled subscription views must not write read-side mirrors back.
+    mapping_fields = fields.pop("_mapping_fields", None)
+    mapping_expected = fields.pop("_mapping_expected", None)
+    identity_expected = fields.pop("_identity_expected", None)
+    manual = identity_source == "explicit_user_mapping" and mapping_fields is None
+    if manual:
+        mapping_fields = {}
+        for provider in ("tmdb", "tvdb"):
+            settings = fields.get(provider)
+            if not isinstance(settings, dict):
+                continue
+            for source, target in (("id", "id"), ("season", "season"), ("ep_offset", "ep_offset")):
+                if source in settings:
+                    mapping_fields[f"{provider}_{target}"] = (settings[source] or None) if source == "id" else settings[source]
     def operation(existing):
         if existing is None:
             return None, False
@@ -351,7 +382,13 @@ def update_subscription(bangumi_id: int, fields: dict, *, identity_source="expli
         existing["_identity_update_source"] = identity_source
         existing["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         return existing, True
-    return _store.mutate_subscription(bangumi_id, operation)
+    saved = _store.mutate_subscription(bangumi_id, operation,
+                                       mapping_fields=mapping_fields, mapping_manual=manual,
+                                       mapping_expected=mapping_expected, identity_expected=identity_expected)
+    if saved and mapping_fields:
+        with _mapping_lock:
+            _mapping_data = None
+    return saved
 
 
 def set_subscription_rss_offset(bangumi_id: int, key: str, offset: int) -> bool:
