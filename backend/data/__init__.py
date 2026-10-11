@@ -288,6 +288,28 @@ def add_subscription(name: str, rss_url: str, bangumi_id: int, subgroup_id: int,
                      backup_exclude_patterns: list[str] | None = None) -> dict:
     now = time.strftime("%Y-%m-%dT%H:%M:%S")
     def operation(existing):
+        def apply_known_bindings(record):
+            # Community bindings do not depend on successful remote enrichment.
+            # Only fill missing IDs; keep explicit subscription overrides.
+            identity = record.get("resource_identity") or {}
+            if identity.get("media_type", "tv") != "tv":
+                return record
+            for provider, provider_id, season in (
+                ("tmdb", get_tmdb_id(bangumi_id), get_tmdb_season(bangumi_id)),
+                ("tvdb", get_tvdb_id(bangumi_id), get_tvdb_season(bangumi_id)),
+            ):
+                if provider_id and not identity.get(f"{provider}_series_id"):
+                    record[provider] = {"id": provider_id, "season": season, "ep_offset": 0}
+                    record["_identity_update_source"] = "existing_mapping"
+                    from ..domain.resource_adapters import provider_binding_identity
+                    identity = provider_binding_identity(
+                        title=record.get("series_name"), bangumi_id=bangumi_id,
+                        tmdb_id=provider_id if provider == "tmdb" else identity.get("tmdb_series_id"),
+                        tvdb_id=provider_id if provider == "tvdb" else identity.get("tvdb_series_id"),
+                    )
+                    record["resource_identity"] = identity
+            return record
+
         primary = {"rss_url": rss_url, "subgroup_id": subgroup_id,
                    "subgroup_name": subgroup_name, "filter_tags": filter_tags or [],
                    "exclude_patterns": exclude_patterns or []}
@@ -302,10 +324,12 @@ def add_subscription(name: str, rss_url: str, bangumi_id: int, subgroup_id: int,
             existing.update(name=name, primary=primary, backup=backup, updated_at=now)
             if download_path:
                 existing["download_path"] = download_path
+            apply_known_bindings(existing)
             return existing, existing
         record = {"name": name, "bangumi_id": bangumi_id,
                   "download_path": download_path or "/{series_name}/Season {season}",
                   "active": 1, "created_at": now, "primary": primary, "backup": backup}
+        apply_known_bindings(record)
         return record, record
     return _store.mutate_subscription(bangumi_id, operation)
 

@@ -290,7 +290,7 @@ async def initial_poll_status(bangumi_id: int):
     return status
 
 
-ENRICH_GROUPS = ("bgm", "tvdb", "tmdb", "series_name")
+ENRICH_GROUPS = ("bgm", "tvdb", "tmdb", "series_name", "resource_identity")
 
 
 def _get_cached_enrichment(bangumi_id: int) -> dict | None:
@@ -314,6 +314,12 @@ def _get_cached_enrichment(bangumi_id: int) -> dict | None:
         has_eps = (bgm.get("sortrange") or [0, 0])[1] > 0
         has_tvdb = s["resource_identity"]["tvdb_series_id"] is not None
         has_tmdb = s["resource_identity"]["tmdb_series_id"] is not None or s["resource_identity"]["tmdb_movie_id"] is not None
+        # A partial cache must not hide community bindings added since enrichment.
+        if s["resource_identity"]["media_type"] == "tv" and (
+            (not has_tmdb and data.get_tmdb_id(bangumi_id))
+            or (not has_tvdb and data.get_tvdb_id(bangumi_id))
+        ):
+            return None
         if has_eps or has_tvdb or has_tmdb:
             return {g: s[g] for g in ENRICH_GROUPS if g in s}
         # Stale/failed enrichment — ignore and re-run
