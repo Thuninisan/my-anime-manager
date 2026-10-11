@@ -1,14 +1,16 @@
-"""Torrent cards and resumable processing plans stored through the ORM."""
+"""Torrent business records; unfinished plans live in shared recovery storage."""
 
 import json
+import logging
 from datetime import datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 
 from .connection import new_session
-from .models import TorrentCard, TorrentCardBangumi, TorrentCardOperation
-from . import fontinass
+from .models import TorrentCard, TorrentCardBangumi, WorkflowRecovery
+from . import recovery
 
+logger = logging.getLogger(__name__)
 
 CARD_FIELDS = {
     "info_hash", "torrent_name", "show_name", "bgm_rating", "poster_url", "status",
@@ -33,9 +35,6 @@ def _card_values(record: dict) -> dict:
 
 def _as_dict(session, card: TorrentCard) -> dict:
     result = dict(card.extra_data or {})
-    subtitle_state = fontinass.read(session, card.id)
-    if subtitle_state is not None:
-        result["fontinass"] = subtitle_state
     for field in CARD_FIELDS - {"processing", "completion_snapshot"}:
         if field == "bangumi_ids":
             result[field] = [row.bangumi_id for row in session.scalars(
@@ -47,25 +46,9 @@ def _as_dict(session, card: TorrentCard) -> dict:
         if card.completion_schema_version != 1:
             raise ValueError("unsupported_torrent_completion_version")
         result["completion_snapshot"] = json.loads(card.completion_snapshot_json)
-    if card.processing_present:
-        processing = dict(card.processing_extra_data or {})
-        if card.replaced_history_snapshot is not None:
-            processing["replaced_history"] = card.replaced_history_snapshot
-        if card.processing_mode is not None:
-            processing["mode"] = card.processing_mode
-        if card.replace_bangumi_id is not None:
-            processing["replace_bangumi_id"] = card.replace_bangumi_id
-        processing["files"] = [
-            {**(row.extra_data or {}),
-             **{field: getattr(row, field) for field in (
-                 "torrent_path", "source_path", "target_path", "action", "bangumi_sort", "episode_mapping_snapshot", "resource_identity")
-                if getattr(row, field) is not None}}
-            for row in session.scalars(select(TorrentCardOperation).where(
-                TorrentCardOperation.card_id == card.id).order_by(TorrentCardOperation.position))]
-        if processing.get("replace_bangumi_id") is not None:
-            from ..legacy.torrent import replacement_operation_view
-            processing["files"] = [replacement_operation_view(op, processing["replace_bangumi_id"]) for op in processing["files"]]
-        result["processing"] = processing
+    job = recovery.read(session, "torrent_processing", card.info_hash)
+    if job is not None:
+        result["processing"] = job.checkpoint["processing"]
     return result
 
 
@@ -84,18 +67,11 @@ def _save_card(session, record: dict) -> TorrentCard:
         session.add(TorrentCardBangumi(card_id=card.id, position=position,
                                        bangumi_id=bangumi_id))
     processing = record.get("processing")
-    card.processing_present = int(processing is not None)
-    card.processing_mode = processing.get("mode") if processing else None
-    card.replace_bangumi_id = processing.get("replace_bangumi_id") if processing else None
-    session.execute(delete(TorrentCardOperation).where(TorrentCardOperation.card_id == card.id))
-    for position, operation in enumerate((processing or {}).get("files", [])):
-        save_operation(session, card.id, position, operation)
-    card.replaced_history_snapshot = (processing or {}).get("replaced_history")
-    card.processing_extra_data = {key: value for key, value in (processing or {}).items()
-                                 if key not in {"mode", "replace_bangumi_id", "files", "replaced_history"}}
+    if processing is not None:
+        recovery.create(session, "torrent_processing", card.info_hash, "wait_download",
+                        {"processing": processing})
     card.extra_data = {key: value for key, value in record.items()
-                      if key not in CARD_FIELDS and key != "fontinass"}
-    fontinass.replace(session, card.id, record.get("fontinass"))
+                      if key not in CARD_FIELDS}
     return card
 
 
@@ -112,10 +88,19 @@ def save_torrent(record: dict) -> None:
 
 
 def list_pending_torrents() -> list[dict]:
-    with new_session() as session:
-        cards = session.scalars(select(TorrentCard).where(
-            TorrentCard.status == "downloading", TorrentCard.processing_present == 1
-        ).order_by(TorrentCard.id)).all()
+    with new_session() as session, session.begin():
+        keys = recovery.pending("torrent_processing")
+        cards = session.scalars(select(TorrentCard).where(TorrentCard.info_hash.in_(keys))).all()
+        orphaned = set(keys) - {card.info_hash for card in cards}
+        for key in orphaned:
+            removed = session.execute(delete(WorkflowRecovery).where(
+                WorkflowRecovery.workflow_type == "torrent_processing",
+                WorkflowRecovery.business_key == key,
+                ~select(TorrentCard.id).where(TorrentCard.info_hash == key).exists(),
+                or_(WorkflowRecovery.lease_owner.is_(None),
+                    WorkflowRecovery.lease_expires_at <= recovery.now())))
+            if removed.rowcount:
+                logger.warning("workflow.recovery.orphan torrent=%s reason=business_record_missing", key)
         return [_as_dict(session, card) for card in cards]
 
 
@@ -125,24 +110,19 @@ def get_torrent(info_hash: str) -> dict | None:
         return _as_dict(session, card) if card else None
 
 
-def save_fontinass(info_hash: str, value: dict) -> None:
-    """Checkpoint subtitle processing without replacing the media processing plan."""
+def finish_torrent(info_hash: str, status: str, *, job: recovery.RecoveryJob,
+                   keep_recovery: bool = False) -> None:
+    """Commit business completion and remove its recovery checkpoint atomically."""
     with new_session() as session, session.begin():
+        job.guard(session)
         card = session.scalar(select(TorrentCard).where(TorrentCard.info_hash == info_hash))
         if card is None:
+            job.delete(session)
             return
-        fontinass.replace(session, card.id, value)
-        card.updated_at = datetime.now().astimezone().isoformat(timespec="seconds")
-
-
-def finish_torrent(info_hash: str, status: str) -> None:
-    with new_session() as session, session.begin():
-        card = session.scalar(select(TorrentCard).where(TorrentCard.info_hash == info_hash))
-        if card is None:
-            return
-        if status == "completed" and card.processing_present:
+        if status == "completed":
             from ..domain.persistence import load_episode_mapping_snapshot
-            plan = _as_dict(session, card)["processing"]
+            from copy import deepcopy
+            plan = deepcopy(job.checkpoint["processing"])
             operations = plan["files"]
             for operation in operations:
                 if operation.get("episode_mapping_snapshot") is not None:
@@ -155,17 +135,5 @@ def finish_torrent(info_hash: str, status: str) -> None:
             card.completion_schema_version = 1
         card.status = status
         card.updated_at = datetime.now().astimezone().isoformat(timespec="seconds")
-        card.processing_present = 0
-        card.processing_mode = None
-        card.replace_bangumi_id = None
-        session.execute(delete(TorrentCardOperation).where(TorrentCardOperation.card_id == card.id))
-        card.processing_extra_data = {}
-        card.replaced_history_snapshot = None
-
-
-def save_operation(session, card_id, position, operation):
-    fields = {"torrent_path", "source_path", "target_path", "action", "bangumi_sort",
-              "episode_mapping_snapshot", "resource_identity"}
-    session.add(TorrentCardOperation(card_id=card_id, position=position,
-                **{key: operation.get(key) for key in fields},
-                extra_data={key: value for key, value in operation.items() if key not in fields}))
+        if not keep_recovery:
+            job.delete(session)

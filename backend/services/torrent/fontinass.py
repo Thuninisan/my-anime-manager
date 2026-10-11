@@ -1,4 +1,4 @@
-"""Durable ASS processing after subtitle copies, preserving source downloads."""
+"""Recoverable ASS processing; terminal results are only logged."""
 
 import asyncio
 import hashlib
@@ -13,7 +13,7 @@ from time import perf_counter
 
 from ... import config
 from ...clients import fontinass as client
-from ...db import torrents as store
+from ..workflow_recovery import current_job
 from ...logging.logging_config import current_operation_id, new_operation_id, operation_context, safe_url
 
 logger = logging.getLogger(__name__)
@@ -25,21 +25,19 @@ def digest(data: bytes) -> str:
 
 
 def _state(info_hash: str) -> dict:
-    record = store.get_torrent(info_hash)
-    return (record or {}).get("fontinass") or {"status": "waiting", "files": []}
+    return current_job().checkpoint.get("fontinass") or {"status": "waiting", "files": []}
 
 
 def _checkpoint(info_hash: str, state: dict) -> None:
-    started = perf_counter()
-    try:
-        store.save_fontinass(info_hash, state)
-    except Exception as error:
-        # SQL exception text/parameters can contain service addresses and messages.
-        logger.error("fontinass.checkpoint.failed torrent=%s status=%s error_type=%s stack=%s",
-                     info_hash, state.get("status"), type(error).__name__, "".join(traceback.format_tb(error.__traceback__)))
-        raise RuntimeError("FontInAss 状态保存失败") from None
-    logger.debug("fontinass.checkpoint.saved torrent=%s status=%s files=%d elapsed_ms=%.1f",
-                 info_hash, state.get("status"), len(state.get("files", [])), (perf_counter() - started) * 1000)
+    # Keep only data needed to resume; business messages and errors belong in logs.
+    job = current_job()
+    job.checkpoint["fontinass"] = {
+        **{key: state[key] for key in ("status", "settings") if key in state},
+        "files": [{key: value for key, value in entry.items()
+                   if key in {"path", "status", "attempts", "input_hash", "output_hash"}}
+                  for entry in state["files"]],
+    }
+    job.save()
 
 
 def copy_subtitle(info_hash: str, source: Path, target: Path) -> None:
@@ -180,13 +178,14 @@ def _replace(target: Path, data: bytes, expected_hash: str) -> None:
             logger.debug("fontinass.replace.cleanup temporary=%r", name)
 
 
-async def process(info_hash: str, *, retry: bool = False) -> None:
+async def process(info_hash: str) -> bool:
+    """Return False when disabled mid-work; True when all files are terminal."""
     operation_id = current_operation_id()
     with operation_context(operation_id if operation_id != "-" else new_operation_id("fontinass")):
         try:
-            await _process(info_hash, retry=retry)
+            return await _process(info_hash)
         except asyncio.CancelledError:
-            logger.info("fontinass.task.cancelled torrent=%s recovery=persisted_checkpoint", info_hash)
+            logger.info("fontinass.task.cancelled torrent=%s recovery=workflow_checkpoint", info_hash)
             raise
         except Exception as error:
             logger.error("fontinass.task.exception torrent=%s error_type=%s stack=%s",
@@ -194,23 +193,15 @@ async def process(info_hash: str, *, retry: bool = False) -> None:
             raise
 
 
-async def _process(info_hash: str, *, retry: bool = False) -> None:
+async def _process(info_hash: str) -> bool:
     started = perf_counter()
     state = _state(info_hash)
-    logger.debug("fontinass.task.selected torrent=%s ass_files=%d enabled=%s previous_status=%s retry=%s",
-                 info_hash, len(state["files"]), config.FONTINASS_ENABLED, state.get("status"), retry)
-    if retry:
-        state.pop("settings", None)
-        for entry in state["files"]:
-            if entry["status"] == "failed":
-                entry.update(status="pending", error="")
     if not state["files"]:
         state["status"] = "not_needed" if config.FONTINASS_ENABLED else "disabled"
         _checkpoint(info_hash, state)
         logger.debug("fontinass.task.skipped torrent=%s reason=%s", info_hash, state["status"])
-        return
+        return True
     state.setdefault("settings", {"server": config.FONTINASS_URL, "timeout": config.FONTINASS_TIMEOUT})
-    state["ready"] = True
     state["status"] = "processing"
     _checkpoint(info_hash, state)
     logger.info("fontinass.task.start torrent=%s ass_files=%d", info_hash, len(state["files"]))
@@ -246,7 +237,7 @@ async def _process(info_hash: str, *, retry: bool = False) -> None:
                 state["status"] = "disabled"
                 _checkpoint(info_hash, state)
                 logger.info("fontinass.task.paused torrent=%s reason=disabled", info_hash)
-                return
+                return False
             entry["status"] = "processing"
             entry.pop("code", None)
             entry.pop("messages", None)
@@ -263,7 +254,7 @@ async def _process(info_hash: str, *, retry: bool = False) -> None:
                         state["status"] = "disabled"
                         _checkpoint(info_hash, state)
                         logger.info("fontinass.task.paused torrent=%s reason=disabled", info_hash)
-                        return
+                        return False
                     entry["attempts"] += 1
                     _checkpoint(info_hash, state)
                     phase = "request"
@@ -276,7 +267,7 @@ async def _process(info_hash: str, *, retry: bool = False) -> None:
                         if not error.retryable or attempt == 2:
                             logger.debug("fontinass.file.no_retry torrent=%s target=%r attempt=%d retryable=%s", info_hash, str(target), attempt + 1, error.retryable)
                             raise
-                        # A very long Retry-After is left for explicit later retry.
+                        # Do not block the workflow for an excessive Retry-After.
                         if error.retry_after > 60:
                             logger.warning("fontinass.file.retry_deferred torrent=%s target=%r retry_after_s=%.1f", info_hash, str(target), error.retry_after)
                             raise client.SubsetError(f"服务要求等待 {error.retry_after:.0f} 秒后重试") from error
@@ -291,7 +282,7 @@ async def _process(info_hash: str, *, retry: bool = False) -> None:
             missing_glyph_fonts = [match.group(1) for message in result.messages
                                    if (match := re.match(r"Missing glyphs in \[([^\]\r\n]{1,200})\]:", message))][:20]
             if missing_glyph_fonts:
-                logger.debug("fontinass.file.missing_glyph_fonts torrent=%s target=%r fonts=%r",
+                logger.warning("fontinass.file.missing_glyph_fonts torrent=%s target=%r fonts=%r",
                              info_hash, str(target), missing_glyph_fonts)
             phase = "business_result"
             if result.code != 200:
@@ -314,9 +305,9 @@ async def _process(info_hash: str, *, retry: bool = False) -> None:
             entry.update(status="failed", error=str(error)[:2000])
             # Business messages can include the entire missing character set.
             business_reason = {201: "服务返回警告，未完整处理", 300: "缺失字体或字形", 400: "服务拒绝字幕输入", 500: "服务内部处理错误"}.get(entry.get("code"), "未知业务结果")
-            reason = f"{business_reason}（完整消息见任务详情）" if phase == "business_result" else str(error)
-            logger.warning("fontinass.file.failed torrent=%s target=%r phase=%s error_type=%s code=%s reason=%s elapsed_ms=%.1f original_preserved=true",
-                           info_hash, entry["path"], phase, type(error).__name__, entry.get("code"), reason, (perf_counter() - file_started) * 1000)
+            reason = (business_reason + "：" + "；".join(entry.get("messages", []))) if phase == "business_result" else str(error)
+            logger.warning("fontinass.file.failed torrent=%s target=%r phase=%s error_type=%s code=%s reason=%r elapsed_ms=%.1f original_preserved=true",
+                           info_hash, entry["path"], phase, type(error).__name__, entry.get("code"), reason[:2000], (perf_counter() - file_started) * 1000)
             if isinstance(error, OSError):
                 logger.exception("fontinass.file.filesystem_error torrent=%s target=%r phase=%s", info_hash, entry["path"], phase)
         _checkpoint(info_hash, state)
@@ -325,3 +316,5 @@ async def _process(info_hash: str, *, retry: bool = False) -> None:
     _checkpoint(info_hash, state)
     logger.info("fontinass.task.finish torrent=%s status=%s total=%d success=%d failed=%d skipped=%d elapsed_ms=%.1f",
                 info_hash, state["status"], len(state["files"]), succeeded, len(state["files"]) - succeeded, skipped, (perf_counter() - started) * 1000)
+
+    return True

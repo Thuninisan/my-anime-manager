@@ -12,6 +12,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from .. import config
 from ..db import torrents as torrent_store
+from ..db import recovery
+from ..services.workflow_recovery import execution
 from . import state
 from ..clients import bangumi as bgm_client
 from ..clients.errors import MissingAPIKeyError
@@ -28,7 +30,7 @@ from ..services.nfo import format_download_path
 from ..utils.torrent_hash import compute_info_hash
 from ..services.torrent.monitor import build_processing, monitor_download, monitor_processing
 from ..services.torrent import fontinass
-from ..logging.logging_config import new_operation_id, operation_context
+from ..logging.logging_config import operation_context
 from ..services.torrent.metadata import pre_generate_nfo
 from ..services.torrent.preview import derive_series_name
 from ..utils.paths import SUBTITLE_DIR
@@ -42,55 +44,7 @@ logger = logging.getLogger(__name__)
 async def list_torrent_collections():
     """Return saved torrent collections for the Torrent page."""
     records = [{key: value for key, value in record.items() if key != "processing"} for record in torrent_store.list_torrents()]
-    for record in records:
-        if record.get("fontinass"):
-            record["fontinass"] = {key: value for key, value in record["fontinass"].items() if key in {"status", "files"}}
     return records
-
-
-def _start_fontinass(info_hash: str, *, retry: bool = False) -> None:
-    async def run_work() -> None:
-        try:
-            await fontinass.process(info_hash, retry=retry)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("FontInAss 后处理异常 [%s]", info_hash[:8])
-        finally:
-            state._download_tasks.pop(info_hash, None)
-    async def run() -> None:
-        with operation_context(new_operation_id("fontinass")):
-            await run_work()
-    state._download_tasks[info_hash] = asyncio.create_task(run())
-
-
-@router.post("/api/torrent/{info_hash}/fontinass/retry", status_code=202)
-async def retry_fontinass(info_hash: str):
-    record = torrent_store.get_torrent(info_hash)
-    if not record:
-        logger.debug("fontinass.retry.rejected torrent=%s reason=not_found", info_hash)
-        raise HTTPException(404, "Torrent 不存在")
-    task = state._download_tasks.get(info_hash)
-    if record["status"] == "downloading" or (task and not task.done()):
-        logger.debug("fontinass.retry.rejected torrent=%s reason=task_active", info_hash)
-        raise HTTPException(409, "Torrent 后处理尚未结束")
-    if not config.FONTINASS_ENABLED:
-        logger.debug("fontinass.retry.rejected torrent=%s reason=disabled", info_hash)
-        raise HTTPException(400, "请先在设置中启用 FontInAss")
-    if not any(item["status"] == "failed" for item in record.get("fontinass", {}).get("files", [])):
-        logger.debug("fontinass.retry.rejected torrent=%s reason=no_failed_files", info_hash)
-        raise HTTPException(400, "没有需要重试的失败字幕")
-    subtitle_state = record["fontinass"]
-    subtitle_state.pop("settings", None)
-    subtitle_state.update(status="processing", ready=True)
-    for item in subtitle_state["files"]:
-        if item["status"] == "failed":
-            item.update(status="pending", error="")
-    torrent_store.save_fontinass(info_hash, subtitle_state)
-    logger.info("fontinass.retry.accepted torrent=%s files=%d", info_hash,
-                sum(item["status"] == "pending" for item in subtitle_state["files"]))
-    _start_fontinass(info_hash)
-    return {"status": "accepted"}
 
 
 async def _torrent_card_meta(bangumi_id: int) -> dict:
@@ -130,9 +84,10 @@ def _start_torrent_monitor(record: dict, context: dict | None = None) -> None:
     if existing and not existing.done():
         return
 
-    async def run_work() -> None:
-        try:
-            processing = record["processing"]
+    async def run_work(job: recovery.RecoveryJob) -> None:
+        processing = job.checkpoint["processing"]
+        if job.stage in {"wait_download", "organize_files"}:
+            job.save(stage="organize_files")
             if context is None:
                 linked = await monitor_processing(info_hash, record["torrent_name"], processing)
             else:
@@ -158,65 +113,93 @@ def _start_torrent_monitor(record: dict, context: dict | None = None) -> None:
                 client = await qb_login(config.QBITTORRENT_URL, config.QBITTORRENT_USERNAME, config.QBITTORRENT_PASSWORD)
                 hashes, old_links = await bd_replacement.old_files(client, bangumi_id, episodes, info_hash)
                 success = await bd_replacement.finalize(client, bangumi_id, episodes, hashes, old_links, linked, required)
-            if linked is not None:
-                logger.debug("fontinass.dispatch torrent=%s media_success=%s copied_subtitle_operations=%d",
-                             info_hash, success, sum(item["action"] == "copy" for item in processing["files"]))
-                try:
-                    await fontinass.process(info_hash)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception("FontInAss 后处理异常，保留媒体整理结果 [%s]", info_hash[:8])
-            else:
-                logger.debug("fontinass.dispatch.skipped torrent=%s reason=download_monitor_failed_or_timed_out", info_hash)
-            torrent_store.finish_torrent(info_hash, "completed" if success else "failed")
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Torrent 后处理失败: %s", info_hash)
-            torrent_store.finish_torrent(info_hash, "failed")
-        finally:
-            state._download_tasks.pop(info_hash, None)
+            job.checkpoint["media_status"] = "completed" if success else "failed"
+            job.save(stage="fontinass" if linked is not None else "finalize")
+
+        if job.stage == "fontinass":
+            # Font processing does not hold back the completed media result.
+            torrent_store.finish_torrent(info_hash, job.checkpoint["media_status"],
+                                        job=job, keep_recovery=True)
+            if not await fontinass.process(info_hash):
+                job.release(blocked=True)
+                return
+            job.checkpoint.pop("fontinass", None)
+            job.save(stage="finalize")
+
+        if job.stage != "finalize":
+            raise ValueError("unsupported_torrent_recovery_stage")
+        torrent_store.finish_torrent(info_hash, job.checkpoint["media_status"], job=job)
 
     async def run() -> None:
-        with operation_context(new_operation_id("torrent")):
-            logger.debug("torrent.monitor.start torrent=%s mode=%s operations=%d", info_hash,
-                         "recovery" if context is None else "normal", len(record["processing"]["files"]))
-            await run_work()
+        job = None
+        try:
+            job = recovery.RecoveryJob.claim("torrent_processing", info_hash)
+            if job is None:
+                return
+            with operation_context(job.id):
+                logger.info("workflow.start torrent=%s stage=%s mode=%s", info_hash,
+                            job.stage, "recovery" if context is None else "normal")
+                async with execution(job):
+                    await run_work(job)
+        except recovery.LostLease:
+            logger.exception("Torrent 恢复任务失去执行租约: %s", info_hash)
+        except asyncio.CancelledError:
+            if job is not None:
+                try:
+                    job.release()
+                except recovery.LostLease:
+                    pass
+            raise
+        except Exception:
+            logger.exception("Torrent 后处理异常，保留恢复检查点: %s", info_hash)
+            if job is not None:
+                try:
+                    job.release(delay_seconds=60)
+                except recovery.LostLease:
+                    pass
+        finally:
+            state._download_tasks.pop(info_hash, None)
 
     state._download_tasks[info_hash] = asyncio.create_task(run())
 
 
 async def recover_torrent_monitors() -> None:
-    """Reattach persisted monitors; fail jobs whose qBittorrent entry vanished."""
-    for record in torrent_store.list_torrents():
-        subtitle_state = record.get("fontinass", {})
-        if (record["status"] == "downloading" or not subtitle_state.get("ready")
-                or subtitle_state.get("status") not in {"processing", "disabled"}):
-            continue
-        if not config.FONTINASS_ENABLED or record["info_hash"] in state._download_tasks:
-            logger.debug("fontinass.recovery.skipped torrent=%s reason=%s", record["info_hash"],
-                         "disabled" if not config.FONTINASS_ENABLED else "task_active")
-            continue
-        logger.info("fontinass.recovery.scheduled torrent=%s previous_status=%s files=%d",
-                    record["info_hash"], subtitle_state.get("status"), len(subtitle_state.get("files", [])))
-        _start_fontinass(record["info_hash"])
+    """Resume each unfinished workflow from its shared checkpoint stage."""
     pending = torrent_store.list_pending_torrents()
-    if not pending:
+    download_jobs = []
+    for record in pending:
+        info_hash = record["info_hash"]
+        if info_hash in state._download_tasks:
+            continue
+        with recovery.new_session() as session:
+            row = recovery.read(session, "torrent_processing", info_hash)
+            stage = row.stage if row else None
+            blocked = row is not None and row.state == "blocked"
+        if blocked and not config.FONTINASS_ENABLED:
+            continue
+        if stage in {"fontinass", "finalize"}:
+            _start_torrent_monitor(record)
+        else:
+            download_jobs.append(record)
+    if not download_jobs:
         return
     try:
         client = await qb_login(config.QBITTORRENT_URL, config.QBITTORRENT_USERNAME, config.QBITTORRENT_PASSWORD)
-        torrents = await get_torrents_by_hashes(client, [record["info_hash"] for record in pending], raise_on_error=True)
+        torrents = await get_torrents_by_hashes(client, [record["info_hash"] for record in download_jobs], raise_on_error=True)
     except Exception:
         logger.exception("Torrent 监控恢复延迟：qBittorrent 不可用")
         return
-    for record in pending:
+    for record in download_jobs:
         info_hash = record["info_hash"]
+        if info_hash in state._download_tasks:
+            continue
         if info_hash in torrents:
-            if info_hash not in state._download_tasks:
-                _start_torrent_monitor(record)
+            _start_torrent_monitor(record)
         else:
-            torrent_store.finish_torrent(info_hash, "failed")
+            job = recovery.RecoveryJob.claim("torrent_processing", info_hash)
+            if job is not None:
+                logger.warning("Torrent 已从 qBittorrent 移除，结束恢复任务: %s", info_hash)
+                torrent_store.finish_torrent(info_hash, "failed", job=job)
 
 
 # ── /api/torrent/subtitle/upload ──

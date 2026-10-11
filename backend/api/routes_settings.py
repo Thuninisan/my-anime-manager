@@ -26,4 +26,7 @@ async def update_config(changes: dict[str, object]):
         await downloader.apply_interval()
     if "RESOURCE_POLL_INTERVAL_MIN" in changes:
         resource_worker.notify_interval_changed()
+    if changes.get("FONTINASS_ENABLED") and config.FONTINASS_ENABLED:
+        from .routes_torrent import recover_torrent_monitors
+        await recover_torrent_monitors()
     return result

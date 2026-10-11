@@ -63,7 +63,10 @@ async def lifespan(_app: FastAPI):
 
     async def recover_pending_torrents() -> None:
         while True:
-            await recover_torrent_monitors()
+            try:
+                await recover_torrent_monitors()
+            except Exception:
+                logger.exception("恢复任务调度失败，将在下一轮重试")
             await asyncio.sleep(60)
 
     mapping_task = asyncio.create_task(mapping_sync.initialize())

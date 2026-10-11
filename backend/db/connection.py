@@ -92,50 +92,6 @@ def get_engine() -> Engine:
                                             if key not in {"tag", "attribute"}})
                     migration_session.flush()
                 connection.exec_driver_sql("ALTER TABLE resource_sources DROP COLUMN downloadtag")
-            card_columns = {row[1] for row in connection.exec_driver_sql(
-                "PRAGMA table_info(torrent_cards)")}
-            if "bangumi_ids" in card_columns:
-                if "processing_mode" not in card_columns:
-                    connection.exec_driver_sql("ALTER TABLE torrent_cards ADD COLUMN processing_mode TEXT")
-                if "replace_bangumi_id" not in card_columns:
-                    connection.exec_driver_sql("ALTER TABLE torrent_cards ADD COLUMN replace_bangumi_id INTEGER")
-                if "processing_present" not in card_columns:
-                    connection.exec_driver_sql("ALTER TABLE torrent_cards ADD COLUMN processing_present INTEGER NOT NULL DEFAULT 0")
-                with Session(bind=connection) as migration_session:
-                    rows = connection.exec_driver_sql(
-                        "SELECT id, bangumi_ids, processing, extra_data FROM torrent_cards").all()
-                    for card_id, raw_ids, raw_processing, raw_extra in rows:
-                        for position, bangumi_id in enumerate(json.loads(raw_ids or "[]")):
-                            connection.exec_driver_sql(
-                                "INSERT INTO torrent_card_bangumi VALUES (?, ?, ?)",
-                                (card_id, position, bangumi_id))
-                        processing = json.loads(raw_processing) if raw_processing else None
-                        if processing is not None:
-                            connection.exec_driver_sql(
-                                "UPDATE torrent_cards SET processing_mode=?, replace_bangumi_id=?, processing_present=1 WHERE id=?",
-                                (processing.get("mode"), processing.get("replace_bangumi_id"), card_id))
-                            for position, operation in enumerate(processing.get("files", [])):
-                                connection.exec_driver_sql(
-                                    "INSERT INTO torrent_card_operations (card_id,position,torrent_path,source_path,target_path,action,bangumi_sort) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                    (card_id, position, operation.get("torrent_path"),
-                                     operation.get("source_path"), operation.get("target_path"),
-                                     operation.get("action"), operation.get("bangumi_sort")))
-                                assign(migration_session, "torrent_card", card_id,
-                                                   f"operation:{position}",
-                                                   {key: value for key, value in operation.items()
-                                                    if key not in {"torrent_path", "source_path",
-                                                                   "target_path", "action", "bangumi_sort"}})
-                            extra_processing = {key: value for key, value in processing.items()
-                                                if key not in {"mode", "replace_bangumi_id", "files"}}
-                            assign(migration_session, "torrent_card", card_id,
-                                               "processing_extra", extra_processing)
-                        from .models import TorrentCard
-                        migration_session.get(TorrentCard, card_id).extra_data = {}
-                        assign(migration_session, "torrent_card", card_id,
-                               "extra_data", json.loads(raw_extra or "{}"))
-                    migration_session.flush()
-                for column in ("bangumi_ids", "processing"):
-                    connection.exec_driver_sql(f"ALTER TABLE torrent_cards DROP COLUMN {column}")
             migrate_nodes(connection)
         _engine, _engine_path = engine, path
         return engine

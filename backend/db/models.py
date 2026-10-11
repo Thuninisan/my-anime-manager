@@ -1,6 +1,6 @@
 """ORM models for the application database."""
 
-from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Float, ForeignKeyConstraint, Index, Integer, JSON, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -67,8 +67,6 @@ class ResourceBangumiCandidate(Base):
 class TorrentCard(Base):
     __tablename__ = "torrent_cards"
     extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
-    processing_extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
-    replaced_history_snapshot: Mapped[dict | None] = mapped_column(JSON)
     __table_args__ = (Index("idx_torrent_cards_status", "status"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -84,9 +82,6 @@ class TorrentCard(Base):
     video_codec: Mapped[str] = mapped_column(Text, nullable=False, default="")
     completion_snapshot_json: Mapped[str | None] = mapped_column(Text)
     completion_schema_version: Mapped[int | None] = mapped_column(Integer)
-    processing_mode: Mapped[str | None] = mapped_column(Text)
-    replace_bangumi_id: Mapped[int | None] = mapped_column(Integer)
-    processing_present: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
 class TorrentCardBangumi(Base):
@@ -94,20 +89,6 @@ class TorrentCardBangumi(Base):
     card_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, primary_key=True)
     bangumi_id: Mapped[int] = mapped_column(Integer, nullable=False)
-
-
-class TorrentCardOperation(Base):
-    __tablename__ = "torrent_card_operations"
-    episode_mapping_snapshot: Mapped[dict | None] = mapped_column(JSON)
-    resource_identity: Mapped[dict | None] = mapped_column(JSON)
-    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
-    card_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    position: Mapped[int] = mapped_column(Integer, primary_key=True)
-    torrent_path: Mapped[str | None] = mapped_column(Text)
-    source_path: Mapped[str | None] = mapped_column(Text)
-    target_path: Mapped[str | None] = mapped_column(Text)
-    action: Mapped[str | None] = mapped_column(Text)
-    bangumi_sort: Mapped[int | None] = mapped_column(Integer)
 
 
 class Subscription(Base):
@@ -242,28 +223,27 @@ class TorrentPreviewSession(Base):
     expires_at: Mapped[str] = mapped_column(Text, nullable=False, index=True)
 
 
-class TorrentFontinassTask(Base):
-    __tablename__ = "torrent_fontinass_tasks"
-    card_id: Mapped[int] = mapped_column(ForeignKey("torrent_cards.id", ondelete="CASCADE"), primary_key=True)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    ready: Mapped[bool | None] = mapped_column()
-    server_url: Mapped[str | None] = mapped_column(Text)
-    timeout_seconds: Mapped[int | None] = mapped_column(Integer)
-    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
-
-
-class TorrentFontinassFile(Base):
-    __tablename__ = "torrent_fontinass_files"
-    __table_args__ = (UniqueConstraint("card_id", "path"),)
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    card_id: Mapped[int] = mapped_column(ForeignKey("torrent_fontinass_tasks.card_id", ondelete="CASCADE"), nullable=False)
-    position: Mapped[int] = mapped_column(Integer, nullable=False)
-    path: Mapped[str] = mapped_column(Text, nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False)
-    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    input_hash: Mapped[str | None] = mapped_column(Text)
-    output_hash: Mapped[str | None] = mapped_column(Text)
-    code: Mapped[int | None] = mapped_column(Integer)
-    messages: Mapped[list | None] = mapped_column(JSON)
-    error: Mapped[str | None] = mapped_column(Text)
-    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+class WorkflowRecovery(Base):
+    """Only unfinished workflows; terminal results belong in business data/logs."""
+    __tablename__ = "workflow_recovery"
+    __table_args__ = (
+        UniqueConstraint("workflow_type", "business_key"),
+        CheckConstraint("schema_version >= 1"),
+        CheckConstraint("revision >= 1"),
+        CheckConstraint("state IN ('pending', 'running', 'waiting', 'blocked')"),
+        Index("ix_workflow_recovery_schedule", "state", "next_run_at"),
+        Index("ix_workflow_recovery_lease", "state", "lease_expires_at"),
+    )
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    workflow_type: Mapped[str] = mapped_column(Text, nullable=False)
+    business_key: Mapped[str] = mapped_column(Text, nullable=False)
+    schema_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    state: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    stage: Mapped[str] = mapped_column(Text, nullable=False)
+    checkpoint: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    next_run_at: Mapped[str | None] = mapped_column(Text)
+    lease_owner: Mapped[str | None] = mapped_column(Text)
+    lease_expires_at: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)

@@ -3,8 +3,7 @@ import json
 from collections import defaultdict
 from sqlalchemy.orm import Session
 from .models import (Subscription, SubscriptionFeed, Resource, ResourceSource,
-                     TorrentCard, TorrentCardOperation)
-from . import fontinass
+                     TorrentCard)
 
 ADDITIONS = {
     "rss_subscriptions": {"poster_url": "TEXT", **{key: "JSON NOT NULL DEFAULT '{}'" for key in
@@ -13,10 +12,7 @@ ADDITIONS = {
     "resources": {"recognition_title_snapshot": "JSON", "recognition_status": "TEXT",
                   "recognition_error": "TEXT NOT NULL DEFAULT ''"},
     "resource_sources": {"download_tag_extra_data": "JSON NOT NULL DEFAULT '{}'"},
-    "torrent_cards": {"extra_data": "JSON NOT NULL DEFAULT '{}'", "processing_extra_data": "JSON NOT NULL DEFAULT '{}'",
-                      "replaced_history_snapshot": "JSON"},
-    "torrent_card_operations": {"episode_mapping_snapshot": "JSON", "resource_identity": "JSON",
-                                "extra_data": "JSON NOT NULL DEFAULT '{}'"},
+    "torrent_cards": {"extra_data": "JSON NOT NULL DEFAULT '{}'"},
 }
 
 
@@ -84,36 +80,9 @@ def assign(session, kind, owner_id, field, value):
     if kind == "resource_source" and field == "downloadtag_extra":
         _merge(row, "download_tag_extra_data", value)
         return
-    if kind == "torrent_card":
-        if field == "extra_data":
-            if "fontinass" in value:
-                state = value.pop("fontinass")
-                current = fontinass.read(session, row.id)
-                if current is not None and current != state:
-                    raise ValueError("Conflicting subtitle checkpoint")
-                fontinass.replace(session, row.id, state)
-            _merge(row, "extra_data", value)
-            return
-        if field == "processing_extra":
-            if "replaced_history" in value:
-                snapshot = value.pop("replaced_history")
-                if row.replaced_history_snapshot is not None and row.replaced_history_snapshot != snapshot:
-                    raise ValueError("Conflicting replacement history")
-                row.replaced_history_snapshot = snapshot
-            _merge(row, "processing_extra_data", value)
-            return
-        if field.startswith("operation:"):
-            operation = session.get(TorrentCardOperation, (row.id, int(field.split(":", 1)[1])))
-            if operation is None:
-                raise ValueError("Missing torrent operation for extension")
-            for key in ("episode_mapping_snapshot", "resource_identity"):
-                if key in value:
-                    item = value.pop(key)
-                    if getattr(operation, key) is not None and getattr(operation, key) != item:
-                        raise ValueError(f"Conflicting operation {key}")
-                    setattr(operation, key, item)
-            _merge(operation, "extra_data", value)
-            return
+    if kind == "torrent_card" and field == "extra_data":
+        _merge(row, "extra_data", value)
+        return
     raise ValueError(f"Unknown extension field: {kind}/{owner_id}/{field}")
 
 

@@ -3,7 +3,6 @@ import type { EpisodeCatalog } from '@/types/episode';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import TorrentUpload from '@/components/torrent/TorrentUpload';
 import TorrentPreview from '@/components/torrent/TorrentPreview';
-import FontinassStatus from '@/components/torrent/FontinassStatus';
 import PosterCard from '@/components/shared/PosterCard';
 import { getTorrentCollections, parseAndSearchTorrent, type TorrentCollection } from '@/api/torrentApi';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -130,7 +129,6 @@ export default function TorrentPage() {
                     ...(item.video_codec?.toLowerCase() === 'av1' ? ['AV1'] : item.video_codec?.toLowerCase() === 'h265' ? ['H.265'] : []),
                   ]}
                 />
-                <FontinassStatus item={item} onRefresh={refreshCollections} />
               </div>
             ))}
           </div>
