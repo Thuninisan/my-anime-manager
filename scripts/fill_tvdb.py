@@ -1,26 +1,27 @@
-"""Fill TVDB fields in docs/subscriptions_new.json from bangumi_mikan_map.json."""
+"""Fill TVDB fields in docs/subscriptions_new.json from the SQLite mapping database."""
 import json
 import os
+import sys
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
 
 SUBS_PATH = os.path.join(PROJECT_DIR, "docs", "subscriptions_new.json")
-MAP_PATH = os.path.join(PROJECT_DIR, "backend", "data", "bangumi_mikan_map.json")
+sys.path.insert(0, PROJECT_DIR)
+from backend.db.legacy_data import list_mappings
 
 
 def main():
     with open(SUBS_PATH, "r", encoding="utf-8") as f:
         subs = json.load(f)
 
-    with open(MAP_PATH, "r", encoding="utf-8") as f:
-        bmm = json.load(f)
+    bmm = list_mappings()
 
     filled = 0
     skipped = 0
 
     for s in subs:
-        bid = str(s["bangumi_id"])
+        bid = int(s["bangumi_id"])
         entry = bmm.get(bid, {})
         tid = entry.get("tvdb_id")
         tseason = entry.get("tvdb_season")

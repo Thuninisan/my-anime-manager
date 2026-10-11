@@ -5,14 +5,11 @@ this ledger groups every column by its actual use, rather than treating generic 
 
 | Table | Fields / class | Writer → reader | Lifecycle / permanence |
 |---|---|---|---|
-| resources | source/source_id/title/URLs/descriptions (metadata/input); hash/size/torrent_path/status/error/timestamps (processing); index_type (configuration) | collector/details → monitor, resources API, preview | Permanent collected torrent, **not a work binding** |
+| resources | source/source_id/title/URLs/descriptions (metadata/input); hash/size/torrent_path/status/error/recognition_status/recognition_error/timestamps (processing); index_type (configuration) | collector/details → monitor, resources API, preview | Permanent collected torrent, **not a work binding** |
 | resource_sources | name/rss_url/download_tag/download_attribute/index_type (configuration) | source settings → collector | Permanent configuration |
-| resource_torrent_files | resource_id/position/name (processing) | collector → resource API/preview | Permanent file inventory |
-| resource_recognitions | resource_id/status/error (processing) | recognize → resource API | Regenerable candidate computation |
 | resource_bangumi_candidates | bangumi_id/index_id/index_season/media_type (candidate identity), decision/reason/match_count (candidate provenance) | recognize → grouped resource API | Permanent candidates, never authoritative bindings |
 | rss_subscriptions | bangumi_id/tmdb_id/tvdb_id (legacy work identity); bgm_season/sort range, provider season/offset (configuration); name/series_name/bgm names/rating/date (metadata); download_path/active/timestamps (configuration/processing) | subscription create/edit/augment → RSS, upload, history, paths | Permanent confirmed subscription binding |
-| rss_subscription_feeds | bangumi_id/kind/rss_url/subgroup ID/name/offset (configuration) | subscription writes → polling | Permanent configuration |
-| rss_subscription_feed_rules | bangumi_id/kind/rule_type/position/value (configuration) | subscription writes → filtering | Permanent configuration |
+| rss_subscription_feeds | bangumi_id/kind/rss_url/subgroup ID/name/offset/filter_tags/exclude_patterns (configuration) | subscription writes → polling/filtering | Permanent configuration |
 | bangumi_mappings_v2 | bangumi_id/tmdb_id/tvdb_id/anidb_id/mikan_id (provider hints), seasons (numbering hints), names (metadata) | import/community refresh/manual override → resolver/augment | Permanent hints, not a second subscription authority |
 | bangumi_mapping_overrides | bangumi_id/field/text_value/int_value (user hint overrides) | mapping edit → dataset refresh | Permanent user configuration |
 | download_episodes | bangumi_id/episode_number (Bangumi subject/sort); tmdb_ep/tmdb_season (user overrides); tvdb_ep/tmdb_ep_calc (legacy computed episode); RSS/guid/source/date/hash/at/fail_count/status (processing) | mark_downloaded/manual/failure/override → duplicate checks/history/NFO | Permanent latest episode record; downloaded means submitted, **not qBittorrent completion** |
@@ -20,7 +17,8 @@ this ledger groups every column by its actual use, rather than treating generic 
 | torrent_card_bangumi | card_id/position/bangumi_id (legacy identity/display association) | card save → card API | Permanent |
 | torrent_card_operations | card_id/position/source/torrent/target path/action (processing), bangumi_sort (legacy episode) | processing plan → monitor/replacement | Temporary until finish; paths must be archived before cleanup |
 | torrent_preview_sessions | id/schema/revision/hash/name/context_json/timestamps/expiry (self-contained identity/catalog/metadata snapshot) | preview service → confirmation/download | Disposable; immutable across external binding changes, schema mismatch requires re-preview |
-| structured_nodes | owner/root/parent/key/position/type/value (extension storage) | repositories → repositories | Owner lifecycle: subscription extras, mapping extras, recognition title snapshot, history document metadata, torrent processing/file extras and subtitle checkpoints |
+| Business-owned extension fields | JSON columns on subscriptions, feeds, resources, sources, cards and operations | owning repositories → owning repositories | Follows owner lifecycle; former structured_nodes tree storage is migrated and removed |
+| torrent_fontinass_tasks / torrent_fontinass_files | task settings/status and ordered file checkpoints/hashes/messages | subtitle processor → recovery/retry/cards | Durable checkpoints, cascade with torrent owner |
 | legacy_imports | name/imported_at (migration bookkeeping) | repository imports → imports | Permanent idempotence marker |
 
 ## Decisions
@@ -161,3 +159,23 @@ Files modified:
 - backend/services/torrent/monitor.py
 - backend/services/torrent/preview.py
 - backend/services/torrent/preview_session.py
+
+
+## Business-owned extension storage (October 2026)
+
+The startup transaction now creates business tables, adds extension columns, migrates
+older JSON columns directly to their owners, restores existing structured node trees,
+and drops structured_nodes only after every tree has been assigned successfully.
+Unknown owners/fields, missing parents, malformed trees and conflicting populated
+values abort the transaction rather than discarding data. Mapping extension nodes
+are no longer silently deleted: unsupported historical mapping nodes require resolution.
+
+Subscription posters are explicit columns; provider and feed extras remain local JSON.
+Legacy primary/backup exclusion lists merge into existing feed rules with stable
+ordering and duplicate removal; without a feed, the original rules remain subscription
+extras. Resource title parsing snapshots remain JSON, including raw parser output.
+Torrent operation identity/mapping snapshots and replacement history belong to their
+operation/card. FontInAss tasks and ordered file checkpoints are dedicated child tables;
+expected output hashes are still committed before file replacement by the existing processor.
+History documents are assembled only from episode rows; document-level metadata storage has been removed.
+New databases never create structured_nodes. No test files were added or modified.

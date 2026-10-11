@@ -272,14 +272,19 @@ async def batch_nfo_generator(
             "tvdb": {"season": tvdb_season if tvdb_season is not None else tmdb_season},
             "tmdb": {"season": tmdb_season},
         }
-        rel_path = format_download_path(
-            template, sub,
-            bangumi_sort=bangumi_episode_sort, bangumi_ep=int(bangumi_ep_val if bangumi_ep_val is not None else 0),
-            tvdb_episode=tvdb_episode_number, tmdb_episode=tmdb_ep_num,
-            tmdb_title=tmdb_title,
-        ).lstrip("/")
-        file_stem = Path(rel_path).stem
-        season_dir = Path(pre_path) / Path(rel_path).parent
+        if ep.get("download_path"):
+            media_path = Path(ep["download_path"])
+            file_stem = media_path.stem
+            season_dir = media_path.parent
+        else:
+            rel_path = format_download_path(
+                template, sub,
+                bangumi_sort=bangumi_episode_sort, bangumi_ep=int(bangumi_ep_val if bangumi_ep_val is not None else 0),
+                tvdb_episode=tvdb_episode_number, tmdb_episode=tmdb_ep_num,
+                tmdb_title=tmdb_title,
+            ).lstrip("/")
+            file_stem = Path(rel_path).stem
+            season_dir = Path(pre_path) / Path(rel_path).parent
         show_dir = season_dir.parent
         season_dir.mkdir(parents=True, exist_ok=True)
 

@@ -21,9 +21,8 @@ from .. import __version__, data
 from ..clients.errors import MissingAPIKeyError
 from ..utils.http_client import http_client_manager
 from ..db import torrents as torrent_store
-from ..db import download_history
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
-from ..services import downloader, initial_rss_poll
+from ..services import downloader, initial_rss_poll, mapping_sync
 from ..services.resource_monitor import worker as resource_worker
 from . import state
 from .routes_downloader import router as downloader_router
@@ -45,14 +44,8 @@ _frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 async def lifespan(_app: FastAPI):
     """Startup/shutdown handling (replaces the deprecated @app.on_event)."""
     # ── Startup ──
-    def migrate_user_data() -> None:
-        # Complete all SQLite schema upgrades before background workers read
-        # subscriptions or download history.
-        data.mapping_count()
-        data.list_subscriptions()
-        download_history.ensure_imported(data._HIST_FILE)
-
-    await asyncio.to_thread(migrate_user_data)
+    # Initialize the database and mapping synchronization state before workers start.
+    await asyncio.to_thread(data.mapping_count)
     # Mount static assets after all routes are registered (production mode)
     if _frontend_dist.exists() and _frontend_dist.is_dir():
         assets_dir = _frontend_dist / "assets"
@@ -73,6 +66,7 @@ async def lifespan(_app: FastAPI):
             await recover_torrent_monitors()
             await asyncio.sleep(60)
 
+    mapping_task = asyncio.create_task(mapping_sync.initialize())
     recovery_task = asyncio.create_task(recover_pending_torrents())
     resource_worker.start()
 
@@ -80,6 +74,8 @@ async def lifespan(_app: FastAPI):
 
     # ── Shutdown ──
     logger.info("Shutting down background workers...")
+    mapping_task.cancel()
+    await asyncio.gather(mapping_task, return_exceptions=True)
     recovery_task.cancel()
     await initial_rss_poll.stop()
     await resource_worker.stop()

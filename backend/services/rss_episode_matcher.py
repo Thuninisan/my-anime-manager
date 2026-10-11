@@ -81,9 +81,11 @@ async def subscription_episode_mapping(ref: RssEpisodeRef, sub: dict, subject_id
             if season is None:
                 season = sub.get("bgm", {}).get("season", 1)
             override = overrides or {}
+            if override.get(f"{provider}_series_id") != series_id:
+                override = {}
             rules[provider] = {"series_id": series_id,
-                "season_number": (override["tmdb_season"] if override.get("tmdb_season") is not None else season) if provider == "tmdb" else season,
-                "episode_number": override.get("tmdb_ep") if provider == "tmdb" else tvdb_episode_number,
+                "season_number": (override["tmdb_season_number"] if override.get("tmdb_season_number") is not None else season) if provider == "tmdb" else season,
+                "episode_number": override.get("tmdb_episode_number") if provider == "tmdb" else tvdb_episode_number,
                 "episode_offset": settings.get("ep_offset", 0)}
             if series_id is not None:
                 provider_catalogs[provider][str(series_id)] = (

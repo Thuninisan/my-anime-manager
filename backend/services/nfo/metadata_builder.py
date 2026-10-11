@@ -19,7 +19,7 @@ async def generate_metadata(
     qb_client, info_hash: str, old_torrent_path: str, *, episode_mapping,
     season_dir: str = "", show_dir: str = "", series_name: str = "",
     rename_in_qbit: bool = True, overwrite: bool = False, metadata_ctx=None,
-    base_path: str | None = None, processing_result=None,
+    base_path: str | None = None, processing_result=None, download_path: str | None = None,
 ) -> bool:
     """Generate NFO + images via :func:`batch_nfo_generator`, then rename in qBittorrent.
 
@@ -39,7 +39,7 @@ async def generate_metadata(
     if episode_mapping is None:
         raise ValueError("canonical_episode_mapping_required")
     pre_path = base_path if base_path is not None else str(Path(show_dir).parent)
-    nfo_episodes = [{"episode_mapping": episode_mapping}]
+    nfo_episodes = [{"episode_mapping": episode_mapping, "download_path": download_path}]
 
     # ── Delegate to shared NFO + image pipeline ─────────────────────
     summary = await batch_nfo_generator(

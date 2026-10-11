@@ -34,7 +34,7 @@ async def history_stream_v1(iterator):
         event = json.loads(chunk)
         if event.get("type") == "data":
             event = {**event, "episodes": [{**entry,
-                "tmdb_ep": entry.get("tmdb_episode_override"),
-                "tmdb_season": entry.get("tmdb_season_override")}
+                "tmdb_ep": (entry.get("mapping") or {}).get("tmdb_episode_number"),
+                "tmdb_season": (entry.get("mapping") or {}).get("tmdb_season_number")}
                 for entry in event.get("episodes", [])]}
         yield (json.dumps(event, ensure_ascii=False) + "\n").encode("utf-8")

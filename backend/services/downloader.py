@@ -681,7 +681,7 @@ async def _download_item(item: dict, bangumi_id: int, source: str, sub: dict, me
     try:
         await submit_episode_torrent(
             tmp_path, bangumi_id, sort, source, sub=sub, guid=guid,
-            rss_url=item.get("rss_url", ""), pub_date=item.get("pub_date", ""),
+            pub_date=item.get("pub_date", ""),
             metadata_ctx=metadata_ctx, rss_ref=ref,
         )
     except Exception:
@@ -697,7 +697,7 @@ VIDEO_EXTENSIONS = {".mkv", ".mp4", ".mka", ".avi", ".mov", ".ts", ".wmv", ".flv
 
 async def submit_episode_torrent(
     torrent_path: str, bangumi_id: int, sort: int, source: str, *,
-    sub: dict, guid: str, rss_url: str = "", pub_date: str = "",
+    sub: dict, guid: str, pub_date: str = "",
     metadata_ctx: MetadataContext | None = None, replace_existing: bool = False,
     rss_ref=None,
 ) -> str:
@@ -720,7 +720,7 @@ async def submit_episode_torrent(
     mapping_sub = {**sub, "tmdb": {**tmdb, "id": tmdb_id}, "tvdb": {**tvdb, "id": tvdb_id}}
     mapping = await subscription_episode_mapping(
         rss_ref if rss_ref is not None else rss_episode_ref({}, ""),
-        mapping_sub, bangumi_id, metadata_ctx, sort=sort, overrides=old,
+        mapping_sub, bangumi_id, metadata_ctx, sort=sort, overrides=old.get("mapping"),
     )
     tvdb_episode_number = mapping["tvdb"]["episode_number"]
     rel_path = format_download_path(
@@ -768,11 +768,9 @@ async def submit_episode_torrent(
     except Exception:
         logger.warning("恢复种子失败: hash=%s", info_hash[:12], exc_info=True)
     mark_downloaded(
-        bangumi_id, sort, rss_url, guid, source, pub_date=pub_date,
+        bangumi_id, sort, guid, source, pub_date=pub_date,
         info_hash=torrent_hash,
-        episode_mapping=mapping, resource_identity=identity,
-        identity_revision=sub.get("identity_revision"),
-        processing_result=processing_result,
+        episode_mapping=mapping, download_path=processing_result["target_path"],
     )
     reset_fail_count(bangumi_id, sort)
     return torrent_hash
@@ -790,16 +788,15 @@ def resolve_episode_paths(bangumi_id: int, sort: int) -> tuple[dict, str, str]:
     if not sub:
         raise HTTPException(404, "订阅不存在")
 
+    download_path = get_all_episodes(bangumi_id).get(str(sort), {}).get("download_path")
+    if download_path:
+        season_dir = str(Path(download_path).parent)
+        return sub, season_dir, str(Path(season_dir).parent)
     tvdb_ep_val = sort + sub.get("tvdb", {}).get("ep_offset", 0)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
     rel_path = format_download_path(
         config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_ep_val,
     ).lstrip("/")
-    # Historical directories belong to the original output, not today's binding.
-    historical = get_all_episodes(bangumi_id).get(str(sort), {}).get("episode_mapping_snapshot", {})
-    processing_result = historical.get("processing_result") or {}
-    if processing_result.get("season_dir") and processing_result.get("show_dir"):
-        return sub, processing_result["season_dir"], processing_result["show_dir"]
     rel_dir = str(Path(rel_path).parent)
     season_dir = str(Path(rss_base) / rel_dir)
     show_dir = str(Path(season_dir).parent)
@@ -807,10 +804,10 @@ def resolve_episode_paths(bangumi_id: int, sort: int) -> tuple[dict, str, str]:
 
 
 async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
-    """Regenerate NFO for one downloaded episode using its stored overrides.
+    """Regenerate NFO using relational mapping and the recorded media path.
 
-    Everything is derived server-side (subscription, per-episode TMDB
-    overrides, paths) — callers only need to identify the episode.
+    The stored episode mapping and media destination identify the output.
+    Callers only need to identify the episode.
     NFO-only: rewrites NFO + images on disk and never touches qBittorrent
     (no rename), so it works even after the torrent has been removed.
     Raises HTTPException(4xx) on missing data, HTTPException(500) on failure.
@@ -820,18 +817,11 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     if not ep:
         raise HTTPException(404, "该集的下载记录不存在")
 
-    historical = ep.get("episode_mapping_snapshot") or {}
-    historical_mapping = historical.get("episode_mapping")
-    if historical_mapping is None or not any(historical_mapping[p]["series_id"] for p in ("tmdb", "tvdb")):
-        raise HTTPException(409, "legacy_history_unresolved: 历史缺少作品 ID，保留只读")
-    # Explicit overrides affect this output, never the immutable historical fact.
-    import copy
-    historical_mapping = copy.deepcopy(historical_mapping)
-    for override_field, canonical_field in (("tmdb_ep", "episode_number"),
-                                             ("tmdb_season", "season_number")):
-        if ep.get(override_field) is not None and ep[override_field] != historical_mapping["tmdb"][canonical_field]:
-            historical_mapping["tmdb"][canonical_field] = ep[override_field]
-            historical_mapping["tmdb"]["episode_id"] = None
+    stored_mapping = ep.get("mapping")
+    if stored_mapping is None or not any(stored_mapping.get(f"{p}_series_id") for p in ("tmdb", "tvdb")):
+        raise HTTPException(409, "episode_mapping_unresolved: 下载记录缺少作品映射")
+    from ..db.download_episode_mapping import episode_mapping
+    historical_mapping = episode_mapping(bangumi_id, sort, stored_mapping)
     series_name = sub.get("series_name") or sub.get("name", str(bangumi_id))
 
     # qb_client / info_hash / old_torrent_path are only consumed by the
@@ -846,7 +836,8 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
         episode_mapping=historical_mapping,
         rename_in_qbit=False,
         overwrite=True,
-        base_path=config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
+        base_path=Path(ep["download_path"]).anchor if ep.get("download_path") else (config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH),
+        download_path=ep.get("download_path"),
     )
     if not ok:
         raise HTTPException(500, "NFO 生成失败")

@@ -13,7 +13,7 @@ EPISODE_MAPPING_SNAPSHOT_VERSION = 1
 _MAPPING = TypeAdapter(EpisodeMapping)
 
 
-def episode_mapping_snapshot(mapping, identity=None, *, source="canonical", revision=None, processing_result=None):
+def validate_episode_mapping(mapping):
     mapping = _MAPPING.validate_python(mapping, strict=True)
     for provider in ("bangumi", "tmdb", "tvdb"):
         for key, value in mapping[provider].items():
@@ -23,6 +23,11 @@ def episode_mapping_snapshot(mapping, identity=None, *, source="canonical", revi
                 raise ValueError("invalid_history_provider_id")
             if not key.endswith("_id") and (not math.isfinite(value) or value < 0):
                 raise ValueError("invalid_history_coordinate")
+    return mapping
+
+
+def episode_mapping_snapshot(mapping, identity=None, *, source="canonical", revision=None, processing_result=None):
+    mapping = validate_episode_mapping(mapping)
     if revision is not None and (type(revision) is not int or revision < 1):
         raise ValueError("invalid_history_identity_revision")
     if identity is not None:
@@ -52,9 +57,3 @@ def load_episode_mapping_snapshot(raw):
                                     source=value.get("source", "legacy_unknown"),
                                     revision=value.get("identity_revision"),
                                     processing_result=value.get("processing_result"))
-
-
-def write_history_snapshot(row, mapping, identity=None, revision=None, processing_result=None):
-    snapshot = episode_mapping_snapshot(mapping, identity, revision=revision, processing_result=processing_result)
-    row.episode_mapping_snapshot = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
-    row.episode_mapping_schema_version = EPISODE_MAPPING_SNAPSHOT_VERSION

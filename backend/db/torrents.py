@@ -1,23 +1,14 @@
 """Torrent cards and resumable processing plans stored through the ORM."""
 
 import json
-import logging
-import threading
 from datetime import datetime
-from pathlib import Path
 
 from sqlalchemy import delete, select
-from sqlalchemy.dialects.sqlite import insert
 
-from ..utils.paths import USER_DATA_DIR
 from .connection import new_session
-from .models import LegacyImport, StructuredNode, TorrentCard, TorrentCardBangumi, TorrentCardOperation
-from . import structured_values
+from .models import TorrentCard, TorrentCardBangumi, TorrentCardOperation
+from . import fontinass
 
-logger = logging.getLogger(__name__)
-LEGACY_FILE = USER_DATA_DIR / "torrents.json"
-IMPORT_NAME = "torrents.json:v1"
-_import_lock = threading.Lock()
 
 CARD_FIELDS = {
     "info_hash", "torrent_name", "show_name", "bgm_rating", "poster_url", "status",
@@ -41,7 +32,10 @@ def _card_values(record: dict) -> dict:
 
 
 def _as_dict(session, card: TorrentCard) -> dict:
-    result = structured_values.read(session, "torrent_card", card.id, "extra_data", {})
+    result = dict(card.extra_data or {})
+    subtitle_state = fontinass.read(session, card.id)
+    if subtitle_state is not None:
+        result["fontinass"] = subtitle_state
     for field in CARD_FIELDS - {"processing", "completion_snapshot"}:
         if field == "bangumi_ids":
             result[field] = [row.bangumi_id for row in session.scalars(
@@ -54,17 +48,17 @@ def _as_dict(session, card: TorrentCard) -> dict:
             raise ValueError("unsupported_torrent_completion_version")
         result["completion_snapshot"] = json.loads(card.completion_snapshot_json)
     if card.processing_present:
-        processing = structured_values.read(session, "torrent_card", card.id,
-                                            "processing_extra", {})
+        processing = dict(card.processing_extra_data or {})
+        if card.replaced_history_snapshot is not None:
+            processing["replaced_history"] = card.replaced_history_snapshot
         if card.processing_mode is not None:
             processing["mode"] = card.processing_mode
         if card.replace_bangumi_id is not None:
             processing["replace_bangumi_id"] = card.replace_bangumi_id
         processing["files"] = [
-            {**structured_values.read(session, "torrent_card", card.id,
-                                      f"operation:{row.position}", {}),
+            {**(row.extra_data or {}),
              **{field: getattr(row, field) for field in (
-                 "torrent_path", "source_path", "target_path", "action", "bangumi_sort")
+                 "torrent_path", "source_path", "target_path", "action", "bangumi_sort", "episode_mapping_snapshot", "resource_identity")
                 if getattr(row, field) is not None}}
             for row in session.scalars(select(TorrentCardOperation).where(
                 TorrentCardOperation.card_id == card.id).order_by(TorrentCardOperation.position))]
@@ -94,53 +88,18 @@ def _save_card(session, record: dict) -> TorrentCard:
     card.processing_mode = processing.get("mode") if processing else None
     card.replace_bangumi_id = processing.get("replace_bangumi_id") if processing else None
     session.execute(delete(TorrentCardOperation).where(TorrentCardOperation.card_id == card.id))
-    session.execute(delete(StructuredNode).where(
-        StructuredNode.owner_kind == "torrent_card", StructuredNode.owner_id == str(card.id),
-        StructuredNode.root_field.like("operation:%")))
     for position, operation in enumerate((processing or {}).get("files", [])):
-        session.add(TorrentCardOperation(card_id=card.id, position=position,
-                                         **{key: operation.get(key) for key in (
-                                             "torrent_path", "source_path", "target_path",
-                                             "action", "bangumi_sort")}))
-        structured_values.replace(session, "torrent_card", card.id, f"operation:{position}",
-                                  {key: value for key, value in operation.items()
-                                   if key not in {"torrent_path", "source_path", "target_path",
-                                                  "action", "bangumi_sort"}})
-    structured_values.replace(session, "torrent_card", card.id, "processing_extra",
-                              {key: value for key, value in (processing or {}).items()
-                               if key not in {"mode", "replace_bangumi_id", "files"}})
-    structured_values.replace(session, "torrent_card", card.id, "extra_data",
-                              {key: value for key, value in record.items()
-                               if key not in CARD_FIELDS})
+        save_operation(session, card.id, position, operation)
+    card.replaced_history_snapshot = (processing or {}).get("replaced_history")
+    card.processing_extra_data = {key: value for key, value in (processing or {}).items()
+                                 if key not in {"mode", "replace_bangumi_id", "files", "replaced_history"}}
+    card.extra_data = {key: value for key, value in record.items()
+                      if key not in CARD_FIELDS and key != "fontinass"}
+    fontinass.replace(session, card.id, record.get("fontinass"))
     return card
 
 
-def _ensure_legacy_imported() -> None:
-    if not LEGACY_FILE.is_file():
-        return
-    with _import_lock:
-        with new_session() as session:
-            if session.get(LegacyImport, IMPORT_NAME):
-                return
-        document = json.loads(LEGACY_FILE.read_text(encoding="utf-8"))
-        records = document.get("torrents") if isinstance(document, dict) else None
-        if not isinstance(records, list):
-            raise ValueError(f"Invalid legacy torrent document: {LEGACY_FILE}")
-        with new_session() as session, session.begin():
-            for record in records:
-                if not isinstance(record, dict) or not record.get("info_hash"):
-                    raise ValueError(f"Invalid legacy torrent record: {LEGACY_FILE}")
-                if session.scalar(select(TorrentCard).where(
-                        TorrentCard.info_hash == record["info_hash"])) is None:
-                    _save_card(session, record)
-            session.execute(insert(LegacyImport).values(name=IMPORT_NAME).on_conflict_do_nothing(
-                index_elements=[LegacyImport.name]
-            ))
-        logger.info("Imported %d Torrent cards from %s", len(records), LEGACY_FILE)
-
-
 def list_torrents() -> list[dict]:
-    _ensure_legacy_imported()
     with new_session() as session:
         cards = session.scalars(select(TorrentCard).order_by(TorrentCard.id)).all()
         return [_as_dict(session, card) for card in cards]
@@ -148,13 +107,11 @@ def list_torrents() -> list[dict]:
 
 def save_torrent(record: dict) -> None:
     """Upsert a card by info hash, preserving its first creation time."""
-    _ensure_legacy_imported()
     with new_session() as session, session.begin():
         _save_card(session, record)
 
 
 def list_pending_torrents() -> list[dict]:
-    _ensure_legacy_imported()
     with new_session() as session:
         cards = session.scalars(select(TorrentCard).where(
             TorrentCard.status == "downloading", TorrentCard.processing_present == 1
@@ -163,7 +120,6 @@ def list_pending_torrents() -> list[dict]:
 
 
 def get_torrent(info_hash: str) -> dict | None:
-    _ensure_legacy_imported()
     with new_session() as session:
         card = session.scalar(select(TorrentCard).where(TorrentCard.info_hash == info_hash))
         return _as_dict(session, card) if card else None
@@ -171,19 +127,15 @@ def get_torrent(info_hash: str) -> dict | None:
 
 def save_fontinass(info_hash: str, value: dict) -> None:
     """Checkpoint subtitle processing without replacing the media processing plan."""
-    _ensure_legacy_imported()
     with new_session() as session, session.begin():
         card = session.scalar(select(TorrentCard).where(TorrentCard.info_hash == info_hash))
         if card is None:
             return
-        extra = structured_values.read(session, "torrent_card", card.id, "extra_data", {})
-        extra["fontinass"] = value
-        structured_values.replace(session, "torrent_card", card.id, "extra_data", extra)
+        fontinass.replace(session, card.id, value)
         card.updated_at = datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def finish_torrent(info_hash: str, status: str) -> None:
-    _ensure_legacy_imported()
     with new_session() as session, session.begin():
         card = session.scalar(select(TorrentCard).where(TorrentCard.info_hash == info_hash))
         if card is None:
@@ -207,7 +159,13 @@ def finish_torrent(info_hash: str, status: str) -> None:
         card.processing_mode = None
         card.replace_bangumi_id = None
         session.execute(delete(TorrentCardOperation).where(TorrentCardOperation.card_id == card.id))
-        session.execute(delete(StructuredNode).where(
-            StructuredNode.owner_kind == "torrent_card", StructuredNode.owner_id == str(card.id),
-            StructuredNode.root_field.like("operation:%")))
-        structured_values.replace(session, "torrent_card", card.id, "processing_extra", {})
+        card.processing_extra_data = {}
+        card.replaced_history_snapshot = None
+
+
+def save_operation(session, card_id, position, operation):
+    fields = {"torrent_path", "source_path", "target_path", "action", "bangumi_sort",
+              "episode_mapping_snapshot", "resource_identity"}
+    session.add(TorrentCardOperation(card_id=card_id, position=position,
+                **{key: operation.get(key) for key in fields},
+                extra_data={key: value for key, value in operation.items() if key not in fields}))

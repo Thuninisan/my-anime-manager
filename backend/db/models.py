@@ -1,6 +1,6 @@
 """ORM models for the application database."""
 
-from sqlalchemy import Float, Index, Integer, Text, UniqueConstraint, text
+from sqlalchemy import Float, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -10,6 +10,7 @@ class Base(DeclarativeBase):
 
 class Resource(Base):
     __tablename__ = "resources"
+    recognition_title_snapshot: Mapped[dict | None] = mapped_column(JSON)
     __table_args__ = (
         UniqueConstraint("source", "source_id"),
         Index("idx_resources_source", "source"),
@@ -32,33 +33,21 @@ class Resource(Base):
     torrent_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    recognition_status: Mapped[str | None] = mapped_column(Text)
+    recognition_error: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     collected_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
 class ResourceSource(Base):
     __tablename__ = "resource_sources"
+    download_tag_extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
 
     name: Mapped[str] = mapped_column(Text, primary_key=True)
     rss_url: Mapped[str] = mapped_column(Text, nullable=False)
     download_tag: Mapped[str] = mapped_column(Text, nullable=False, default="")
     download_attribute: Mapped[str | None] = mapped_column(Text)
     index_type: Mapped[str] = mapped_column(Text, nullable=False)
-
-
-class ResourceTorrentFile(Base):
-    __tablename__ = "resource_torrent_files"
-
-    resource_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    position: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(Text, nullable=False)
-
-
-class ResourceRecognition(Base):
-    __tablename__ = "resource_recognitions"
-    resource_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
-    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
 
 class ResourceBangumiCandidate(Base):
@@ -77,6 +66,9 @@ class ResourceBangumiCandidate(Base):
 
 class TorrentCard(Base):
     __tablename__ = "torrent_cards"
+    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    processing_extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    replaced_history_snapshot: Mapped[dict | None] = mapped_column(JSON)
     __table_args__ = (Index("idx_torrent_cards_status", "status"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -106,6 +98,9 @@ class TorrentCardBangumi(Base):
 
 class TorrentCardOperation(Base):
     __tablename__ = "torrent_card_operations"
+    episode_mapping_snapshot: Mapped[dict | None] = mapped_column(JSON)
+    resource_identity: Mapped[dict | None] = mapped_column(JSON)
+    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
     card_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, primary_key=True)
     torrent_path: Mapped[str | None] = mapped_column(Text)
@@ -115,30 +110,13 @@ class TorrentCardOperation(Base):
     bangumi_sort: Mapped[int | None] = mapped_column(Integer)
 
 
-class StructuredNode(Base):
-    """Typed tree nodes for extension data without opaque JSON columns."""
-    __tablename__ = "structured_nodes"
-    __table_args__ = (Index("idx_structured_nodes_owner", "owner_kind", "owner_id", "root_field"),)
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    owner_kind: Mapped[str] = mapped_column(Text, nullable=False)
-    owner_id: Mapped[str] = mapped_column(Text, nullable=False)
-    root_field: Mapped[str] = mapped_column(Text, nullable=False)
-    parent_id: Mapped[int | None] = mapped_column(Integer)
-    key_name: Mapped[str | None] = mapped_column(Text)
-    position: Mapped[int | None] = mapped_column(Integer)
-    value_type: Mapped[str] = mapped_column(Text, nullable=False)
-    value_text: Mapped[str | None] = mapped_column(Text)
-
-
-class LegacyImport(Base):
-    __tablename__ = "legacy_imports"
-
-    name: Mapped[str] = mapped_column(Text, primary_key=True)
-    imported_at: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
-
-
 class Subscription(Base):
     __tablename__ = "rss_subscriptions"
+    poster_url: Mapped[str | None] = mapped_column(Text)
+    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    bgm_extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    tmdb_extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+    tvdb_extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
 
     bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -170,6 +148,7 @@ class Subscription(Base):
 
 class SubscriptionFeed(Base):
     __tablename__ = "rss_subscription_feeds"
+    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
 
     bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     kind: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -178,16 +157,8 @@ class SubscriptionFeed(Base):
     subgroup_name: Mapped[str] = mapped_column(Text, nullable=False, default="")
     offset: Mapped[int | None] = mapped_column(Integer)
 
-
-class SubscriptionFeedRule(Base):
-    __tablename__ = "rss_subscription_feed_rules"
-
-    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    kind: Mapped[str] = mapped_column(Text, primary_key=True)
-    rule_type: Mapped[str] = mapped_column(Text, primary_key=True)
-    position: Mapped[int] = mapped_column(Integer, primary_key=True)
-    value: Mapped[str] = mapped_column(Text, nullable=False)
-
+    filter_tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
+    exclude_patterns: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
 
 class BangumiMapping(Base):
     __tablename__ = "bangumi_mappings_v2"
@@ -195,44 +166,65 @@ class BangumiMapping(Base):
                       Index("idx_bangumi_mappings_tvdb", "tvdb_id"))
 
     bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str | None] = mapped_column(Text)
-    name_original: Mapped[str | None] = mapped_column(Text)
+    title_cn: Mapped[str | None] = mapped_column(Text)
+    title_jp: Mapped[str | None] = mapped_column(Text)
     mikan_id: Mapped[int | None] = mapped_column(Integer)
-    anidb_id: Mapped[int | None] = mapped_column(Integer)
     tmdb_id: Mapped[int | None] = mapped_column(Integer)
     tvdb_id: Mapped[int | None] = mapped_column(Integer)
-    tmdb_season: Mapped[int | None] = mapped_column(Integer)
+    tmdb_season: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     tvdb_season: Mapped[int | None] = mapped_column(Integer)
+    override: Mapped[bool] = mapped_column(nullable=False, default=False, server_default=text("0"))
 
 
-class BangumiMappingOverride(Base):
-    __tablename__ = "bangumi_mapping_overrides"
+class MappingSyncState(Base):
+    __tablename__ = "mapping_sync_state"
 
-    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    field: Mapped[str] = mapped_column(Text, primary_key=True)
-    text_value: Mapped[str | None] = mapped_column(Text)
-    int_value: Mapped[int | None] = mapped_column(Integer)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    initialized: Mapped[bool] = mapped_column(default=False, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_attempt_at: Mapped[str | None] = mapped_column(Text)
+    sync_token: Mapped[str | None] = mapped_column(Text)
+    last_success_at: Mapped[str | None] = mapped_column(Text)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    warning: Mapped[str | None] = mapped_column(Text)
 
 
 class DownloadEpisode(Base):
+    """RSS download state and actual media destination."""
     __tablename__ = "download_episodes"
 
     bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     episode_number: Mapped[int] = mapped_column(Integer, primary_key=True)
-    rss_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
     guid: Mapped[str] = mapped_column(Text, nullable=False, default="")
     source: Mapped[str] = mapped_column(Text, nullable=False, default="")
     pub_date: Mapped[str] = mapped_column(Text, nullable=False, default="")
     info_hash: Mapped[str] = mapped_column(Text, nullable=False, default="")
     at: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    episode_mapping_snapshot: Mapped[str | None] = mapped_column(Text)
-    episode_mapping_schema_version: Mapped[int | None] = mapped_column(Integer)
-    tmdb_ep: Mapped[int | None] = mapped_column(Integer)
-    tmdb_season: Mapped[int | None] = mapped_column(Integer)
-    tvdb_ep: Mapped[int | None] = mapped_column(Integer)
-    tmdb_ep_calc: Mapped[int | None] = mapped_column(Integer)
+    download_path: Mapped[str | None] = mapped_column(Text)
     fail_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="downloaded")
+
+
+class DownloadEpisodeMapping(Base):
+    """One effective set of provider coordinates per RSS download record."""
+    __tablename__ = "download_episode_mapping"
+    __table_args__ = (ForeignKeyConstraint(
+        ["bangumi_id", "episode_number"],
+        ["download_episodes.bangumi_id", "download_episodes.episode_number"],
+        ondelete="CASCADE"),)
+
+    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    episode_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bangumi_episode_id: Mapped[int | None] = mapped_column(Integer)
+    bangumi_episode_number: Mapped[float | None] = mapped_column(Float)
+    tmdb_series_id: Mapped[int | None] = mapped_column(Integer)
+    tmdb_episode_id: Mapped[int | None] = mapped_column(Integer)
+    tmdb_season_number: Mapped[int | None] = mapped_column(Integer)
+    tmdb_episode_number: Mapped[float | None] = mapped_column(Float)
+    tvdb_series_id: Mapped[int | None] = mapped_column(Integer)
+    tvdb_episode_id: Mapped[int | None] = mapped_column(Integer)
+    tvdb_season_number: Mapped[int | None] = mapped_column(Integer)
+    tvdb_episode_number: Mapped[float | None] = mapped_column(Float)
 
 
 class TorrentPreviewSession(Base):
@@ -248,3 +240,30 @@ class TorrentPreviewSession(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
     last_used_at: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[str] = mapped_column(Text, nullable=False, index=True)
+
+
+class TorrentFontinassTask(Base):
+    __tablename__ = "torrent_fontinass_tasks"
+    card_id: Mapped[int] = mapped_column(ForeignKey("torrent_cards.id", ondelete="CASCADE"), primary_key=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    ready: Mapped[bool | None] = mapped_column()
+    server_url: Mapped[str | None] = mapped_column(Text)
+    timeout_seconds: Mapped[int | None] = mapped_column(Integer)
+    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")
+
+
+class TorrentFontinassFile(Base):
+    __tablename__ = "torrent_fontinass_files"
+    __table_args__ = (UniqueConstraint("card_id", "path"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    card_id: Mapped[int] = mapped_column(ForeignKey("torrent_fontinass_tasks.card_id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    input_hash: Mapped[str | None] = mapped_column(Text)
+    output_hash: Mapped[str | None] = mapped_column(Text)
+    code: Mapped[int | None] = mapped_column(Integer)
+    messages: Mapped[list | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(Text)
+    extra_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict, server_default="{}")

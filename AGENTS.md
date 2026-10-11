@@ -6,7 +6,7 @@ My Anime Manager 是 FastAPI + React 的番剧管理应用：匹配 TMDB/Bangumi
 
 - `backend/`：Python 3.11+ 包。`api/` 提供 FastAPI 路由；`clients/` 封装外部服务；`services/` 包含 RSS 下载、资源采集、torrent 处理和 NFO；`db/` 使用 SQLAlchemy + SQLite；`data/` 负责 JSON 数据与社区映射；`utils/` 是路径、解析与 HTTP 工具。
 - `frontend/`：React 19 + TypeScript + Vite + Tailwind CSS v4。`src/pages/` 是页面入口，`src/components/{rss,torrent,settings,shared,ui}/` 是组件，`src/api/` 是 API 调用层。
-- `scripts/`：版本同步、映射下载与调试脚本；`tests/`：回归测试。
+- `scripts/`：版本同步、映射下载与调试脚本。
 - `Dockerfile`：构建带 Git、Node.js 和 Python 依赖的基础镜像；`docker-entrypoint.sh` 在容器启动时拉取源码、安装后端并构建前端；`docker-compose.yml`：本地构建与持久化挂载。
 
 ## 启动与验证
@@ -18,7 +18,7 @@ cd frontend && npm ci && npm run build
 docker compose up -d --build
 ```
 
-后端测试：`python -m unittest discover -s tests -p 'test_*.py'`；安装 pytest 后可运行 `python -m pytest tests`。前端修改后运行 `cd frontend && npm run build`。
+前端修改后运行 `cd frontend && npm run build`。其他改动可通过静态检查、构建或直接检查实际行为验证，验证方式必须遵守下述测试文件限制。
 
 ## 配置与数据
 
@@ -35,8 +35,9 @@ docker compose up -d --build
 
 ## 开发约定
 
+- **未经用户明确要求，禁止创建、编写、修改或生成任何形式的测试文件。** 此规则适用于所有工具和方法，包括测试脚本、单元测试、集成测试、端到端测试、临时测试文件以及由工具自动生成的测试文件；不得以验证改动为由绕过此限制。
 - 前端组件按用途放入小写目录；组件文件使用 PascalCase，hook 使用 `use` + PascalCase。前端图标用 SVG，禁止 emoji。
 - 异步 HTTP 使用 httpx，经 `backend/clients/` 或相关工具封装。业务流程使用标准 `logging`，避免 `print()`。
-- Python 相对导入按包层级计算。保持 `backend` 包、`uvicorn backend.api:app`、Docker、测试及脚本中的路径一致。
+- Python 相对导入按包层级计算。保持 `backend` 包、`uvicorn backend.api:app`、Docker 及脚本中的路径一致。
 - 更新版本运行 `python scripts/bump_version.py X.Y.Z`，同步 `backend/__init__.py`、`pyproject.toml`、`frontend/package.json` 和 `Dockerfile`；同时更新 `frontend/package-lock.json` 的根版本。
 - Docker 容器更新可从网页的 Updates 页触发源码拉取、前端重建和重启；基础镜像更新在宿主机运行 `docker compose up -d --build`。

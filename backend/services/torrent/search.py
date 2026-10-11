@@ -162,7 +162,7 @@ async def _fetch_bangumi_episodes(bgm_id: int) -> dict | None:
 async def _fetch_all_provider_catalogs(tmdb_id: int) -> dict:
     """Fetch episode data from TMDB + related Bangumi + TVDB sources.
 
-    Looks up ``bangumi_mikan_map.json`` for all entries linked to the
+    Looks up ``SQLite community mappings`` for all entries linked to the
     same *tmdb_id*, then fetches episode listings from every source
     concurrently where possible.
 
@@ -190,7 +190,7 @@ async def _fetch_all_provider_catalogs(tmdb_id: int) -> dict:
         logger.debug(f"   🗺 map.json: {len(map_entries)} 个关联条目 (TMDB {tmdb_id})")
         for me in map_entries:
             tvdb_str = f"tvdb={me['tvdb_id']}" if me.get("tvdb_id") else "tvdb=N/A"
-            logger.debug(f"     - Bangumi {me['bangumi_id']} ({me['name']})  {tvdb_str}")
+            logger.debug(f"     - Bangumi {me['bangumi_id']} ({me['title_cn']})  {tvdb_str}")
 
     # ── Collect unique Bangumi IDs ──
     bangumi_ids: list[int] = sorted({me["bangumi_id"] for me in map_entries})
@@ -234,7 +234,7 @@ async def _fetch_all_provider_catalogs(tmdb_id: int) -> dict:
     async def _fetch_one_tvdb(tid: int):
         # Find matching map entry for the name
         match = next((me for me in map_entries if me.get("tvdb_id") == tid), None)
-        fallback_name = match["name"] if match else ""
+        fallback_name = match["title_cn"] if match else ""
         async with tvdb_sem:
             return str(tid), await fetch_tvdb_series_episodes(tid, series_name=fallback_name)
 

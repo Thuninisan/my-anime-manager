@@ -40,6 +40,12 @@ export interface ManualSubscribeIn {
 export interface RssDataStatus {
   exists: boolean;
   count: number;
+  initialized: boolean;
+  syncing: boolean;
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+  last_error: string | null;
+  warning: string | null;
 }
 
 export interface SubscriptionIn {
@@ -141,15 +147,27 @@ export interface QbitTorrentInfo {
   save_path: string;
 }
 
+export interface DownloadEpisodeMapping {
+  bangumi_episode_id: number | null;
+  bangumi_episode_number: number | null;
+  tmdb_series_id: number | null;
+  tmdb_episode_id: number | null;
+  tmdb_season_number: number | null;
+  tmdb_episode_number: number | null;
+  tvdb_series_id: number | null;
+  tvdb_episode_id: number | null;
+  tvdb_season_number: number | null;
+  tvdb_episode_number: number | null;
+}
+
 export interface EpisodeHistoryEntry {
-  episode_mapping_snapshot: import("./episode").EpisodeMappingSnapshot;
+  download_path: string | null;
+  mapping: DownloadEpisodeMapping | null;
   sort: number;
   source: string;
   guid: string;
   at: string;
   info_hash: string;
-  tmdb_episode_override?: number | null;
-  tmdb_season_override?: number | null;
   qbit: QbitTorrentInfo | null;
 }
 

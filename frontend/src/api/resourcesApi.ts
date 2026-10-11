@@ -11,7 +11,6 @@ export interface Resource {
   detail_description: string;
   torrent_url: string;
   torrent_name: string;
-  torrent_files: { name: string }[];
   info_hash: string;
   size_label: string;
   status: string;

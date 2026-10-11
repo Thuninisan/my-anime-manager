@@ -247,7 +247,7 @@ async def recognize_resource(
             if not movie_entries and names:
                 for match in data.search_by_name(names[0]):
                     entry = data.get_map_entry(match["bangumi_id"]) or {}
-                    if any(marker in entry.get("name", "").lower() for marker in
+                    if any(marker in entry.get("title_cn", "").lower() for marker in
                            ("movie", "剧场版", "劇場版", "映画")):
                         movie_entries.append({"bangumi_id": match["bangumi_id"], **entry})
             for entry in movie_entries:

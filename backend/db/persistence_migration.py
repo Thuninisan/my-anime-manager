@@ -1,16 +1,16 @@
-"""Additive, repeatable SQLite upgrade; deterministic explicit backfill."""
+"""Transactional, repeatable SQLite upgrades and explicit backfill."""
 import json
 from sqlalchemy import select
 
 IDENTITY_COLUMNS = {"resource_identity_json": "TEXT", "identity_source": "TEXT",
                     "identity_updated_at": "TEXT", "identity_revision": "INTEGER",
                     "identity_schema_version": "INTEGER"}
-HISTORY_COLUMNS = {"episode_mapping_snapshot": "TEXT", "episode_mapping_schema_version": "INTEGER"}
 
 
 def upgrade(connection):
+    _upgrade_mappings(connection)
+    _upgrade_download_history(connection)
     for table, additions in (("rss_subscriptions", IDENTITY_COLUMNS),
-                             ("download_episodes", HISTORY_COLUMNS),
                              ("torrent_cards", {"completion_snapshot_json": "TEXT", "completion_schema_version": "INTEGER"})):
         columns = {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table})")}
         for name, kind in additions.items():
@@ -18,11 +18,91 @@ def upgrade(connection):
                 connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
 
 
+def _upgrade_mappings(connection):
+    """Fold legacy per-field overrides into the mapping and protect edited rows."""
+    columns = {row[1] for row in connection.exec_driver_sql(
+        "PRAGMA table_info(bangumi_mappings_v2)")}
+    for old, new in (("name", "title_cn"), ("name_original", "title_jp")):
+        if old in columns and new not in columns:
+            connection.exec_driver_sql(f"ALTER TABLE bangumi_mappings_v2 RENAME COLUMN {old} TO {new}")
+    if "override" not in columns:
+        connection.exec_driver_sql(
+            "ALTER TABLE bangumi_mappings_v2 ADD COLUMN override BOOLEAN NOT NULL DEFAULT 0")
+    old_table = connection.exec_driver_sql(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bangumi_mapping_overrides'").first()
+    if old_table:
+        fields = {"name": "title_cn", "name_original": "title_jp",
+                  "title_cn": "title_cn", "title_jp": "title_jp",
+                  "mikan_id": "mikan_id", "tmdb_id": "tmdb_id", "tmdb_season": "tmdb_season",
+                  "tvdb_id": "tvdb_id", "tvdb_season": "tvdb_season"}
+        for bangumi_id, field, text_value, int_value in connection.exec_driver_sql(
+                "SELECT bangumi_id, field, text_value, int_value FROM bangumi_mapping_overrides").all():
+            target = fields.get(field)
+            if target is None:
+                continue
+            value = text_value if target in {"title_cn", "title_jp"} else int_value
+            if target == "tmdb_season" and value is None:
+                value = 1
+            connection.exec_driver_sql(
+                f"UPDATE bangumi_mappings_v2 SET {target}=?, override=1 WHERE bangumi_id=?",
+                (value, bangumi_id))
+        connection.exec_driver_sql("DROP TABLE bangumi_mapping_overrides")
+    if "anidb_id" in columns:
+        connection.exec_driver_sql("ALTER TABLE bangumi_mappings_v2 DROP COLUMN anidb_id")
+    connection.exec_driver_sql("UPDATE bangumi_mappings_v2 SET tmdb_season=1 WHERE tmdb_season IS NULL")
+    # Rebuild old nullable season definitions to give direct inserts the same default.
+    info = {row[1]: row for row in connection.exec_driver_sql("PRAGMA table_info(bangumi_mappings_v2)")}
+    if not info["tmdb_season"][3] or str(info["tmdb_season"][4]) != "1":
+        connection.exec_driver_sql("""CREATE TABLE bangumi_mappings_upgrade (
+            bangumi_id INTEGER NOT NULL PRIMARY KEY, title_cn TEXT, title_jp TEXT,
+            mikan_id INTEGER, tmdb_id INTEGER, tvdb_id INTEGER,
+            tmdb_season INTEGER NOT NULL DEFAULT 1, tvdb_season INTEGER,
+            override BOOLEAN NOT NULL DEFAULT 0)""")
+        fields = "bangumi_id,title_cn,title_jp,mikan_id,tmdb_id,tvdb_id,tmdb_season,tvdb_season,override"
+        connection.exec_driver_sql(f"INSERT INTO bangumi_mappings_upgrade ({fields}) SELECT {fields} FROM bangumi_mappings_v2")
+        connection.exec_driver_sql("DROP TABLE bangumi_mappings_v2")
+        connection.exec_driver_sql("ALTER TABLE bangumi_mappings_upgrade RENAME TO bangumi_mappings_v2")
+        connection.exec_driver_sql("CREATE INDEX idx_bangumi_mappings_tmdb ON bangumi_mappings_v2 (tmdb_id)")
+        connection.exec_driver_sql("CREATE INDEX idx_bangumi_mappings_tvdb ON bangumi_mappings_v2 (tvdb_id)")
+
+
+def _upgrade_download_history(connection):
+    """Split RSS download state from provider coordinates in one transaction."""
+    columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(download_episodes)")}
+    if "download_path" in columns and not columns.intersection(
+            {"rss_url", "tmdb_ep", "tmdb_season", "tvdb_ep", "tmdb_ep_calc", "episode_mapping_snapshot"}):
+        return
+    from .download_episode_mapping import legacy_values
+    from .models import DownloadEpisodeMapping
+    communities = {row["bangumi_id"]: dict(row) for row in connection.exec_driver_sql(
+        "SELECT bangumi_id,tmdb_id,tmdb_season,tvdb_id,tvdb_season FROM bangumi_mappings_v2").mappings()}
+    records = [dict(row) for row in connection.exec_driver_sql("SELECT * FROM download_episodes").mappings()]
+    mappings = []
+    downloads = []
+    for record in records:
+        values, path = legacy_values(record, communities.get(record["bangumi_id"], {}))
+        mappings.append(dict(bangumi_id=record["bangumi_id"], episode_number=record["episode_number"], **values))
+        downloads.append(tuple(record[key] for key in
+                               ("bangumi_id", "episode_number", "guid", "source", "pub_date", "info_hash", "at"))
+                         + (path, record["fail_count"], record["status"]))
+    connection.exec_driver_sql("""CREATE TABLE download_episodes_upgrade (
+        bangumi_id INTEGER NOT NULL, episode_number INTEGER NOT NULL,
+        guid TEXT NOT NULL, source TEXT NOT NULL, pub_date TEXT NOT NULL,
+        info_hash TEXT NOT NULL, at TEXT NOT NULL, download_path TEXT,
+        fail_count INTEGER NOT NULL, status TEXT NOT NULL,
+        PRIMARY KEY (bangumi_id, episode_number))""")
+    if downloads:
+        connection.exec_driver_sql("INSERT INTO download_episodes_upgrade VALUES (?,?,?,?,?,?,?,?,?,?)", downloads)
+    connection.exec_driver_sql("DROP TABLE download_episodes")
+    connection.exec_driver_sql("ALTER TABLE download_episodes_upgrade RENAME TO download_episodes")
+    if mappings:
+        connection.execute(DownloadEpisodeMapping.__table__.insert(), mappings)
+
+
 def backfill(session):
-    from .models import Subscription, DownloadEpisode
+    from .models import Subscription, DownloadEpisode, DownloadEpisodeMapping, BangumiMapping
     from .identity import read_resource_identity, update_resource_identity
-    from ..legacy.history import legacy_history_to_episode_mapping
-    from ..domain.persistence import EPISODE_MAPPING_SNAPSHOT_VERSION
+    from .download_episode_mapping import legacy_values
     stats = {"identities": 0, "history_partial": 0, "skipped_canonical": 0, "unresolved": 0}
     for row in session.scalars(select(Subscription)):
         if row.resource_identity_json is not None:
@@ -35,17 +115,17 @@ def backfill(session):
         except (ValueError, TypeError):
             stats["unresolved"] += 1
     for row in session.scalars(select(DownloadEpisode)):
-        if row.episode_mapping_snapshot is not None:
+        key = (row.bangumi_id, row.episode_number)
+        if session.get(DownloadEpisodeMapping, key) is not None:
             stats["skipped_canonical"] += 1
             continue
         if row.status != "downloaded":
             stats["unresolved"] += 1
             continue
-        snapshot = legacy_history_to_episode_mapping(row)
-        if snapshot["episode_mapping"]["bangumi"]["subject_id"] is None:
-            stats["unresolved"] += 1
-            continue
-        row.episode_mapping_snapshot = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
-        row.episode_mapping_schema_version = EPISODE_MAPPING_SNAPSHOT_VERSION
+        community = session.get(BangumiMapping, row.bangumi_id)
+        values, _ = legacy_values({"bangumi_id": row.bangumi_id, "episode_number": row.episode_number},
+                                  {field: getattr(community, field) for field in
+                                   ("tmdb_id", "tmdb_season", "tvdb_id", "tvdb_season")} if community else {})
+        session.add(DownloadEpisodeMapping(bangumi_id=row.bangumi_id, episode_number=row.episode_number, **values))
         stats["history_partial"] += 1
     return stats

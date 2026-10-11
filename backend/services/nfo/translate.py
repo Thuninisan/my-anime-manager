@@ -196,6 +196,11 @@ async def translate_ja_to_zh(text: str) -> str:
             )
             continue
 
+        logger.info(
+            "DeepSeek episode plot translation output (attempt %d/%d): %s",
+            attempt, MAX_ATTEMPTS, translated,
+        )
+
         if not translated:
             logger.warning(
                 "DeepSeek returned empty output (attempt %d/%d) — retrying",

@@ -373,7 +373,7 @@ async def _search_bangumi_for_name(
     # Ranking recommends a directory without confirming cross-platform identity.
     if tmdb_id is not None:
 
-        linked = list({e["bangumi_id"]: dict(e, id=e["bangumi_id"])
+        linked = list({e["bangumi_id"]: dict(e, id=e["bangumi_id"], name=e.get("title_jp") or e.get("title_cn", ""), name_cn=e.get("title_cn", ""))
                        for e in data_store.get_map_entries_by_tmdb_id(tmdb_id)
                        if (e.get("tmdb_season") == -1 if media_type == "movie" else e.get("tmdb_season") != -1)}.values())
         if linked:
@@ -381,8 +381,8 @@ async def _search_bangumi_for_name(
                 "bangumi", linked, cleaned_name, year=year, media_type=media_type, source="existing_mapping")
             if recommendation["status"] != "unresolved":
                 def project(row):
-                    return {"id": row["id"], "name": row.get("name_original") or row.get("name", ""),
-                            "name_cn": row.get("name", ""), "eps": 0}
+                    return {"id": row["id"], "name": row.get("title_jp") or row.get("title_cn", ""),
+                            "name_cn": row.get("title_cn", ""), "eps": 0}
                 return {"searchby": cleaned_name, "recommendation": recommendation,
                         "first": project(selected) if selected else None,
                         "rest": [project(r) for r in linked if r is not selected]}
@@ -484,7 +484,7 @@ async def _parallel_search(show_names: list[str], parsed_files: list[dict] | Non
             links = [dict(row) for row in data_store.get_map_entries_by_tmdb_id(first["id"])
                      if row.get("tmdb_season") != -1]
         bgm_rows = list({row["bangumi_id"]: dict(row, id=row["bangumi_id"],
-                        name_cn=row.get("name", ""), name=row.get("name_original") or row.get("name", ""))
+                        name_cn=row.get("title_cn", ""), name=row.get("title_jp") or row.get("title_cn", ""))
                         for row in links if row.get("bangumi_id")}.values())
         tvdb_rows = list({row["tvdb_id"]: row for row in links if row.get("tvdb_id")}.values())
         keyword = first.get("name") or first.get("original_title") or first.get("original_name") or name

@@ -17,8 +17,8 @@ def provider_candidates(provider: str, results: list[dict], media_type="tv", sou
             year = int(str(date)[:4])
         except ValueError:
             year = None
-        title = raw.get("name_cn") or raw.get("title") or raw.get("name")
-        original = raw.get("original_title") or raw.get("original_name") or raw.get("name_original") or (raw.get("name") if provider == "bangumi" else None)
+        title = raw.get("name_cn") or raw.get("title_cn") or raw.get("title") or raw.get("name")
+        original = raw.get("original_title") or raw.get("original_name") or raw.get("name_original") or raw.get("title_jp") or (raw.get("name") if provider == "bangumi" else None)
         aliases = raw.get("aliases") or raw.get("alternative_titles") or []
         if isinstance(aliases, dict):
             aliases = aliases.get("results", aliases.get("titles", []))

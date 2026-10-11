@@ -1,6 +1,6 @@
 import type { CatalogSeason } from '@/types/episode';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import type { DownloadHistoryResponse, SubscriptionOut } from '@/types/preview';
+import type { DownloadHistoryResponse, EpisodeHistoryEntry, SubscriptionOut } from '@/types/preview';
 import { updateSubscription, deleteSubscriptionRss, deleteEpisodeHistory, addEpisodeWithTorrent, replaceEpisodeWithTorrent, getTmdbSeasonMap, regenEpisodeNfo } from '@/api/rssApi';
 import LeftSidebar from './LeftSidebar';
 import EpisodeTable, { formatBytes } from './EpisodeTable';
@@ -117,16 +117,16 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
     }
   };
 
-  // ── TMDB overrides ──
+  // ── TMDB episode mapping ──
   const [expandedSort, setExpandedSort] = useState<number | null>(null);
   const [tmdbForm, setTmdbForm] = useState<{ ep: string; season: string }>({ ep: '', season: '' });
 
-  const openTmdbDropdown = (sort: number, entry: { tmdb_episode_override?: number | null; tmdb_season_override?: number | null }) => {
+  const openTmdbDropdown = (sort: number, entry: EpisodeHistoryEntry) => {
     setExpandedSort(sort === expandedSort ? null : sort);
 
-    // Smart defaults: existing override → TMDB match → subscription default → bare fallback
-    let season = entry.tmdb_season_override != null ? String(entry.tmdb_season_override) : '';
-    let ep = entry.tmdb_episode_override != null ? String(entry.tmdb_episode_override) : '';
+    // Saved coordinates → TMDB match → subscription default → fallback
+    let season = entry.mapping?.tmdb_season_number != null ? String(entry.mapping?.tmdb_season_number) : '';
+    let ep = entry.mapping?.tmdb_episode_number != null ? String(entry.mapping?.tmdb_episode_number) : '';
 
     if (tmdbSeasonMap) {
       // Filter out S00 (Specials) from default candidates
@@ -155,8 +155,8 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
   const saveTmdbOverrides = async (sort: number, regen: boolean) => {
     if (!data) return;
     const fields: Record<string, number> = {};
-    if (tmdbForm.ep !== '') fields.tmdb_episode_override = Number(tmdbForm.ep);
-    if (tmdbForm.season !== '') fields.tmdb_season_override = Number(tmdbForm.season);
+    if (tmdbForm.ep !== '') fields.tmdb_episode_number = Number(tmdbForm.ep);
+    if (tmdbForm.season !== '') fields.tmdb_season_number = Number(tmdbForm.season);
     if (Object.keys(fields).length === 0) return;
     try {
       await fetch(`/api/rss/v2/download-history/${data.bangumi_id}/${sort}${regen ? '?regen_nfo=true' : ''}`, {

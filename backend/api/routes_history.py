@@ -19,6 +19,14 @@ from ..utils.torrent_file_reader import read_torrent_file_list
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
+def _coordinate(value, field, *, integer=False):
+    import math
+    if (type(value) not in (int, float) or not math.isfinite(value) or value < 0 or
+            (integer and int(value) != value)):
+        raise HTTPException(422, f"invalid_{field}")
+    return int(value) if integer or int(value) == value else value
+
+
 # ── /api/rss/download-history/{bangumi_id}/{sort} ──
 
 @router.delete("/api/rss/download-history/{bangumi_id}/{sort}")
@@ -52,7 +60,7 @@ async def add_episode_history(bangumi_id: int, sort: int):
     """Manually mark a missing episode as downloaded (source='manual')."""
     data.mark_downloaded(
         bangumi_id, sort,
-        rss_url="", guid="", source="manual", pub_date="", info_hash="",
+        guid="", source="manual", pub_date="", info_hash="",
     )
     return {"ok": True}
 
@@ -109,7 +117,7 @@ async def update_episode_overrides(
     fields: dict[str, object] = {},
     regen_nfo: bool = False,
 ):
-    """Set TMDB overrides for an episode and optionally regenerate NFO.
+    """Update the effective TMDB mapping using deprecated v1 field names.
 
     Body: ``{"tmdb_ep": 13, "tmdb_season": 2}`` — one or both fields.
     Query: ``?regen_nfo=true`` to regenerate NFO after setting overrides.
@@ -119,10 +127,10 @@ async def update_episode_overrides(
     if tmdb_ep is None and tmdb_season is None:
         raise HTTPException(400, "至少需要提供 tmdb_ep 或 tmdb_season")
 
-    ok = data.set_episode_overrides(
+    ok = data.set_episode_mapping(
         bangumi_id, sort,
-        tmdb_ep=int(tmdb_ep) if tmdb_ep is not None else None,
-        tmdb_season=int(tmdb_season) if tmdb_season is not None else None,
+        tmdb_episode_number=_coordinate(tmdb_ep, "tmdb_episode_number") if tmdb_ep is not None else None,
+        tmdb_season_number=_coordinate(tmdb_season, "tmdb_season_number", integer=True) if tmdb_season is not None else None,
     )
     if not ok:
         raise HTTPException(404, "该集的下载记录不存在")
@@ -138,9 +146,9 @@ async def update_episode_overrides(
 
 @router.post("/api/rss/download-history/{bangumi_id}/{sort}/regen-nfo")
 async def regen_episode_nfo(bangumi_id: int, sort: int):
-    """Regenerate NFO for a single episode using its stored TMDB overrides.
+    """Regenerate NFO using the stored episode mapping and media path.
 
-    No request body — all inputs (subscription, per-episode overrides,
+    No request body — all inputs (subscription, per-episode mapping,
     paths) are derived server-side.  NFO-only, never touches qBittorrent.
     """
     try:
@@ -155,11 +163,11 @@ async def regen_episode_nfo(bangumi_id: int, sort: int):
 
 
 @router.patch("/api/rss/v2/download-history/{bangumi_id}/{sort}")
-async def update_canonical_episode_overrides(bangumi_id: int, sort: int,
+async def update_canonical_episode_mapping(bangumi_id: int, sort: int,
                                            fields: dict[str, object], regen_nfo: bool = False):
-    allowed = {"tmdb_episode_override", "tmdb_season_override"}
+    allowed = {"tmdb_episode_number", "tmdb_season_number"}
     if set(fields) - allowed:
-        raise HTTPException(422, "invalid_episode_override_fields")
+        raise HTTPException(422, "invalid_episode_mapping_fields")
     return await update_episode_overrides(bangumi_id, sort,
-        {"tmdb_ep": fields.get("tmdb_episode_override"), "tmdb_season": fields.get("tmdb_season_override")},
+        {"tmdb_ep": fields.get("tmdb_episode_number"), "tmdb_season": fields.get("tmdb_season_number")},
         regen_nfo)

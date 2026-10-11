@@ -1,8 +1,8 @@
-"""Export current SQLite subscriptions and Bangumi mappings for an older release.
+"""Export current SQLite subscriptions, history and torrents for an older release.
 
 Usage: python scripts/export_legacy_json.py /path/to/export-directory
 Stop the app before downgrading, then copy the generated files to their
-respective legacy locations. The mapping belongs in backend/data/.
+respective legacy locations. Community mappings are no longer exported.
 """
 
 import argparse
@@ -28,16 +28,18 @@ def legacy_subscription_export(record):
 
 
 def legacy_history_export(document):
-    """Project each historical snapshot's own coordinates; no current binding."""
+    """Project relational RSS mappings to the old history format."""
     import copy
     result = copy.deepcopy(document)
     for episodes in result.get("episodes", {}).values():
         for entry in episodes.values():
-            snapshot = entry.get("episode_mapping_snapshot")
-            if snapshot:
-                mapping = snapshot["episode_mapping"]
-                entry["tmdb_ep_calc"] = mapping["tmdb"]["episode_number"]
-                entry["tvdb_ep"] = mapping["tvdb"]["episode_number"]
+            mapping = entry.pop("mapping", None)
+            entry.pop("download_path", None)
+            if mapping:
+                entry["tmdb_ep_calc"] = mapping["tmdb_episode_number"]
+                entry["tmdb_ep"] = mapping["tmdb_episode_number"]
+                entry["tmdb_season"] = mapping["tmdb_season_number"]
+                entry["tvdb_ep"] = mapping["tvdb_episode_number"]
     return result
 
 
@@ -48,7 +50,6 @@ def main():
     args.directory.mkdir(parents=True, exist_ok=True)
     files = {
         "subscriptions.json": [legacy_subscription_export(record) for record in data.list_subscriptions()],
-        "bangumi_mikan_map.json": {str(key): value for key, value in data._load().items()},
         "download_history.json": legacy_history_export(data._load_hist()),
         "torrents.json": {"version": 1, "torrents": torrents.list_torrents()},
     }

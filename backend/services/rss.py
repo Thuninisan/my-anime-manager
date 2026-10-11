@@ -109,7 +109,7 @@ async def lookup_mikan_rss(mikan_id: int, bangumi_id: int, name: str) -> dict:
 
     This is the entry point for the Mikan-search fallback flow — the
     mikan_id comes from the user's selection in MikanSearchDialog
-    rather than from the bangumi_mikan_map.
+    rather than from the community mapping.
     """
     base = config.MIKAN_BASE_URL
     groups = await mikan_client.get_subtitle_groups(mikan_id)

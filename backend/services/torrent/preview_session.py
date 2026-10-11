@@ -86,7 +86,7 @@ def candidate_context(key, entry, provider_catalogs):
     context = {"show_key": key, "display_name": tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or key,
                    "bangumi_display_name": bgm.get("name_cn") or bgm.get("name") or "",
                    "media_type": media_type, "candidates": candidates,
-                   "mapping_hints": [{"bangumi_subject_id": h.get("bangumi_id"), "name": h.get("name", ""),
+                   "mapping_hints": [{"bangumi_subject_id": h.get("bangumi_id"), "name": h.get("title_cn") or h.get("name", ""),
                        "tvdb_series_id": h.get("tvdb_id"), "tvdb_season_number": h.get("tvdb_season"),
                        "tmdb_season_number": h.get("tmdb_season")} for h in hints]}
     if not entry.get("discovery_complete"):
@@ -118,7 +118,7 @@ def discover_mapping_candidates(context):
             context["candidates"]["tvdb"].extend(provider_candidates("tvdb", [hint], "tv", "existing_mapping"))
             if hint.get("tmdb_id"):
                 context["candidates"]["tmdb"].extend(provider_candidates("tmdb", [dict(hint, id=hint["tmdb_id"])], "tv", "existing_mapping"))
-        normalized = {"bangumi_subject_id": bid, "name": hint.get("name", ""),
+        normalized = {"bangumi_subject_id": bid, "name": hint.get("title_cn", ""),
             "tvdb_series_id": None if movie else hint.get("tvdb_id"), "tvdb_season_number": hint.get("tvdb_season"),
             "tmdb_season_number": hint.get("tmdb_season")}
         if normalized not in context["mapping_hints"]:

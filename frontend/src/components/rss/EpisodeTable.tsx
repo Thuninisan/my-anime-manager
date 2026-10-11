@@ -128,6 +128,11 @@ export default function EpisodeTable({
                     <div className="text-sm font-bold text-foreground tabular-nums">
                       EP{e.sort.toString().padStart(2, '0')}
                     </div>
+                    {e.download_path && (
+                      <div className="text-[10px] text-muted-foreground max-w-48 truncate" title={e.download_path}>
+                        {e.download_path}
+                      </div>
+                    )}
                     {q?.name && (
                       <div className="text-[10px] text-muted-foreground max-w-48 truncate" title={q.name}>
                         {q.name.slice(0, 40)}

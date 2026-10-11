@@ -16,7 +16,6 @@ My Anime Manager 是面向 Jellyfin 的番剧管理网页。它可解析 `.torre
 backend/                 FastAPI 应用、外部 API 客户端、业务服务、SQLite 与 JSON 数据
 frontend/                React 19 + TypeScript + Vite 前端
 scripts/                 版本、映射下载和调试脚本
-tests/                   后端回归测试
 Dockerfile               前端构建 + Python 运行镜像
 docker-compose.yml       本地构建及持久化挂载
 ```
@@ -56,7 +55,7 @@ cd frontend && npm ci && npm run build && cd ..
 python run.py
 ```
 
-也可直接运行 `uvicorn backend.api:app --host 0.0.0.0 --port 8000`。前端开发服务器在 `frontend/` 目录执行 `npm run dev`。后端测试可运行 `python -m unittest discover -s tests -p 'test_*.py'`；安装 pytest 后可运行 `python -m pytest tests`。
+也可直接运行 `uvicorn backend.api:app --host 0.0.0.0 --port 8000`。前端开发服务器在 `frontend/` 目录执行 `npm run dev`。前端修改后运行 `npm run build`；其他改动可通过静态检查、构建或直接检查实际行为验证。未经用户明确要求，禁止创建、编写、修改或生成任何形式的测试文件，具体规则见 `AGENTS.md`。
 
 ## 设置与数据
 
@@ -66,7 +65,10 @@ FontInAss 网络故障、缺失字体、缺字形或返回警告时保留目标�
 
 首次打开网页后，在设置页填写 TMDB API Key、qBittorrent 连接信息、下载及整理路径。路径应填写**应用容器内**看到的路径。TVDB 和 DeepSeek 密钥是可选项。设置保存到 `MAM_DATA_DIR/settings.json`（Docker 中为 `/app/data/settings.json`）；环境变量仅在设置文件不存在的首次启动时初始化同名设置，之后以网页保存值为准。敏感字段在 API 中显示为 `***`。
 
-RSS 排除词、RSS 下载轮询间隔和资源采集轮询间隔也保存在同一设置文件。旧版 `rss_settings.json` 的排除词会自动迁入 `settings.json`。订阅、下载历史、Bangumi 映射、资源与种子关系均保存在 `MAM_DATA_DIR/mam.sqlite3`。首次使用新版本时，旧 `subscriptions.json`、`download_history.json`、`torrents.json` 和随程序提供的 `bangumi_mikan_map.json` 会自动导入数据库，原文件不会删除；此后以数据库为准。降级到旧版本前，先停止应用，运行 `python scripts/export_legacy_json.py /path/to/export`，将导出的用户数据 JSON 复制到旧版的数据目录、映射文件复制到旧版的 `backend/data/` 目录。
+RSS 排除词、RSS 下载轮询间隔和资源采集轮询间隔也保存在同一设置文件。旧版 `rss_settings.json` 的排除词会自动迁入 `settings.json`。订阅、下载历史、Bangumi 映射、资源与种子关系均保存在 `MAM_DATA_DIR/mam.sqlite3`。旧 `subscriptions.json`、`download_history.json` 和 `torrents.json` 会自动导入数据库，原文件不会删除；此后以数据库为准。社区映射仅存储在 SQLite，不再附带、读取或导出本地 mapping JSON。新安装会在启动后后台联网初始化映射；失败不会阻止应用启动，可在设置页查看状态并重试。已有映射数据库会继续使用，旧映射数据库表会自动迁移。设置页更新及 `python scripts/download_bangumi_data.py` 共用同步服务，直接写入数据库，并保留手动修正；Kometa 获取失败时保留已有 TVDB 字段。仅持有旧 mapping JSON 的用户，应先使用支持 JSON 导入的旧版本完成迁移，再升级。降级到旧版本前，先停止应用，运行 `python scripts/export_legacy_json.py /path/to/export`，将导出的订阅、历史和种子 JSON 复制到旧版的数据目录；该工具不再导出社区映射，旧版所需映射需单独准备。
+
+RSS 下载历史使用两张表：`download_episodes` 保存下载状态、来源、种子哈希和重命名后的完整媒体路径；`download_episode_mapping` 保存对应单集的 Bangumi/TMDB/TVDB 坐标，两表通过 Bangumi 条目与集数关联。旧历史中的映射 snapshot 会自动拆入映射表，已记录的目标路径迁入下载表；缺失的作品 ID 从当前社区映射补齐，无法确定的文件路径保持为空。手动修正直接更新单集映射，NFO 重生成优先使用记录的实际媒体路径。
+
 
 如果启用 `WATCH_DIR=/torrents`，应用会扫描该目录下的 `.torrent` 文件。处理成功后文件会删除，失败时移到 `failed/`。RSS 下载器的开关是运行状态；重启后需在设置页重新开启，轮询间隔仍会保留。
 

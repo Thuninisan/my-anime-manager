@@ -16,7 +16,7 @@ from ..db import legacy_data as _store
 
 logger = logging.getLogger(__name__)
 
-# Bundled mapping JSON is a first-run import source; SQLite is authoritative.
+# Mapping data is stored exclusively in SQLite.
 _DATA_DIR = PACKAGE_DATA_DIR
 
 # User data (subscriptions, download_history, rss_settings) can be
@@ -34,76 +34,77 @@ if _USER_DATA_DIR != _DATA_DIR:
 # Bangumi → Mikan mapping
 # ═══════════════════════════════════════════════════════════════════════
 
-_MAP_FILE = _DATA_DIR / "bangumi_mikan_map.json"
-_bangumi_mikan_map: dict[int, dict] | None = None
+_mapping_data: dict[int, dict] | None = None
+_mapping_revision = -1
+_mapping_lock = threading.Lock()
 
 
 def _load() -> dict[int, dict]:
-    return _store.list_mappings(_MAP_FILE)
+    return _store.list_mappings()
 
 
 def _mapping_cache() -> dict[int, dict]:
-    global _bangumi_mikan_map
-    if _bangumi_mikan_map is None:
-        _bangumi_mikan_map = _load()
-    return _bangumi_mikan_map
+    global _mapping_data, _mapping_revision
+    with _mapping_lock:
+        revision = _store.mapping_revision()
+        if _mapping_data is None or revision != _mapping_revision:
+            _mapping_data = _load()
+            _mapping_revision = revision
+        return _mapping_data
 
 
 def mapping_count() -> int:
-    return _store.mapping_count(_MAP_FILE)
+    return _store.mapping_count()
 
 
-def replace_mappings(records: dict) -> None:
-    global _bangumi_mikan_map
-    _store.replace_mappings(_MAP_FILE, records)
-    _bangumi_mikan_map = None
+def replace_mappings(records: dict, **options) -> None:
+    global _mapping_data
+    _store.replace_mappings(records, **options)
+    with _mapping_lock:
+        _mapping_data = None
 
 
 def get_mikan_id(bangumi_id: int) -> int | None:
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    entry = _bangumi_mikan_map.get(bangumi_id)
+    mapping = _mapping_cache()
+    entry = mapping.get(bangumi_id)
     return entry.get("mikan_id") if entry else None
 
 
 def get_bangumi_name(bangumi_id: int) -> str | None:
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    entry = _bangumi_mikan_map.get(bangumi_id)
-    return entry["name"] if entry else None
+    mapping = _mapping_cache()
+    entry = mapping.get(bangumi_id)
+    return entry.get("title_cn") if entry else None
 
 
 def get_bangumi_name_original(bangumi_id: int) -> str | None:
     """Get original (Japanese) title from the mapping."""
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    entry = _bangumi_mikan_map.get(bangumi_id)
-    return entry.get("name_original") if entry else None
+    mapping = _mapping_cache()
+    entry = mapping.get(bangumi_id)
+    return entry.get("title_jp") if entry else None
 
 
 def get_tmdb_id(bangumi_id: int) -> int | None:
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    entry = _bangumi_mikan_map.get(bangumi_id)
+    mapping = _mapping_cache()
+    entry = mapping.get(bangumi_id)
     return entry.get("tmdb_id") if entry else None
 
 
 def get_tmdb_season(bangumi_id: int) -> int | None:
     """Get TMDB season number from the Bangumi→Mikan mapping.
 
-    Only set when the upstream bangumi-data source includes a /season/N suffix.
+    Defaults to 1 when the source does not specify a season.
     """
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    entry = _bangumi_mikan_map.get(bangumi_id)
+    mapping = _mapping_cache()
+    entry = mapping.get(bangumi_id)
     return entry.get("tmdb_season") if entry else None
 
 
-def _set_mapping_fields(bangumi_id: int, fields: dict) -> bool:
-    global _bangumi_mikan_map
-    saved = _store.set_mapping_fields(_MAP_FILE, bangumi_id, fields)
+def _set_mapping_fields(bangumi_id: int, fields: dict, *, manual: bool = True) -> bool:
+    global _mapping_data
+    saved = _store.set_mapping_fields(bangumi_id, fields, manual=manual)
     if saved:
-        _bangumi_mikan_map = None
+        with _mapping_lock:
+            _mapping_data = None
     return saved
 
 
@@ -112,31 +113,23 @@ def set_mikan_id(bangumi_id: int, mikan_id: int) -> bool:
 
 
 def add_mapping(bangumi_id: int, name: str, name_original: str = "") -> None:
-    global _bangumi_mikan_map
-    _store.add_mapping(_MAP_FILE, bangumi_id, name, name_original)
-    _bangumi_mikan_map = None
+    global _mapping_data
+    _store.add_mapping(bangumi_id, name, name_original)
+    with _mapping_lock:
+        _mapping_data = None
 
 
-def set_tmdb_id(bangumi_id: int, tmdb_id: int, tmdb_season: int | None = None) -> bool:
+def set_tmdb_id(bangumi_id: int, tmdb_id: int, tmdb_season: int | None = None, *, manual: bool = True) -> bool:
     fields = {"tmdb_id": tmdb_id}
     if tmdb_season is not None:
         fields["tmdb_season"] = tmdb_season
-    return _set_mapping_fields(bangumi_id, fields)
-
-
-def get_anidb_id(bangumi_id: int) -> int | None:
-    """Get AniDB ID from the Bangumi mapping entry."""
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    entry = _bangumi_mikan_map.get(bangumi_id)
-    return entry.get("anidb_id") if entry else None
+    return _set_mapping_fields(bangumi_id, fields, manual=manual)
 
 
 def get_tvdb_id(bangumi_id: int) -> int | None:
     """Get TVDB series ID from the Bangumi mapping entry."""
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    entry = _bangumi_mikan_map.get(bangumi_id)
+    mapping = _mapping_cache()
+    entry = mapping.get(bangumi_id)
     return entry.get("tvdb_id") if entry else None
 
 
@@ -146,17 +139,16 @@ def get_tvdb_season(bangumi_id: int) -> int | None:
     Values follow Kometa conventions: 1+ for normal seasons,
     0 for specials, -1 for movies.
     """
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    entry = _bangumi_mikan_map.get(bangumi_id)
+    mapping = _mapping_cache()
+    entry = mapping.get(bangumi_id)
     return entry.get("tvdb_season") if entry else None
 
 
-def set_tvdb_id(bangumi_id: int, tvdb_id: int, tvdb_season: int | None = None) -> bool:
+def set_tvdb_id(bangumi_id: int, tvdb_id: int, tvdb_season: int | None = None, *, manual: bool = True) -> bool:
     fields = {"tvdb_id": tvdb_id}
     if tvdb_season is not None:
         fields["tvdb_season"] = tvdb_season
-    return _set_mapping_fields(bangumi_id, fields)
+    return _set_mapping_fields(bangumi_id, fields, manual=manual)
 
 
 def get_bangumi_id_by_tvdb_id(tvdb_id: int) -> int | None:
@@ -168,9 +160,8 @@ def get_bangumi_id_by_tvdb_id(tvdb_id: int) -> int | None:
     Returns:
         Bangumi ID, or None if not found.
     """
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    for bgm_id_str, entry in _bangumi_mikan_map.items():
+    mapping = _mapping_cache()
+    for bgm_id_str, entry in mapping.items():
         if entry.get("tvdb_id") == tvdb_id:
             return int(bgm_id_str)
     return None
@@ -178,29 +169,27 @@ def get_bangumi_id_by_tvdb_id(tvdb_id: int) -> int | None:
 
 def get_map_entries_by_tvdb_id(tvdb_id: int) -> list[dict]:
     """Return every Bangumi entry mapped to a TVDB series."""
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
+    mapping = _mapping_cache()
     return sorted(({"bangumi_id": int(bgm_id), **entry}
-                   for bgm_id, entry in _bangumi_mikan_map.items()
+                   for bgm_id, entry in mapping.items()
                    if entry.get("tvdb_id") == tvdb_id), key=lambda entry: entry["bangumi_id"])
 
 
 def get_movie_map_entries_by_titles(names: list[str]) -> list[dict]:
     """Find movie entries whose Chinese or original title equals an RSS alias."""
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
+    mapping = _mapping_cache()
 
     def normalized(value: str) -> str:
         return "".join(unicodedata.normalize("NFKC", value).lower().split())
 
     wanted = {normalized(name) for name in names if name}
     return sorted(({"bangumi_id": int(bgm_id), **entry}
-                   for bgm_id, entry in _bangumi_mikan_map.items()
+                   for bgm_id, entry in mapping.items()
                    if (entry.get("tvdb_season") == 0 or
-                       any(marker in str(entry.get("name", "")).lower() for marker in
+                       any(marker in str(entry.get("title_cn", "")).lower() for marker in
                            ("movie", "剧场版", "劇場版", "映画")))
                    and any(normalized(str(entry.get(key) or "")) in wanted
-                           for key in ("name", "name_original"))),
+                           for key in ("title_cn", "title_jp"))),
                   key=lambda entry: entry["bangumi_id"])
 
 
@@ -213,9 +202,8 @@ def get_bangumi_id_by_tmdb_id(tmdb_id: int) -> int | None:
     Returns:
         Bangumi ID, or None if not found.
     """
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    for bgm_id_str, entry in _bangumi_mikan_map.items():
+    mapping = _mapping_cache()
+    for bgm_id_str, entry in mapping.items():
         if entry.get("tmdb_id") == tmdb_id:
             return int(bgm_id_str)
     return None
@@ -224,12 +212,11 @@ def get_bangumi_id_by_tmdb_id(tmdb_id: int) -> int | None:
 def get_map_entry(bangumi_id: int) -> dict | None:
     """Get the full Bangumi→Mikan map entry for a Bangumi ID.
 
-    Returns the raw entry dict (name, name_original, mikan_id, tmdb_id,
-    tmdb_season, tvdb_id, tvdb_season, anidb_id, ...), or None.
+    Returns the raw entry dict (title_cn, title_jp, mikan_id, tmdb_id,
+    tmdb_season, tvdb_id, tvdb_season, override), or None.
     """
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
-    return _bangumi_mikan_map.get(bangumi_id)
+    mapping = _mapping_cache()
+    return mapping.get(bangumi_id)
 
 
 def get_map_entries_by_tmdb_id(tmdb_id: int) -> list[dict]:
@@ -242,19 +229,18 @@ def get_map_entries_by_tmdb_id(tmdb_id: int) -> list[dict]:
         tmdb_id: TMDB series ID.
 
     Returns:
-        List of dicts with keys: bangumi_id, name, name_original,
+        List of dicts with keys: bangumi_id, title_cn, title_jp,
         tvdb_id, tvdb_season, tmdb_season.
         Sorted by bangumi_id ascending.
     """
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
+    mapping = _mapping_cache()
     results: list[dict] = []
-    for bgm_id_str, entry in _bangumi_mikan_map.items():
+    for bgm_id_str, entry in mapping.items():
         if entry.get("tmdb_id") == tmdb_id:
             results.append({
                 "bangumi_id": int(bgm_id_str),
-                "name": entry.get("name", ""),
-                "name_original": entry.get("name_original"),
+                "title_cn": entry.get("title_cn", ""),
+                "title_jp": entry.get("title_jp"),
                 "tvdb_id": entry.get("tvdb_id"),
                 "tvdb_season": entry.get("tvdb_season"),
                 "tmdb_season": entry.get("tmdb_season"),
@@ -264,15 +250,14 @@ def get_map_entries_by_tmdb_id(tmdb_id: int) -> list[dict]:
 
 
 def search_by_name(query: str) -> list[dict]:
-    """Search bangumi_mikan_map by name. Returns up to 20 short matches."""
-    global _bangumi_mikan_map
-    _bangumi_mikan_map = _mapping_cache()
+    """Search community mappings by name. Returns up to 20 short matches."""
+    mapping = _mapping_cache()
     q = query.strip().lower()
     if not q:
         return []
     results = []
-    for bid_str, entry in _bangumi_mikan_map.items():
-        name = entry.get("name", "")
+    for bid_str, entry in mapping.items():
+        name = entry.get("title_cn", "")
         if q in name.lower():
             results.append({
                 "bangumi_id": int(bid_str),
@@ -287,61 +272,11 @@ def search_by_name(query: str) -> list[dict]:
 # RSS Subscriptions
 # ═══════════════════════════════════════════════════════════════════════
 
-_SUBS_FILE = _USER_DATA_DIR / "subscriptions.json"
 _subs_lock = threading.Lock()
 
 
 def _load_subs() -> list[dict]:
-    return _store.list_subscriptions(_SUBS_FILE, _migrate_subscriptions)
-
-
-def _migrate_subscriptions(data: list[dict]) -> bool:
-    """Migrate old flat subscription format to nested groups.
-
-    Returns True if any migration was performed.
-    """
-    migrated = False
-    for sub in data:
-        if "bgm" in sub or "primary" in sub:
-            continue  # already migrated (or created in new format)
-
-        sub["bgm"] = {
-            "season": sub.pop("bgm_season", 1),
-            "sortrange": sub.pop("bgm_sortrange", [0, 0]),
-            "subject_name": sub.pop("bgm_subject_name", sub.pop("name", "")),
-            "series_name": sub.pop("series_name", ""),
-            "rating": sub.pop("bgm_rating", 0.0),
-            "air_date": sub.pop("air_date", ""),
-        }
-        sub.pop("bgm_rating_total", None)
-
-        sub["tvdb"] = {
-            "id": sub.pop("tvdb_id", 0) or 0,
-            "season": sub.pop("tvdb_season", None),
-            "ep_offset": sub.pop("tvdb_ep_offset", 0),
-        }
-        sub["tmdb"] = {
-            "id": sub.pop("tmdb_id", 0) or 0,
-            "season": sub.pop("tmdb_season", None),
-            "ep_offset": sub.pop("tmdb_ep_offset", 0),
-        }
-
-        sub["primary"] = {
-            "rss_url": sub.pop("rss_url", ""),
-            "subgroup_id": sub.pop("subgroup_id", 0),
-            "subgroup_name": sub.pop("subgroup_name", ""),
-            "filter_tags": sub.pop("filter_tags", []),
-            "exclude_patterns": sub.pop("exclude_patterns", []),
-        }
-        sub["backup"] = {
-            "rss_url": sub.pop("backup_rss_url", ""),
-            "subgroup_id": sub.pop("backup_subgroup_id", 0),
-            "subgroup_name": sub.pop("backup_subgroup_name", ""),
-            "filter_tags": sub.pop("backup_filter_tags", []),
-            "exclude_patterns": sub.pop("backup_exclude_patterns", []),
-        }
-        migrated = True
-    return migrated
+    return _store.list_subscriptions()
 
 
 def list_subscriptions() -> list[dict]:
@@ -375,11 +310,11 @@ def add_subscription(name: str, rss_url: str, bangumi_id: int, subgroup_id: int,
                   "download_path": download_path or "/{series_name}/Season {season}",
                   "active": 1, "created_at": now, "primary": primary, "backup": backup}
         return record, record
-    return _store.mutate_subscription(_SUBS_FILE, _migrate_subscriptions, bangumi_id, operation)
+    return _store.mutate_subscription(bangumi_id, operation)
 
 
 def remove_subscription(bangumi_id: int) -> bool:
-    return _store.mutate_subscription(_SUBS_FILE, _migrate_subscriptions, bangumi_id,
+    return _store.mutate_subscription(bangumi_id,
                                       lambda existing: (None, existing is not None))
 
 
@@ -395,7 +330,7 @@ def update_subscription(bangumi_id: int, fields: dict, *, identity_source="expli
         existing["_identity_update_source"] = identity_source
         existing["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         return existing, True
-    return _store.mutate_subscription(_SUBS_FILE, _migrate_subscriptions, bangumi_id, operation)
+    return _store.mutate_subscription(bangumi_id, operation)
 
 
 def set_subscription_rss_offset(bangumi_id: int, key: str, offset: int) -> bool:
@@ -407,35 +342,33 @@ def set_subscription_rss_offset(bangumi_id: int, key: str, offset: int) -> bool:
         existing.setdefault(key, {})["offset"] = offset
         existing["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
         return existing, True
-    return _store.mutate_subscription(_SUBS_FILE, _migrate_subscriptions, bangumi_id, operation)
+    return _store.mutate_subscription(bangumi_id, operation)
 
 
 # ═══════════════════════════════════════════════════════════════════════
 # Download history (dedup by bangumi_id + episode_number)
 # ═══════════════════════════════════════════════════════════════════════
 
-_HIST_FILE = _USER_DATA_DIR / "download_history.json"
-
 
 from ..db import download_history as _history
 
 
 def _load_hist() -> dict:
-    return _history.legacy_document(_HIST_FILE)
+    return _history.history_document()
 
 
 def is_downloaded(bangumi_id: int, ep_num: int) -> bool:
-    _, status = _history.get_episode(_HIST_FILE, bangumi_id, ep_num)
+    _, status = _history.get_episode(bangumi_id, ep_num)
     return status == "downloaded"
 
 
 def get_episode_source(bangumi_id: int, ep_num: int) -> str | None:
-    entry, _ = _history.get_episode(_HIST_FILE, bangumi_id, ep_num)
+    entry, _ = _history.get_episode(bangumi_id, ep_num)
     return entry.get("source") if entry else None
 
 
 def get_episode_pub_date(bangumi_id: int, ep_num: int) -> str | None:
-    entry, _ = _history.get_episode(_HIST_FILE, bangumi_id, ep_num)
+    entry, _ = _history.get_episode(bangumi_id, ep_num)
     return entry.get("pub_date") if entry else None
 
 
@@ -445,75 +378,79 @@ def remove_episode_record(bangumi_id: int, ep_num: int) -> bool:
             return False
         session.delete(row)
         return True
-    return _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
+    return _history.mutate_episode(bangumi_id, ep_num, operation)
 
 
 def mark_downloaded(
-    bangumi_id: int, ep_num: int, rss_url: str, guid: str, source: str,
-    pub_date: str = "", info_hash: str = "", *, episode_mapping=None, resource_identity=None, identity_revision=None, processing_result=None,
+    bangumi_id: int, ep_num: int, guid: str, source: str,
+    pub_date: str = "", info_hash: str = "", *, episode_mapping=None, download_path=None,
 ) -> None:
     from ..db.models import DownloadEpisode
+    from ..db.download_episode_mapping import save
 
     def operation(session, row):
         if row is None:
             row = DownloadEpisode(bangumi_id=bangumi_id, episode_number=ep_num)
             session.add(row)
-        row.rss_url = rss_url
         row.guid = guid
         row.source = source
         row.pub_date = pub_date
         row.info_hash = info_hash
         row.at = time.strftime("%Y-%m-%dT%H:%M:%S")
+        if download_path is not None:
+            row.download_path = download_path
         if episode_mapping is not None:
-            from ..domain.persistence import write_history_snapshot
-            write_history_snapshot(row, episode_mapping, resource_identity, identity_revision, processing_result)
-        elif row.episode_mapping_snapshot is None:
-            # Manual marks know only subject/sort. Do not borrow a current binding.
-            from ..domain.episode import create_episode_mapping
-            from ..domain.persistence import write_history_snapshot
-            empty = {"series_id": None, "episode_id": None, "season_number": None, "episode_number": None}
-            mapping = create_episode_mapping(
-                {"season_number": None, "episode_number": ep_num},
-                {"subject_id": bangumi_id, "episode_id": None, "episode_number": None, "episode_absolute": ep_num},
-                dict(empty), dict(empty))
-            write_history_snapshot(row, mapping)
+            save(session, row, episode_mapping)
         row.fail_count = 0
         row.status = "downloaded"
-    _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
+    _history.mutate_episode(bangumi_id, ep_num, operation)
 
 
-def set_episode_overrides(
-    bangumi_id: int, ep_num: int, tmdb_ep: int | None = None,
-    tmdb_season: int | None = None,
+def set_episode_mapping(
+    bangumi_id: int, ep_num: int, tmdb_episode_number: int | float | None = None,
+    tmdb_season_number: int | None = None,
 ) -> bool:
+    from ..db.models import BangumiMapping, DownloadEpisodeMapping
+
     def operation(session, row):
         if row is None:
             return False
-        if tmdb_ep is not None:
-            row.tmdb_ep = tmdb_ep
-        if tmdb_season is not None:
-            row.tmdb_season = tmdb_season
+        mapping = session.get(DownloadEpisodeMapping, (bangumi_id, ep_num))
+        if mapping is None:
+            # A manually marked record may not have a mapping yet.
+            from ..db.download_episode_mapping import legacy_values
+            community = session.get(BangumiMapping, bangumi_id)
+            values, _ = legacy_values({"bangumi_id": bangumi_id, "episode_number": ep_num},
+                                      {field: getattr(community, field) for field in
+                                       ("tmdb_id", "tmdb_season", "tvdb_id", "tvdb_season")} if community else {})
+            mapping = DownloadEpisodeMapping(bangumi_id=bangumi_id, episode_number=ep_num, **values)
+            session.add(mapping)
+        for field, value in (("tmdb_episode_number", tmdb_episode_number),
+                             ("tmdb_season_number", tmdb_season_number)):
+            if value is not None and getattr(mapping, field) != value:
+                setattr(mapping, field, value)
+                mapping.tmdb_episode_id = None
         return True
-    saved = _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
+    saved = _history.mutate_episode(bangumi_id, ep_num, operation)
     if saved:
-        logger.info("overrides set for bangumi=%d sort=%d: tmdb_ep=%s tmdb_season=%s",
-                    bangumi_id, ep_num, tmdb_ep, tmdb_season)
+        logger.info("Episode mapping updated: bangumi=%d sort=%d TMDB season=%s episode=%s",
+                    bangumi_id, ep_num, tmdb_season_number, tmdb_episode_number)
     return saved
 
 
 def get_all_episodes(bangumi_id: int) -> dict[str, dict]:
-    return _history.get_all(_HIST_FILE, bangumi_id)
+    return _history.get_all(bangumi_id)
 
 
 def clear_download_history(bangumi_id: int) -> int:
-    return _history.clear(_HIST_FILE, bangumi_id)
+    return _history.clear(bangumi_id)
 
 
 MAX_FAIL_COUNT = 5
 
 
 def get_fail_count(bangumi_id: int, ep_num: int) -> int:
-    entry, _ = _history.get_episode(_HIST_FILE, bangumi_id, ep_num)
+    entry, _ = _history.get_episode(bangumi_id, ep_num)
     return entry.get("fail_count", 0) if entry else 0
 
 
@@ -527,14 +464,14 @@ def increment_fail_count(bangumi_id: int, ep_num: int) -> int:
             session.add(row)
         row.fail_count += 1
         return row.fail_count
-    return _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
+    return _history.mutate_episode(bangumi_id, ep_num, operation)
 
 
 def reset_fail_count(bangumi_id: int, ep_num: int) -> None:
     def operation(session, row):
         if row:
             row.fail_count = 0
-    _history.mutate_episode(_HIST_FILE, bangumi_id, ep_num, operation)
+    _history.mutate_episode(bangumi_id, ep_num, operation)
 
 
 # ═══════════════════════════════════════════════════════════════════════

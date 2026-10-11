@@ -726,11 +726,11 @@ async def enrich_subscription(
         except Exception:
             _emit("⚠️ Failed to fetch Bangumi rating/air_date (non-fatal)")
 
-        # 4. TMDB info from bangumi_mikan_map.json
+        # 4. TMDB info from SQLite community mappings
         tmdb_id = get_tmdb_id(bangumi_id)
         tmdb_season = get_tmdb_season(bangumi_id)
 
-        # 4a. TVDB info from bangumi_mikan_map.json
+        # 4a. TVDB info from SQLite community mappings
         tvdb_id = get_tvdb_id(bangumi_id)
         tvdb_season = get_tvdb_season(bangumi_id)
 
@@ -765,7 +765,7 @@ async def enrich_subscription(
                     tvdb_season = tvdb_result["tvdb_season"]
                     tvdb_auto_ep_number = tvdb_result.get("tvdb_ep_number")
                     from ..data import set_tvdb_id as _persist_tvdb
-                    _persist_tvdb(bangumi_id, tvdb_id, tvdb_season)
+                    _persist_tvdb(bangumi_id, tvdb_id, tvdb_season, manual=False)
                     _emit(
                         f"✅ TVDB 自动推断成功: "
                         f"tvdb_id={tvdb_id}, tvdb_season={tvdb_season}"
@@ -788,7 +788,7 @@ async def enrich_subscription(
                     tmdb_season = fallback_result["tmdb_season"]
                     tmdb_auto_ep_number = fallback_result.get("tmdb_ep_number")
                     # Persist so future lookups are instant
-                    data_set_tmdb_id(bangumi_id, tmdb_id, tmdb_season)
+                    data_set_tmdb_id(bangumi_id, tmdb_id, tmdb_season, manual=False)
                     _emit(
                         f"✅ TMDB 自动推断成功: "
                         f"tmdb_id={tmdb_id}, tmdb_season={tmdb_season}"

@@ -3,10 +3,6 @@
 import asyncio
 import json as _json
 import logging
-import subprocess
-import sys
-import tempfile
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -20,6 +16,8 @@ from ..clients.qbittorrent import (
     get_torrents_by_hashes,
     login as qb_login,
 )
+from ..services import mapping_sync
+from ..db import legacy_data as mapping_store
 from ..services import downloader
 from ..services import initial_rss_poll
 from ..services import rss as rss_service
@@ -69,7 +67,7 @@ async def get_bangumi_search_poster(bangumi_id: int):
 
 @router.get("/api/rss/search")
 async def search_bangumi(q: str):
-    """Search bangumi_mikan_map by name. Returns up to 20 matches."""
+    """Search community mapping by name. Returns up to 20 matches."""
     return data.search_by_name(q)
 
 
@@ -184,33 +182,20 @@ async def assign_mikan_id(bangumi_id: int, body: AssignMikanRequest):
 @router.get("/api/rss/data-status")
 async def rss_data_status():
     """Report the active database mapping."""
-    count = data.mapping_count()
-    return {"exists": count > 0, "count": count}
+    return await asyncio.to_thread(mapping_store.mapping_sync_status)
 
 
 @router.post("/api/rss/download-data")
 async def rss_download_data():
-    """Download the latest bangumi-data and rebuild the Mikan mapping."""
-    script = Path(__file__).resolve().parents[2] / "scripts" / "download_bangumi_data.py"
-    if not script.exists():
-        raise HTTPException(500, f"下载脚本不存在: {script}")
-
-    # Import the bundled legacy mapping before fetching new upstream data.
-    data.mapping_count()
-    with tempfile.TemporaryDirectory() as directory:
-        output = Path(directory) / "bangumi_mikan_map.json"
-        try:
-            proc = subprocess.run(
-                [sys.executable, str(script), "--output", str(output)],
-                capture_output=True, text=True, timeout=120,
-            )
-        except subprocess.TimeoutExpired:
-            raise HTTPException(500, "下载超时，请重试")
-        if proc.returncode != 0:
-            raise HTTPException(500, f"下载失败:\n{proc.stderr or proc.stdout}")
-        data.replace_mappings(_json.loads(output.read_text(encoding="utf-8")))
-
-    return {"ok": True, "output": proc.stdout}
+    """Update community mappings directly in SQLite."""
+    try:
+        return await mapping_sync.synchronize()
+    except mapping_sync.MappingSyncBusy as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(504, "映射更新超时，原有数据已保留，请重试") from exc
+    except Exception as exc:
+        raise HTTPException(502, "映射更新失败，原有数据已保留，请检查网络后重试") from exc
 
 
 # ── /api/rss/subscriptions ──
@@ -491,7 +476,7 @@ async def set_subscription_tmdb(bangumi_id: int, body: SetTmdbRequest):
     if not ok:
         raise HTTPException(404, f"Subscription not found: {bangumi_id}")
 
-    # Also persist to bangumi_mikan_map so future auto-lookups work
+    # Also persist to community mapping so future auto-lookups work
     data.set_tmdb_id(bangumi_id, body.tmdb_id, body.tmdb_season)
 
     logger.info(
@@ -591,9 +576,8 @@ async def subscription_history(bangumi_id: int):
             "guid": ep.get("guid", ""),
             "at": ep.get("at", ""),
             "info_hash": h,
-            "episode_mapping_snapshot": ep["episode_mapping_snapshot"],
-            "tmdb_episode_override": ep.get("tmdb_ep"),
-            "tmdb_season_override": ep.get("tmdb_season"),
+            "download_path": ep.get("download_path"),
+            "mapping": ep.get("mapping"),
         })
         if h:
             hashes.append(h)
@@ -700,9 +684,8 @@ async def subscription_history_stream(bangumi_id: int):
                 "guid": ep.get("guid", ""),
                 "at": ep.get("at", ""),
                 "info_hash": h,
-                "episode_mapping_snapshot": ep["episode_mapping_snapshot"],
-                "tmdb_episode_override": ep.get("tmdb_ep"),
-                "tmdb_season_override": ep.get("tmdb_season"),
+                "download_path": ep.get("download_path"),
+                "mapping": ep.get("mapping"),
             })
             if h:
                 hashes.append(h)
