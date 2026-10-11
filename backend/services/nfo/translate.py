@@ -94,16 +94,32 @@ async def resolve_episode_title(
     logger.info("NFO [%s 标题] DeepSeek：翻译成功；最终使用：Bangumi 译文", context)
     return title
 
+# Bangumi descriptions mix narrative and credits without a consistent format.
+# Ask the model to distinguish them semantically instead of truncating the input.
+_ANIME_SYNOPSIS_RULES = (
+    "- Translate ONLY the narrative synopsis. Omit all production, staff, "
+    "cast, voice actor and production company credits, including their "
+    "headings, roles and name lists. Credits may have no heading, mix "
+    "Japanese and Chinese role labels, or span multiple lines and blank lines\n"
+    "- Preserve every narrative paragraph, dialogue, meaning, tone and "
+    "punctuation; do not summarize, expand or invent content\n"
+    "- Preserve characters, titles or roles, organizations and proper nouns "
+    "mentioned WITHIN the story; do not mistake them for production credits\n"
+    "- Translate or transliterate Japanese kana in the narrative, including "
+    "character names and proper nouns, into Chinese; never keep Japanese kana\n"
+    "- Keep anime-specific terminology accurate\n"
+    "- If the input contains only credits and no narrative synopsis, "
+    "return an empty string\n"
+    "- Output ONLY the Chinese narrative translation — no headings, "
+    "explanations, furigana or romanized readings"
+)
+
 ANIME_TRANSLATION_SYSTEM = (
     "You are a professional anime subtitle translator. "
     "Translate the following Japanese anime episode synopsis into "
     "Simplified Chinese (zh-CN).\n\n"
     "Rules:\n"
-    "- Preserve character names and proper nouns as-is (katakana → "
-    "Chinese transliteration; never keep Japanese kana)\n"
-    "- Keep anime-specific terminology accurate\n"
-    "- Output ONLY the Chinese translation — no explanations, no "
-    "furigana, no romanized readings"
+    + _ANIME_SYNOPSIS_RULES
 )
 
 # Stricter prompt used on retries after a failed verification pass.
@@ -114,10 +130,10 @@ ANIME_TRANSLATION_RETRY_SYSTEM = (
     "Translate the following synopsis into Simplified "
     "Chinese (zh-CN).\n\n"
     "Rules:\n"
-    "- Output ONLY the Chinese translation\n"
     "- Never output the original Japanese text\n"
-    "- No explanations, no furigana, no romanized readings\n"
-    "- Translate or transliterate all names into Chinese; no Japanese kana"
+    "- Return the complete translated narrative again, omitting any "
+    "production or cast credits even if they appeared in a previous output\n"
+    + _ANIME_SYNOPSIS_RULES
 )
 
 MAX_ATTEMPTS = 3
