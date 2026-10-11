@@ -93,7 +93,10 @@ export default function ResourcesPage() {
                       <p className="mt-1 text-xs text-muted-foreground">{torrentTags(torrent).join(' · ')}</p>
                       {torrent.published_at && <p className="mt-1 text-xs text-muted-foreground">发布时间：{torrent.published_at}</p>}
                     </div>
-                    <Button type="button" variant="outline" size="sm" onClick={() => navigate('/torrent', { state: { resourceId: torrent.resource_id } })}>
+                    <Button type="button" variant="outline" size="sm" onClick={() => {
+                      setSelected(null);
+                      navigate('/torrent', { state: { resourceId: torrent.resource_id } });
+                    }}>
                       转到下载页面
                     </Button>
                   </div>
