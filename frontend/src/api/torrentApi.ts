@@ -6,21 +6,16 @@ import type { AppConfig } from '../types/preview';
 
 const API_BASE = '/api';
 
-export interface TorrentCollection {
+export interface TorrentCollectionCard {
+  card_key: string;
+  bangumi_id: number | null;
+  title_cn: string;
+  poster_url: string;
+  tags: string[];
   info_hash: string;
-  torrent_name: string;
-  show_name: string;
-  bgm_rating?: number;
-  poster_url?: string;
-  status: 'downloading' | 'completed' | 'failed';
-  created_at: string;
-  updated_at: string;
-  encoding_group: string;
-  video_codec: string;
-  bangumi_ids: number[];
 }
 
-export async function getTorrentCollections(): Promise<TorrentCollection[]> {
+export async function getTorrentCollections(): Promise<TorrentCollectionCard[]> {
   const res = await fetch(`${API_BASE}/torrent/collections`);
   if (!res.ok) throw new Error(`Failed to load torrents (HTTP ${res.status})`);
   return res.json();

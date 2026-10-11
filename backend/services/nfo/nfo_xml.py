@@ -3,6 +3,9 @@
 import re
 import hashlib
 import logging
+import os
+import tempfile
+from xml.etree import ElementTree
 from pathlib import Path
 from ...domain.episode import ResolvedEpisode
 
@@ -27,7 +30,18 @@ def _write_nfo(file_path: Path, xml: str) -> None:
     expected = hashlib.sha256(xml.encode("utf-8")).hexdigest()
     logger.info("NFO write begin: path=%s resolved=%s before=%s expected_sha256=%s",
                 file_path.absolute(), file_path.resolve(), before, expected)
-    file_path.write_text(xml, encoding="utf-8")
+    ElementTree.fromstring(xml)
+    fd, temporary = tempfile.mkstemp(prefix=".nfo-", dir=file_path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(xml)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, file_path.stat().st_mode & 0o777 if file_path.exists() else 0o644)
+        os.replace(temporary, file_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
     after = snapshot()
     if after.get("sha256") != expected:
         raise OSError(f"NFO read-back verification failed: {file_path}")
@@ -81,6 +95,7 @@ def generate_episode_nfo(
     output_dir: str = ".",
     file_stem: str = "",
     overwrite: bool = False,
+    preserve_file_stem: bool = False,
 ) -> str:
     """Serialize resolved episode metadata; no provider queries or fallback."""
     metadata = episode["metadata"]
@@ -99,7 +114,12 @@ def generate_episode_nfo(
     rating = metadata["rating"] if metadata["rating"] is not None else 0.0
     # Filename: use template-derived stem if provided, else legacy pattern
     if file_stem:
-        file_base = _sanitize_filename(file_stem)
+        if preserve_file_stem:
+            if Path(file_stem).name != file_stem or file_stem in {".", ".."}:
+                raise ValueError("invalid_nfo_file_stem")
+            file_base = file_stem
+        else:
+            file_base = _sanitize_filename(file_stem)
     else:
         file_base = _sanitize_filename(
             bangumi_subject_name or original_name or show_name
@@ -150,6 +170,7 @@ def generate_tv_show_nfo(
     output_dir: str = ".",
     tvdb_id: int = 0,
     tmdb_id: int = 0,
+    overwrite: bool = False,
 ) -> str:
     """Generate a tvshow.nfo file.
 
@@ -179,7 +200,7 @@ def generate_tv_show_nfo(
     file_path = output_path / "tvshow.nfo"
 
     # Skip if already exists
-    if file_path.exists():
+    if file_path.exists() and not overwrite:
         logger.info("NFO skipped: existing file path=%s resolved=%s", file_path.absolute(), file_path.resolve())
         return str(file_path)
 
@@ -196,6 +217,7 @@ def generate_season_nfo(
     bangumi_id: int,
     output_dir: str = ".",
     tvdb_season_id: int = 0,
+    overwrite: bool = False,
 ) -> str:
     """Generate a season.nfo file (data from Bangumi subject).
 
@@ -233,7 +255,7 @@ def generate_season_nfo(
     file_path = output_path / "season.nfo"
 
     # Skip if already exists
-    if file_path.exists():
+    if file_path.exists() and not overwrite:
         logger.info("NFO skipped: existing file path=%s resolved=%s", file_path.absolute(), file_path.resolve())
         return str(file_path)
 

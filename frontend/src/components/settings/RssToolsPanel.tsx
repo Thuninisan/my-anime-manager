@@ -124,23 +124,20 @@ export default function RssToolsPanel({ config, onChange }: Props) {
     <div className="flex flex-col gap-6">
       {/* ── RSS Mapping Data ── */}
       <SectionCard icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><circle cx="12" cy="12" r="10"/><path d="M8.56 2.75c4.37 6.03 6.02 9.42 8.03 17.72m2.54-15.38c-3.72 4.35-8.94 5.66-13.88 5.66"/></svg>} title="RSS Mapping Data">
-        <p className="text-xs text-muted-foreground mb-3">Community mappings initialize automatically. Refresh them here to query subtitle group RSS feeds on Mikan.</p>
+        <p className="text-xs text-muted-foreground mb-3">Community mappings initialize automatically and refresh every 24 hours. You can also refresh them here.</p>
         <div className="flex items-center justify-between">
           <span className="text-sm text-muted-foreground">
             {dataStatusError || (dataStatus === null ? 'Checking...'
               : dataStatus.syncing ? `Updating (${dataStatus.count} entries)...`
-              : dataStatus.initialized ? `Ready (${dataStatus.count} entries)`
+              : dataStatus.exists ? `Ready (${dataStatus.count} entries)`
               : `Not initialized (${dataStatus.count} entries)`)}
           </span>
           <Button variant="secondary" size="sm" className="text-xs h-8"
             onClick={handleDownloadData}
-            disabled={downloading || dataStatus?.syncing}>
-            {downloading || dataStatus?.syncing ? 'Updating...' : dataStatus?.initialized ? 'Refresh' : 'Retry initialization'}
+            disabled={downloading || dataStatus === null || !!dataStatusError || dataStatus.syncing}>
+            {downloading || dataStatus?.syncing ? 'Updating...' : dataStatus?.exists ? 'Refresh' : 'Retry initialization'}
           </Button>
         </div>
-        {dataStatus?.last_success_at && <p className="mt-2 text-xs text-muted-foreground">Last updated: {new Date(dataStatus.last_success_at).toLocaleString()}</p>}
-        {dataStatus?.last_error && <p className="mt-2 text-xs text-destructive">{dataStatus.last_error}</p>}
-        {dataStatus?.warning && <p className="mt-2 text-xs text-muted-foreground">{dataStatus.warning}</p>}
         {downloadMsg && <pre className="mt-3 p-3 bg-muted rounded-lg text-xs text-muted-foreground whitespace-pre-wrap max-h-24 overflow-y-auto">{downloadMsg}</pre>}
       </SectionCard>
 

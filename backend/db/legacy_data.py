@@ -1,12 +1,10 @@
 """Relational SQLite storage for subscriptions and Bangumi mappings."""
 
-from datetime import datetime, timezone, timedelta
-
 from sqlalchemy import select, func
 
 from .connection import new_session
 from .models import (BangumiMapping, Subscription,
-                     SubscriptionFeed, MappingSyncState)
+                     SubscriptionFeed)
 
 def _subscription_record(session, row: Subscription) -> dict:
     from .identity import read_resource_identity
@@ -179,32 +177,17 @@ def _write_mapping(session, bangumi_id: int, values: dict, *, override: bool) ->
     row.override = override
 
 
-def ensure_mapping_sync_state():
-    """Initialize synchronization state for an existing or newly created database."""
-    with new_session() as session:
-        if session.get(MappingSyncState, 1) is not None:
-            return
-    with new_session() as session, session.begin():
-        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
-        if session.get(MappingSyncState, 1) is None:
-            count = session.scalar(select(func.count()).select_from(BangumiMapping)) or 0
-            session.add(MappingSyncState(id=1, initialized=count > 0))
-
-
 def list_mappings() -> dict[int, dict]:
-    ensure_mapping_sync_state()
     with new_session() as session:
         return {row.bangumi_id: _mapping_dict(session, row) for row in session.scalars(select(BangumiMapping))}
 
 
 def mapping_count() -> int:
-    ensure_mapping_sync_state()
     with new_session() as session:
         return session.scalar(select(func.count()).select_from(BangumiMapping)) or 0
 
 
 def set_mapping_fields(bangumi_id: int, fields: dict, *, manual: bool = True) -> bool:
-    ensure_mapping_sync_state()
     with new_session() as session, session.begin():
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
         row = session.get(BangumiMapping, bangumi_id)
@@ -215,26 +198,22 @@ def set_mapping_fields(bangumi_id: int, fields: dict, *, manual: bool = True) ->
         if not fields or any(field not in MAPPING_FIELDS for field in fields):
             raise ValueError("Invalid mapping fields")
         _write_mapping(session, bangumi_id, {**_mapping_dict(session, row), **fields}, override=manual or row.override)
-        session.get(MappingSyncState, 1).revision += 1
         return True
 
 
 def add_mapping(bangumi_id: int, name: str, name_original: str = "") -> None:
     """Persist a Bangumi search selection so the normal Mikan flow can use it."""
-    ensure_mapping_sync_state()
     fields = {"title_cn": name, "title_jp": name_original}
     with new_session() as session, session.begin():
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
         if session.get(BangumiMapping, bangumi_id) is None:
             _write_mapping(session, bangumi_id, fields, override=True)
-            session.get(MappingSyncState, 1).revision += 1
 
 
-def replace_mappings(records: dict, *, preserve_fields=(), synced=False, warning=None, sync_token=None):
+def replace_mappings(records: dict, *, preserve_fields=()):
     """Replace upstream dataset atomically, preserving manually edited rows."""
     if not isinstance(records, dict) or not records:
         raise ValueError("Empty or invalid Bangumi mapping dataset")
-    ensure_mapping_sync_state()
     normalized = {}
     for key, value in records.items():
         if not isinstance(value, dict) or not isinstance(value.get("title_cn"), str):
@@ -242,8 +221,6 @@ def replace_mappings(records: dict, *, preserve_fields=(), synced=False, warning
         normalized[int(key)] = value
     with new_session() as session, session.begin():
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
-        if sync_token is not None and session.get(MappingSyncState, 1).sync_token != sync_token:
-            raise RuntimeError("Mapping synchronization lease expired")
         current = {row.bangumi_id: row for row in session.scalars(select(BangumiMapping))}
         for bangumi_id, upstream in normalized.items():
             row = current.pop(bangumi_id, None)
@@ -256,59 +233,3 @@ def replace_mappings(records: dict, *, preserve_fields=(), synced=False, warning
         for row in current.values():
             if not row.override:
                 session.delete(row)
-
-        state = session.get(MappingSyncState, 1)
-        state.revision += 1
-        if synced:
-            state.initialized = True
-            state.last_success_at = datetime.now(timezone.utc).isoformat()
-            state.last_error = None
-            state.warning = warning
-
-
-def mapping_sync_status() -> dict:
-    ensure_mapping_sync_state()
-    with new_session() as session:
-        state = session.get(MappingSyncState, 1)
-        count = session.scalar(select(func.count()).select_from(BangumiMapping)) or 0
-        return {"exists": count > 0, "count": count, "initialized": state.initialized,
-                "last_attempt_at": state.last_attempt_at, "last_success_at": state.last_success_at,
-                "last_error": state.last_error, "warning": state.warning,
-                "syncing": _mapping_sync_active(state)}
-
-
-def _mapping_sync_active(state) -> bool:
-    return bool(state.sync_token and state.last_attempt_at and
-                datetime.fromisoformat(state.last_attempt_at) > datetime.now(timezone.utc) - timedelta(minutes=5))
-
-
-def claim_mapping_sync(token: str, *, only_if_needed=False) -> str:
-    ensure_mapping_sync_state()
-    with new_session() as session, session.begin():
-        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
-        state = session.get(MappingSyncState, 1)
-        if _mapping_sync_active(state):
-            return "busy"
-        if only_if_needed and state.initialized:
-            return "initialized"
-        state.sync_token = token
-        state.last_attempt_at = datetime.now(timezone.utc).isoformat()
-        state.last_error = None
-        state.warning = None
-        return "claimed"
-
-
-def finish_mapping_sync(token: str, error=None) -> None:
-    with new_session() as session, session.begin():
-        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
-        state = session.get(MappingSyncState, 1)
-        if state.sync_token == token:
-            state.sync_token = None
-            completed = state.last_success_at and state.last_success_at >= state.last_attempt_at
-            state.last_error = None if completed else error
-
-
-def mapping_revision() -> int:
-    ensure_mapping_sync_state()
-    with new_session() as session:
-        return session.get(MappingSyncState, 1).revision

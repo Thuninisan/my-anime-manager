@@ -86,6 +86,11 @@ async def batch_nfo_generator(
     series_name: str = "",
     overwrite: bool = False,
     metadata_ctx=None,
+    *,
+    overwrite_assets: bool = False,
+    download_images: bool = True,
+    refresh_results: list[dict] | None = None,
+    path_template: str | None = None,
 ) -> dict:
     """Generate NFO files + images for a batch of episodes.
 
@@ -98,6 +103,10 @@ async def batch_nfo_generator(
         pre_path: Base directory prepended to the formatted template path.
         episodes: Canonical entries containing ``episode_mapping``.
         overwrite: Rewrite episode NFO + thumbs even if they exist (regen).
+        overwrite_assets: Also rewrite existing show/season NFOs.
+        download_images: Disable image requests and reuse local thumbnails.
+        refresh_results: Collect per-file outcomes and continue after write errors.
+        path_template: Frozen template for a background refresh job.
 
     Returns:
         ``{"nfoGenerated": int, "imagesDownloaded": int}``.
@@ -117,7 +126,21 @@ async def batch_nfo_generator(
     from .metadata_context import MetadataContext
     metadata_ctx = metadata_ctx or MetadataContext()
 
-    template = config.RSS_PATH_TEMPLATE
+    template = path_template if path_template is not None else config.RSS_PATH_TEMPLATE
+
+    def write_file(kind, path, writer, **kwargs):
+        if refresh_results is None:
+            return writer(**kwargs)
+        try:
+            existed = path.exists()
+            output = writer(**kwargs)
+        except Exception as exc:
+            logger.exception("NFO refresh failed: %s", path)
+            refresh_results.append({"kind": kind, "path": str(path), "status": "failed", "message": str(exc)})
+            return None
+        refresh_results.append({"kind": kind, "path": str(path), "status": "success",
+                                "message": "已覆盖" if existed else "已生成"})
+        return output
 
     from ...domain.episode_metadata_adapters import (
         metadata_candidates_from_catalogs,
@@ -234,6 +257,8 @@ async def batch_nfo_generator(
         # ── Resolve metadata from caches ──
         show = tmdb_show_cache.get(tmdb_id, {})
         tmdb_title = show.get("title", str(tmdb_id))
+        if refresh_results is not None and not show.get("title"):
+            tmdb_title = series_name or tvdb_cache.get(tvdb_id, {}).get("name") or bgm_subject_cache.get(bgm_id, str(bgm_id))
 
         # Raw provider payloads stop at the catalog compatibility boundary.
         season_map = metadata_ctx.tmdb_season_maps.get((tmdb_id, "zh-CN"), {})
@@ -253,6 +278,8 @@ async def batch_nfo_generator(
                 mapping, season_map, tvdb_cache.get(tvdb_id, {}),
                 bgm_cache.get(bgm_id, []),
             )
+        if refresh_results is not None and not any(candidates.get(provider) for provider in ("tmdb", "tvdb")):
+            raise ValueError("未获取到该集的 TMDB/TVDB 元数据，已保留原 NFO")
         bangumi_ep_val = mapping["bangumi"]["episode_number"]
         resolved = await resolve_nfo_episode(
             mapping, candidates,
@@ -286,33 +313,46 @@ async def batch_nfo_generator(
             file_stem = Path(rel_path).stem
             season_dir = Path(pre_path) / Path(rel_path).parent
         show_dir = season_dir.parent
+        if refresh_results is not None:
+            if not file_stem or any(part == ".." for part in season_dir.parts):
+                raise ValueError("NFO 输出路径无效")
+            if not ep.get("download_path") and not season_dir.resolve().is_relative_to(Path(pre_path).resolve()):
+                raise ValueError("模板输出路径超出下载目录")
+            if not ep.get("download_path") and not show_dir.resolve().is_relative_to(Path(pre_path).resolve()):
+                raise ValueError("模板缺少作品目录，无法安全确定剧集 NFO 输出位置")
         season_dir.mkdir(parents=True, exist_ok=True)
 
         # ── tvshow.nfo + images (once per show_dir) ──
-        show_key = str(show_dir)
+        show_key = str(show_dir.resolve()) if refresh_results is not None else str(show_dir)
         if show_key not in seen_show:
             seen_show.add(show_key)
             show_nfo_exists = (show_dir / "tvshow.nfo").exists()
             if not show_nfo_exists:
                 logger.info("NFO [%s tvshow.nfo] 标题/原名/简介：TMDB；TMDB ID：TMDB；TVDB ID：TVDB", show_dir)
-            generate_tv_show_nfo(
-                title=show.get("title", str(tmdb_id)),
-                original_title=show.get("original_title", ""),
-                plot=show.get("overview", ""),
-                output_dir=str(show_dir),
-                tvdb_id=tvdb_id,
-                tmdb_id=tmdb_id,
-            )
-            nfo_count += int(not show_nfo_exists)
-            logger.info("   tvshow.nfo → %s", show_dir / "tvshow.nfo")
-            imgs = await download_show_images(tmdb_id, str(show_dir)) if tmdb_id else {}
+            if refresh_results is not None and not show.get("title"):
+                refresh_results.append({"kind": "show", "path": str(show_dir / "tvshow.nfo"),
+                                        "status": "failed", "message": "未获取到作品元数据，已保留原 NFO"})
+            else:
+                written = write_file("show", show_dir / "tvshow.nfo", generate_tv_show_nfo,
+                    title=show.get("title", str(tmdb_id)),
+                    original_title=show.get("original_title", ""),
+                    plot=show.get("overview", ""),
+                    output_dir=str(show_dir),
+                    tvdb_id=tvdb_id,
+                    tmdb_id=tmdb_id,
+                    overwrite=overwrite_assets,
+                )
+                nfo_count += int(bool(written) and (overwrite_assets or not show_nfo_exists))
+            imgs = await download_show_images(tmdb_id, str(show_dir)) if download_images and tmdb_id else {}
             img_count += sum(1 for v in imgs.values() if v)
 
         # BGM subject name (for season.nfo originaltitle)
         bgm_subject_name = bgm_subject_cache.get(bgm_id, tmdb_title)
+        if refresh_results is not None and bgm_id not in bgm_subject_data_cache:
+            bgm_subject_name = tmdb_title
 
         # ── season.nfo + poster (once per season_dir) ──
-        season_key = str(season_dir)
+        season_key = str(season_dir.resolve()) if refresh_results is not None else str(season_dir)
         if season_key not in seen_season:
             seen_season.add(season_key)
             effective_tvdb_season = tvdb_season if tvdb_season is not None else tmdb_season
@@ -337,7 +377,7 @@ async def batch_nfo_generator(
             season_nfo_exists = (season_dir / "season.nfo").exists()
             if not season_nfo_exists:
                 logger.info("NFO [%s season.nfo] 标题/季号：季映射；原名/Bangumi ID：Bangumi；播出日期：TMDB", season_dir)
-            generate_season_nfo(
+            written = write_file("season", season_dir / "season.nfo", generate_season_nfo,
                 title=f"Season {effective_tvdb_season}",
                 original_title=bgm_subject_name,
                 plot=season_plot,
@@ -346,16 +386,16 @@ async def batch_nfo_generator(
                 bangumi_id=bgm_id,
                 output_dir=str(season_dir),
                 tvdb_season_id=tvdb_id,
+                overwrite=overwrite_assets,
             )
-            nfo_count += int(not season_nfo_exists)
-            logger.info("   season.nfo → %s", season_dir / "season.nfo")
+            nfo_count += int(bool(written) and (overwrite_assets or not season_nfo_exists))
             # Season poster from BGM images if available
             bgm_subject_images = None
             for e in bgm_cache.get(bgm_id, []):
                 if isinstance(e, dict) and "images" in e:
                     bgm_subject_images = e.get("images")
                     break
-            if bgm_subject_images:
+            if download_images and bgm_subject_images:
                 try:
                     await download_season_poster(
                         {"images": bgm_subject_images},
@@ -368,7 +408,7 @@ async def batch_nfo_generator(
         # ── Episode: collect thumb coroutine + metadata ──
         # Coordinates and still provenance are already resolved.
         still = resolved["metadata"]["still_path"]
-        if still:
+        if download_images and still:
             if still_source == "tvdb":
                 thumb_coros.append((
                     download_tvdb_episode_thumb(
@@ -412,6 +452,11 @@ async def batch_nfo_generator(
     # ── Phase 3c: Generate episode NFOs ───────────────────────────────
     for i, rec in enumerate(pending_eps):
         thumb_path = thumb_results.get(i, "")
+        if not download_images:
+            existing_thumb = next((Path(rec["season_dir"]) / f"{rec['file_stem']}-thumb{suffix}"
+                                   for suffix in (".jpg", ".png", ".webp", ".jpeg")
+                                   if (Path(rec["season_dir"]) / f"{rec['file_stem']}-thumb{suffix}").is_file()), None)
+            thumb_path = str(existing_thumb) if existing_thumb else ""
         episode_nfo_exists = (Path(rec["season_dir"]) / f"{rec['file_stem']}.nfo").exists()
         if overwrite or not episode_nfo_exists:
             logger.info("NFO [%s] 字段来源：标题=%s；简介=%s；"
@@ -419,15 +464,15 @@ async def batch_nfo_generator(
                         "季集编号=TVDB→TMDB；缩略图=%s",
                         rec["context"], rec["title_source"], rec["plot_source"],
                         "已下载" if thumb_path else "无")
-        write_resolved_episode_nfo(
-            rec["resolved"],
-            show_name=rec["show"].get("title", str(rec["tmdb_series_id"])),
+        written = write_file("episode", Path(rec["season_dir"]) / f"{rec['file_stem']}.nfo",
+            write_resolved_episode_nfo, episode=rec["resolved"],
+            show_name=rec["show"].get("title") or (series_name or rec["bgm_subject_name"] if refresh_results is not None else str(rec["tmdb_series_id"])),
             bangumi_subject_name=rec["bgm_subject_name"],
             thumb_path=Path(thumb_path).name if thumb_path else "",
             output_dir=rec["season_dir"], file_stem=rec["file_stem"], overwrite=overwrite,
+            preserve_file_stem=refresh_results is not None,
         )
-        nfo_count += int(overwrite or not episode_nfo_exists)
-        logger.info("   episode.nfo → %s", Path(rec["season_dir"]) / f"{rec['file_stem']}.nfo")
+        nfo_count += int(bool(written) and (overwrite or not episode_nfo_exists))
 
     # ── Phase 4: Clear caches, return summary ──
     bgm_cache.clear()

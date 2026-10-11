@@ -151,19 +151,6 @@ class BangumiMapping(Base):
     override: Mapped[bool] = mapped_column(nullable=False, default=False, server_default=text("0"))
 
 
-class MappingSyncState(Base):
-    __tablename__ = "mapping_sync_state"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    initialized: Mapped[bool] = mapped_column(default=False, nullable=False)
-    revision: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    last_attempt_at: Mapped[str | None] = mapped_column(Text)
-    sync_token: Mapped[str | None] = mapped_column(Text)
-    last_success_at: Mapped[str | None] = mapped_column(Text)
-    last_error: Mapped[str | None] = mapped_column(Text)
-    warning: Mapped[str | None] = mapped_column(Text)
-
-
 class DownloadEpisode(Base):
     """RSS download state, media destination, and provider episode coordinates."""
     __tablename__ = "download_episodes"

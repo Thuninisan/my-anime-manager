@@ -22,7 +22,7 @@ from ..clients.errors import MissingAPIKeyError
 from ..utils.http_client import http_client_manager
 from ..db import torrents as torrent_store
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
-from ..services import downloader, initial_rss_poll, mapping_sync
+from ..services import downloader, initial_rss_poll, mapping_sync, nfo_refresh
 from ..services.resource_monitor import worker as resource_worker
 from . import state
 from .routes_downloader import router as downloader_router
@@ -44,8 +44,9 @@ _frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
 async def lifespan(_app: FastAPI):
     """Startup/shutdown handling (replaces the deprecated @app.on_event)."""
     # ── Startup ──
-    # Initialize the database and mapping synchronization state before workers start.
+    # Initialize the database before workers start.
     await asyncio.to_thread(data.mapping_count)
+    nfo_refresh.initialize()
     # Mount static assets after all routes are registered (production mode)
     if _frontend_dist.exists() and _frontend_dist.is_dir():
         assets_dir = _frontend_dist / "assets"
@@ -69,7 +70,7 @@ async def lifespan(_app: FastAPI):
                 logger.exception("恢复任务调度失败，将在下一轮重试")
             await asyncio.sleep(60)
 
-    mapping_task = asyncio.create_task(mapping_sync.initialize())
+    mapping_task = asyncio.create_task(mapping_sync.run_scheduler())
     recovery_task = asyncio.create_task(recover_pending_torrents())
     resource_worker.start()
 
@@ -82,6 +83,7 @@ async def lifespan(_app: FastAPI):
     recovery_task.cancel()
     await initial_rss_poll.stop()
     await resource_worker.stop()
+    await nfo_refresh.stop()
 
     # Cancel watch worker
     if state._watch_task and not state._watch_task.done():

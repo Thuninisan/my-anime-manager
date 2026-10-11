@@ -1,6 +1,22 @@
 import type { BangumiRssResponse, ManualSubscribeIn, MikanSearchResult, RssDataStatus, RssFeedResponse, RssSettings, SubscriptionIn, SubscriptionOut } from '../types/preview';
+import type { NfoRefreshTask } from '../types/nfoRefresh';
 
 const API_BASE = '/api/rss';
+
+export async function getNfoRefreshTask(bangumiId: number): Promise<NfoRefreshTask | null> {
+  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/regen-nfo`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`获取 NFO 刷新进度失败 (HTTP ${res.status})`);
+  return res.json();
+}
+
+export async function refreshAllNfo(bangumiId: number): Promise<NfoRefreshTask> {
+  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/regen-nfo`, { method: 'POST' });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.detail || `启动 NFO 刷新失败 (HTTP ${res.status})`);
+  }
+  return res.json();
+}
 
 export interface BangumiOnlineResult {
   bangumi_id: number;

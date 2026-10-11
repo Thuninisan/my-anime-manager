@@ -13,11 +13,26 @@ from ..clients.qbittorrent import (
     delete_torrent,
     login as qb_login,
 )
-from ..services import downloader
+from ..services import downloader, nfo_refresh
 from ..utils.torrent_file_reader import read_torrent_file_list
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+@router.post("/api/rss/download-history/{bangumi_id}/regen-nfo", status_code=202)
+async def refresh_subscription_nfo(bangumi_id: int):
+    return nfo_refresh.start(bangumi_id)
+
+
+@router.get("/api/rss/download-history/{bangumi_id}/regen-nfo")
+async def subscription_nfo_status(bangumi_id: int):
+    return nfo_refresh.latest(bangumi_id)
+
+
+@router.get("/api/rss/nfo-refresh-tasks/{task_id}")
+async def nfo_refresh_status(task_id: str):
+    return nfo_refresh.get_task(task_id)
 
 def _coordinate(value, field, *, integer=False):
     import math
@@ -126,6 +141,8 @@ async def update_episode_overrides(
     tmdb_season = fields.get("tmdb_season")
     if tmdb_ep is None and tmdb_season is None:
         raise HTTPException(400, "至少需要提供 tmdb_ep 或 tmdb_season")
+    if regen_nfo:
+        nfo_refresh.ensure_idle(bangumi_id)
 
     ok = data.set_episode_mapping(
         bangumi_id, sort,
@@ -139,7 +156,8 @@ async def update_episode_overrides(
     #    override write above still returns 200) ──
     if regen_nfo:
         try:
-            await downloader.regen_episode_nfo(bangumi_id, sort)
+            async with nfo_refresh.write_lock:
+                await downloader.regen_episode_nfo(bangumi_id, sort)
         except Exception:
             logger.exception("overrides+PATCH: NFO regeneration failed")
 
@@ -151,8 +169,10 @@ async def regen_episode_nfo(bangumi_id: int, sort: int):
     No request body — all inputs (subscription, per-episode mapping,
     paths) are derived server-side.  NFO-only, never touches qBittorrent.
     """
+    nfo_refresh.ensure_idle(bangumi_id)
     try:
-        await downloader.regen_episode_nfo(bangumi_id, sort)
+        async with nfo_refresh.write_lock:
+            await downloader.regen_episode_nfo(bangumi_id, sort)
     except HTTPException:
         raise
     except Exception as e:

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import TorrentUpload from '@/components/torrent/TorrentUpload';
 import TorrentPreview from '@/components/torrent/TorrentPreview';
 import PosterCard from '@/components/shared/PosterCard';
-import { getTorrentCollections, parseAndSearchTorrent, type TorrentCollection } from '@/api/torrentApi';
+import { getTorrentCollections, parseAndSearchTorrent, type TorrentCollectionCard } from '@/api/torrentApi';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { previewResourceTorrent } from '@/api/resourcesApi';
 
@@ -22,7 +22,7 @@ export default function TorrentPage() {
     key: string;
     promise: Promise<TorrentPreviewResponse>;
   } | null>(null);
-  const [collections, setCollections] = useState<TorrentCollection[]>([]);
+  const [collections, setCollections] = useState<TorrentCollectionCard[]>([]);
   const [collectionsError, setCollectionsError] = useState<string | null>(null);
   const [collectionsLoading, setCollectionsLoading] = useState(true);
 
@@ -117,17 +117,13 @@ export default function TorrentPage() {
           <p className="text-sm text-muted-foreground">No torrents yet. Add a torrent to see it here.</p>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-            {[...collections].reverse().map((item) => (
-              <div key={item.info_hash}>
+            {collections.map((item) => (
+              <div key={item.card_key}>
                 <PosterCard
-                  bangumiId={item.bangumi_ids?.[0]}
-                  name={item.show_name || (item.bangumi_ids?.[0] ? `Bangumi ${item.bangumi_ids[0]}` : '未匹配 Bangumi')}
+                  bangumiId={item.bangumi_id ?? undefined}
+                  name={item.title_cn || (item.bangumi_id ? `Bangumi ${item.bangumi_id}` : '未匹配 Bangumi')}
                   posterUrl={item.poster_url}
-                  rating={item.bgm_rating}
-                  tags={[
-                    ...(item.encoding_group === 'ktnbytes' ? ['ktnbytes'] : []),
-                    ...(item.video_codec?.toLowerCase() === 'av1' ? ['AV1'] : item.video_codec?.toLowerCase() === 'h265' ? ['H.265'] : []),
-                  ]}
+                  tags={item.tags}
                 />
               </div>
             ))}

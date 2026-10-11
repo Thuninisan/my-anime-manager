@@ -35,7 +35,6 @@ if _USER_DATA_DIR != _DATA_DIR:
 # ═══════════════════════════════════════════════════════════════════════
 
 _mapping_data: dict[int, dict] | None = None
-_mapping_revision = -1
 _mapping_lock = threading.Lock()
 
 
@@ -44,12 +43,10 @@ def _load() -> dict[int, dict]:
 
 
 def _mapping_cache() -> dict[int, dict]:
-    global _mapping_data, _mapping_revision
+    global _mapping_data
     with _mapping_lock:
-        revision = _store.mapping_revision()
-        if _mapping_data is None or revision != _mapping_revision:
+        if _mapping_data is None:
             _mapping_data = _load()
-            _mapping_revision = revision
         return _mapping_data
 
 
@@ -57,11 +54,11 @@ def mapping_count() -> int:
     return _store.mapping_count()
 
 
-def replace_mappings(records: dict, **options) -> None:
+def replace_mappings(records: dict, *, preserve_fields=()) -> None:
     global _mapping_data
-    _store.replace_mappings(records, **options)
+    _store.replace_mappings(records, preserve_fields=preserve_fields)
     with _mapping_lock:
-        _mapping_data = None
+        _mapping_data = _load()
 
 
 def get_mikan_id(bangumi_id: int) -> int | None:
@@ -104,7 +101,7 @@ def _set_mapping_fields(bangumi_id: int, fields: dict, *, manual: bool = True) -
     saved = _store.set_mapping_fields(bangumi_id, fields, manual=manual)
     if saved:
         with _mapping_lock:
-            _mapping_data = None
+            _mapping_data = _load()
     return saved
 
 
@@ -116,7 +113,7 @@ def add_mapping(bangumi_id: int, name: str, name_original: str = "") -> None:
     global _mapping_data
     _store.add_mapping(bangumi_id, name, name_original)
     with _mapping_lock:
-        _mapping_data = None
+        _mapping_data = _load()
 
 
 def set_tmdb_id(bangumi_id: int, tmdb_id: int, tmdb_season: int | None = None, *, manual: bool = True) -> bool:

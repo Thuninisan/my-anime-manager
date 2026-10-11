@@ -40,12 +40,7 @@ export interface ManualSubscribeIn {
 export interface RssDataStatus {
   exists: boolean;
   count: number;
-  initialized: boolean;
   syncing: boolean;
-  last_attempt_at: string | null;
-  last_success_at: string | null;
-  last_error: string | null;
-  warning: string | null;
 }
 
 export interface SubscriptionIn {

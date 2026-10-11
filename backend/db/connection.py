@@ -59,6 +59,7 @@ def get_engine() -> Engine:
         # columns into typed storage before serving requests.
         with engine.begin() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
+            connection.exec_driver_sql("DROP TABLE IF EXISTS mapping_sync_state")
             Base.metadata.create_all(connection)
             from .persistence_migration import upgrade
             from .business_data_migration import add_columns, assign, migrate_nodes

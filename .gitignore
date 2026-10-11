@@ -34,6 +34,7 @@ backend/data/rss_settings.json
 backend/data/subtitles/
 backend/data/logs/
 backend/data/rss_posters/
+backend/data/nfo_refresh/
 backend/data/torrents.json
 backend/data/resource_monitor/
 backend/data/mam.sqlite3*

@@ -58,13 +58,14 @@ interface Props {
   onOpenTmdb: (sort: number, entry: EpisodeHistoryEntry) => void;
   onSaveTmdb: (sort: number, regen: boolean) => void;
   onRefreshNfo: (sort: number) => void;
+  nfoBusy: boolean;
   onDeleteEpisode: (sort: number) => void;
   onClose: () => void;
 }
 
 export default function EpisodeTable({
   data, loading, sub, fileInputRef, fileIntentRef,
-  expandedSort, tmdbForm, setTmdbForm, tmdbSeasonMap, onOpenTmdb, onSaveTmdb, onRefreshNfo, onDeleteEpisode, onClose: _onClose,
+  expandedSort, tmdbForm, setTmdbForm, tmdbSeasonMap, onOpenTmdb, onSaveTmdb, onRefreshNfo, nfoBusy, onDeleteEpisode, onClose: _onClose,
 }: Props) {
   if (loading) {
     return (
@@ -258,11 +259,15 @@ export default function EpisodeTable({
                           <button
                             className="px-5 py-2.5 text-xs font-bold bg-popover text-popover-foreground border border-border hover:bg-muted rounded-full transition-colors cursor-pointer shadow-md"
                             onClick={() => onRefreshNfo(e.sort)}
+                            disabled={nfoBusy}
+                            style={nfoBusy ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                             title="Regenerate NFO for this episode"
                           >Refresh</button>
                           <button
                             className="px-6 py-2.5 text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 rounded-full transition-colors cursor-pointer shadow-md shadow-primary/20"
                             onClick={() => onSaveTmdb(e.sort, true)}
+                            disabled={nfoBusy}
+                            style={nfoBusy ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                           >Save</button>
                         </div>
                       </div>

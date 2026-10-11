@@ -3,13 +3,20 @@
 import asyncio
 import logging
 import re
-from uuid import uuid4
+from threading import Lock
 
 from .. import data
 from ..clients import mapping_source
-from ..db import legacy_data as store
 
 logger = logging.getLogger(__name__)
+
+_sync_lock = Lock()
+SYNC_INTERVAL_SECONDS = 24 * 60 * 60
+
+
+def status() -> dict:
+    count = data.mapping_count()
+    return {"exists": count > 0, "count": count, "syncing": _sync_lock.locked()}
 
 
 class MappingSyncBusy(RuntimeError):
@@ -83,13 +90,13 @@ async def _download() -> tuple[dict, str | None]:
     return parse_documents(document, kometa), warning
 
 
-async def _update(token: str) -> dict:
+async def _update() -> dict:
     records, warning = await asyncio.wait_for(_download(), timeout=120)
-    # Wait for a started transaction even on shutdown, so the lease is not
+    # Wait for a started transaction even on shutdown, so the lock is not
     # released while its database write is still running in another thread.
     commit = asyncio.create_task(asyncio.to_thread(
-        data.replace_mappings, records, synced=True, warning=warning,
-        preserve_fields=("tvdb_id", "tvdb_season") if warning else (), sync_token=token,
+        data.replace_mappings, records,
+        preserve_fields=("tvdb_id", "tvdb_season") if warning else (),
     ))
     try:
         await asyncio.shield(commit)
@@ -104,30 +111,31 @@ async def _update(token: str) -> dict:
 
 
 async def synchronize(*, only_if_needed=False) -> dict:
-    token = uuid4().hex
-    claimed = store.claim_mapping_sync(token, only_if_needed=only_if_needed)
-    if claimed == "initialized":
-        return {"ok": True, "output": "已有社区映射，无需初始化。"}
-    if claimed == "busy":
+    if not _sync_lock.acquire(blocking=False):
         raise MappingSyncBusy("映射正在更新，请稍后重试")
-    error = None
     try:
-        return await _update(token)
+        if only_if_needed and data.mapping_count() > 0:
+            return {"ok": True, "output": "已有社区映射，无需初始化。"}
+        return await _update()
     except asyncio.CancelledError:
-        error = "映射更新已中断，请重试。"
+        logger.warning("映射更新已中断")
         raise
     except Exception:
-        error = "映射更新失败，原有数据已保留，请检查网络后重试。"
-        logger.exception("社区映射更新失败")
+        logger.exception("社区映射更新失败，原有数据已保留")
         raise
     finally:
-        store.finish_mapping_sync(token, error)
+        _sync_lock.release()
 
 
-async def initialize() -> None:
-    try:
-        await synchronize(only_if_needed=True)
-    except MappingSyncBusy:
-        logger.info("已有映射更新任务，跳过启动初始化")
-    except Exception:
-        logger.warning("社区映射尚未初始化，可在设置页重试")
+async def run_scheduler() -> None:
+    """Initialize an empty database, then refresh community mappings daily."""
+    only_if_needed = True
+    while True:
+        try:
+            await synchronize(only_if_needed=only_if_needed)
+        except MappingSyncBusy:
+            logger.info("已有映射更新任务，跳过本次自动同步")
+        except Exception:
+            logger.warning("社区映射自动更新未完成，将在下一轮重试")
+        only_if_needed = False
+        await asyncio.sleep(SYNC_INTERVAL_SECONDS)

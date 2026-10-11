@@ -4,8 +4,10 @@ import type { DownloadHistoryResponse, EpisodeHistoryEntry, SubscriptionOut } fr
 import { updateSubscription, deleteSubscriptionRss, deleteEpisodeHistory, addEpisodeWithTorrent, replaceEpisodeWithTorrent, getTmdbSeasonMap, regenEpisodeNfo } from '@/api/rssApi';
 import LeftSidebar from './LeftSidebar';
 import EpisodeTable, { formatBytes } from './EpisodeTable';
-import { showLoadingToast, updateToast } from '@/lib/toast';
+import { showError, showLoadingToast, updateToast } from '@/lib/toast';
 import { useNavigate } from 'react-router-dom';
+import { useNfoRefresh } from '@/hooks/useNfoRefresh';
+import NfoRefreshStatus from './NfoRefreshStatus';
 
 interface Props {
   open: boolean;
@@ -24,6 +26,8 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
 
   const idRef = useRef<number | null>(null);
   useEffect(() => { if (sub) idRef.current = sub.bangumi_id; }, [sub]);
+  const nfoRefresh = useNfoRefresh(sub?.bangumi_id ?? idRef.current, open, onRefresh);
+  const [refreshingSort, setRefreshingSort] = useState<number | null>(null);
 
   // ── Fetch TMDB season/episode map on open ──
   const [tmdbSeasonMap, setTmdbSeasonMap] = useState<Record<string, CatalogSeason> | null>(null);
@@ -153,22 +157,30 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
   };
 
   const saveTmdbOverrides = async (sort: number, regen: boolean) => {
-    if (!data) return;
+    if (!data || nfoRefresh.busy || refreshingSort !== null) return;
     const fields: Record<string, number> = {};
     if (tmdbForm.ep !== '') fields.tmdb_episode_number = Number(tmdbForm.ep);
     if (tmdbForm.season !== '') fields.tmdb_season_number = Number(tmdbForm.season);
     if (Object.keys(fields).length === 0) return;
+    setRefreshingSort(sort);
     try {
-      await fetch(`/api/rss/v2/download-history/${data.bangumi_id}/${sort}${regen ? '?regen_nfo=true' : ''}`, {
+      const res = await fetch(`/api/rss/v2/download-history/${data.bangumi_id}/${sort}${regen ? '?regen_nfo=true' : ''}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        throw new Error(body?.detail || `保存失败 (HTTP ${res.status})`);
+      }
       onRefresh();
       setExpandedSort(null);
-    } catch { /* */ }
+    } catch (e) {
+      showError(e);
+    } finally { setRefreshingSort(null); }
   };
 
   const refreshNfo = async (sort: number) => {
-    if (!data) return;
+    if (!data || nfoRefresh.busy || refreshingSort !== null) return;
+    setRefreshingSort(sort);
     const epLabel = `EP${sort.toString().padStart(2, '0')}`;
     const toastId = showLoadingToast(`${epLabel} NFO 重新生成中...`);
     try {
@@ -179,7 +191,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       updateToast(toastId, `${epLabel} NFO 重新生成失败: ${msg}`, 'error');
-    }
+    } finally { setRefreshingSort(null); }
   };
 
   // ── Render ──
@@ -198,7 +210,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
         />
 
         <section className="flex-1 flex flex-col bg-background overflow-hidden min-w-0">
-          <header className="p-5 border-b border-border flex justify-between items-center shrink-0">
+          <header className="p-5 border-b border-border flex flex-wrap gap-3 justify-between items-center shrink-0">
             <div>
               <h1 className="text-xl font-bold text-foreground">Episode Tracking</h1>
               <p className="text-sm text-muted-foreground mt-0.5">
@@ -209,12 +221,27 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
                 episodes
               </p>
             </div>
-            <button className="p-2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer" onClick={onClose} aria-label="Close">
-              <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                className="inline-flex items-center gap-2 border border-border px-3 py-2 rounded-lg text-sm font-medium hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                disabled={loading || !data?.episodes.length || nfoRefresh.busy || nfoRefresh.checking || refreshingSort !== null}
+                title={!data?.episodes.length ? '暂无可刷新的下载记录' : '覆盖当前订阅的剧集、季和分集 NFO，包括人工修改的内容；不更新图片'}
+                onClick={() => void nfoRefresh.start()}
+              >
+                <svg className={`h-4 w-4 shrink-0 ${nfoRefresh.busy ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0111.6-2L20 8M4 16l2.3 3A7 7 0 0017.9 17" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {nfoRefresh.busy ? '正在刷新…' : '刷新全部 NFO'}
+              </button>
+              <button className="p-2 text-muted-foreground hover:text-foreground transition-colors cursor-pointer" onClick={onClose} aria-label="Close">
+                <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path d="M6 18L18 6M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+                </svg>
+              </button>
+            </div>
           </header>
+
+          <NfoRefreshStatus task={nfoRefresh.task} error={nfoRefresh.error} />
 
           <EpisodeTable
             data={data} loading={loading} sub={sub}
@@ -222,6 +249,7 @@ export default function DownloadHistoryDialog({ open, data, loading, subscriptio
             expandedSort={expandedSort} tmdbForm={tmdbForm} setTmdbForm={setTmdbForm}
             tmdbSeasonMap={tmdbSeasonMap}
             onOpenTmdb={openTmdbDropdown} onSaveTmdb={saveTmdbOverrides} onRefreshNfo={refreshNfo}
+            nfoBusy={nfoRefresh.busy || nfoRefresh.checking || refreshingSort !== null}
             onDeleteEpisode={handleDeleteEpisode}
             onClose={onClose}
           />

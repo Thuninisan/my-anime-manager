@@ -17,7 +17,6 @@ from ..clients.qbittorrent import (
     login as qb_login,
 )
 from ..services import mapping_sync
-from ..db import legacy_data as mapping_store
 from ..services import downloader
 from ..services import initial_rss_poll
 from ..services import rss as rss_service
@@ -182,7 +181,7 @@ async def assign_mikan_id(bangumi_id: int, body: AssignMikanRequest):
 @router.get("/api/rss/data-status")
 async def rss_data_status():
     """Report the active database mapping."""
-    return await asyncio.to_thread(mapping_store.mapping_sync_status)
+    return await asyncio.to_thread(mapping_sync.status)
 
 
 @router.post("/api/rss/download-data")
