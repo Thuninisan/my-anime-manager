@@ -353,10 +353,6 @@ def set_subscription_rss_offset(bangumi_id: int, key: str, offset: int) -> bool:
 from ..db import download_history as _history
 
 
-def _load_hist() -> dict:
-    return _history.history_document()
-
-
 def is_downloaded(bangumi_id: int, ep_num: int) -> bool:
     _, status = _history.get_episode(bangumi_id, ep_num)
     return status == "downloaded"
@@ -410,21 +406,21 @@ def set_episode_mapping(
     bangumi_id: int, ep_num: int, tmdb_episode_number: int | float | None = None,
     tmdb_season_number: int | None = None,
 ) -> bool:
-    from ..db.models import BangumiMapping, DownloadEpisodeMapping
+    from ..db.models import BangumiMapping
 
     def operation(session, row):
         if row is None:
             return False
-        mapping = session.get(DownloadEpisodeMapping, (bangumi_id, ep_num))
-        if mapping is None:
+        mapping = row
+        if not row.mapping_initialized:
             # A manually marked record may not have a mapping yet.
-            from ..db.download_episode_mapping import legacy_values
             community = session.get(BangumiMapping, bangumi_id)
-            values, _ = legacy_values({"bangumi_id": bangumi_id, "episode_number": ep_num},
-                                      {field: getattr(community, field) for field in
-                                       ("tmdb_id", "tmdb_season", "tvdb_id", "tvdb_season")} if community else {})
-            mapping = DownloadEpisodeMapping(bangumi_id=bangumi_id, episode_number=ep_num, **values)
-            session.add(mapping)
+            if community is not None:
+                row.tmdb_series_id = community.tmdb_id
+                row.tmdb_season_number = community.tmdb_season
+                row.tvdb_series_id = community.tvdb_id
+                row.tvdb_season_number = community.tvdb_season
+            row.mapping_initialized = True
         for field, value in (("tmdb_episode_number", tmdb_episode_number),
                              ("tmdb_season_number", tmdb_season_number)):
             if value is not None and getattr(mapping, field) != value:

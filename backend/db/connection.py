@@ -56,7 +56,7 @@ def get_engine() -> Engine:
             dbapi_connection.execute("PRAGMA foreign_keys=ON")
 
         # create_all does not alter existing tables. Move the former JSON
-        # columns into typed columns and child rows before serving requests.
+        # columns into typed storage before serving requests.
         with engine.begin() as connection:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
             Base.metadata.create_all(connection)

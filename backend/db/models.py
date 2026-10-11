@@ -1,6 +1,6 @@
 """ORM models for the application database."""
 
-from sqlalchemy import CheckConstraint, Float, ForeignKeyConstraint, Index, Integer, JSON, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Float, Index, Integer, JSON, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -80,15 +80,9 @@ class TorrentCard(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False, default="")
     encoding_group: Mapped[str] = mapped_column(Text, nullable=False, default="")
     video_codec: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    bangumi: Mapped[list[int]] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
     completion_snapshot_json: Mapped[str | None] = mapped_column(Text)
     completion_schema_version: Mapped[int | None] = mapped_column(Integer)
-
-
-class TorrentCardBangumi(Base):
-    __tablename__ = "torrent_card_bangumi"
-    card_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    position: Mapped[int] = mapped_column(Integer, primary_key=True)
-    bangumi_id: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class Subscription(Base):
@@ -171,7 +165,7 @@ class MappingSyncState(Base):
 
 
 class DownloadEpisode(Base):
-    """RSS download state and actual media destination."""
+    """RSS download state, media destination, and provider episode coordinates."""
     __tablename__ = "download_episodes"
 
     bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -185,17 +179,7 @@ class DownloadEpisode(Base):
     fail_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="downloaded")
 
-
-class DownloadEpisodeMapping(Base):
-    """One effective set of provider coordinates per RSS download record."""
-    __tablename__ = "download_episode_mapping"
-    __table_args__ = (ForeignKeyConstraint(
-        ["bangumi_id", "episode_number"],
-        ["download_episodes.bangumi_id", "download_episodes.episode_number"],
-        ondelete="CASCADE"),)
-
-    bangumi_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    episode_number: Mapped[int] = mapped_column(Integer, primary_key=True)
+    mapping_initialized: Mapped[bool] = mapped_column(nullable=False, default=False, server_default=text("0"))
     bangumi_episode_id: Mapped[int | None] = mapped_column(Integer)
     bangumi_episode_number: Mapped[float | None] = mapped_column(Float)
     tmdb_series_id: Mapped[int | None] = mapped_column(Integer)

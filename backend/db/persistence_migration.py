@@ -9,13 +9,38 @@ IDENTITY_COLUMNS = {"resource_identity_json": "TEXT", "identity_source": "TEXT",
 
 def upgrade(connection):
     _upgrade_mappings(connection)
-    _upgrade_download_history(connection)
     for table, additions in (("rss_subscriptions", IDENTITY_COLUMNS),
                              ("torrent_cards", {"completion_snapshot_json": "TEXT", "completion_schema_version": "INTEGER"})):
         columns = {row[1] for row in connection.exec_driver_sql(f"PRAGMA table_info({table})")}
         for name, kind in additions.items():
             if name not in columns:
                 connection.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+
+    _upgrade_torrent_cards(connection)
+
+
+def _upgrade_torrent_cards(connection):
+    """Fold ordered card associations into JSON and remove obsolete tables."""
+    columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(torrent_cards)")}
+    if "bangumi" not in columns:
+        connection.exec_driver_sql("ALTER TABLE torrent_cards ADD COLUMN bangumi JSON NOT NULL DEFAULT '[]'")
+    old_table = connection.exec_driver_sql(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='torrent_card_bangumi'").first()
+    if old_table:
+        associations = {}
+        for card_id, bangumi_id in connection.exec_driver_sql(
+                "SELECT card_id, bangumi_id FROM torrent_card_bangumi ORDER BY card_id, position"):
+            associations.setdefault(card_id, []).append(bangumi_id)
+        for card_id, ids in associations.items():
+            row = connection.exec_driver_sql("SELECT bangumi FROM torrent_cards WHERE id=?", (card_id,)).first()
+            if row is None:
+                raise ValueError(f"Missing torrent card for Bangumi association: {card_id}")
+            current = json.loads(row[0])
+            if current and current != ids:
+                raise ValueError(f"Conflicting torrent card Bangumi associations: {card_id}")
+            connection.exec_driver_sql("UPDATE torrent_cards SET bangumi=? WHERE id=?", (json.dumps(ids), card_id))
+        connection.exec_driver_sql("DROP TABLE torrent_card_bangumi")
+    connection.exec_driver_sql("DROP TABLE IF EXISTS torrent_card_operations")
 
 
 def _upgrade_mappings(connection):
@@ -66,44 +91,10 @@ def _upgrade_mappings(connection):
         connection.exec_driver_sql("CREATE INDEX idx_bangumi_mappings_tvdb ON bangumi_mappings_v2 (tvdb_id)")
 
 
-def _upgrade_download_history(connection):
-    """Split RSS download state from provider coordinates in one transaction."""
-    columns = {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(download_episodes)")}
-    if "download_path" in columns and not columns.intersection(
-            {"rss_url", "tmdb_ep", "tmdb_season", "tvdb_ep", "tmdb_ep_calc", "episode_mapping_snapshot"}):
-        return
-    from .download_episode_mapping import legacy_values
-    from .models import DownloadEpisodeMapping
-    communities = {row["bangumi_id"]: dict(row) for row in connection.exec_driver_sql(
-        "SELECT bangumi_id,tmdb_id,tmdb_season,tvdb_id,tvdb_season FROM bangumi_mappings_v2").mappings()}
-    records = [dict(row) for row in connection.exec_driver_sql("SELECT * FROM download_episodes").mappings()]
-    mappings = []
-    downloads = []
-    for record in records:
-        values, path = legacy_values(record, communities.get(record["bangumi_id"], {}))
-        mappings.append(dict(bangumi_id=record["bangumi_id"], episode_number=record["episode_number"], **values))
-        downloads.append(tuple(record[key] for key in
-                               ("bangumi_id", "episode_number", "guid", "source", "pub_date", "info_hash", "at"))
-                         + (path, record["fail_count"], record["status"]))
-    connection.exec_driver_sql("""CREATE TABLE download_episodes_upgrade (
-        bangumi_id INTEGER NOT NULL, episode_number INTEGER NOT NULL,
-        guid TEXT NOT NULL, source TEXT NOT NULL, pub_date TEXT NOT NULL,
-        info_hash TEXT NOT NULL, at TEXT NOT NULL, download_path TEXT,
-        fail_count INTEGER NOT NULL, status TEXT NOT NULL,
-        PRIMARY KEY (bangumi_id, episode_number))""")
-    if downloads:
-        connection.exec_driver_sql("INSERT INTO download_episodes_upgrade VALUES (?,?,?,?,?,?,?,?,?,?)", downloads)
-    connection.exec_driver_sql("DROP TABLE download_episodes")
-    connection.exec_driver_sql("ALTER TABLE download_episodes_upgrade RENAME TO download_episodes")
-    if mappings:
-        connection.execute(DownloadEpisodeMapping.__table__.insert(), mappings)
-
-
 def backfill(session):
-    from .models import Subscription, DownloadEpisode, DownloadEpisodeMapping, BangumiMapping
+    from .models import Subscription
     from .identity import read_resource_identity, update_resource_identity
-    from .download_episode_mapping import legacy_values
-    stats = {"identities": 0, "history_partial": 0, "skipped_canonical": 0, "unresolved": 0}
+    stats = {"identities": 0, "skipped_canonical": 0, "unresolved": 0}
     for row in session.scalars(select(Subscription)):
         if row.resource_identity_json is not None:
             stats["skipped_canonical"] += 1
@@ -114,18 +105,4 @@ def backfill(session):
             stats["identities"] += 1
         except (ValueError, TypeError):
             stats["unresolved"] += 1
-    for row in session.scalars(select(DownloadEpisode)):
-        key = (row.bangumi_id, row.episode_number)
-        if session.get(DownloadEpisodeMapping, key) is not None:
-            stats["skipped_canonical"] += 1
-            continue
-        if row.status != "downloaded":
-            stats["unresolved"] += 1
-            continue
-        community = session.get(BangumiMapping, row.bangumi_id)
-        values, _ = legacy_values({"bangumi_id": row.bangumi_id, "episode_number": row.episode_number},
-                                  {field: getattr(community, field) for field in
-                                   ("tmdb_id", "tmdb_season", "tvdb_id", "tvdb_season")} if community else {})
-        session.add(DownloadEpisodeMapping(bangumi_id=row.bangumi_id, episode_number=row.episode_number, **values))
-        stats["history_partial"] += 1
     return stats

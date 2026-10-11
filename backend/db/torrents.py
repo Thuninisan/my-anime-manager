@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import delete, or_, select
 
 from .connection import new_session
-from .models import TorrentCard, TorrentCardBangumi, WorkflowRecovery
+from .models import TorrentCard, WorkflowRecovery
 from . import recovery
 
 logger = logging.getLogger(__name__)
@@ -37,9 +37,7 @@ def _as_dict(session, card: TorrentCard) -> dict:
     result = dict(card.extra_data or {})
     for field in CARD_FIELDS - {"processing", "completion_snapshot"}:
         if field == "bangumi_ids":
-            result[field] = [row.bangumi_id for row in session.scalars(
-                select(TorrentCardBangumi).where(TorrentCardBangumi.card_id == card.id)
-                .order_by(TorrentCardBangumi.position))]
+            result[field] = list(card.bangumi or [])
         else:
             result[field] = getattr(card, field)
     if card.completion_snapshot_json is not None:
@@ -62,10 +60,7 @@ def _save_card(session, record: dict) -> TorrentCard:
         record["created_at"] = card.created_at
         for key, value in _card_values(record).items():
             setattr(card, key, value)
-    session.execute(delete(TorrentCardBangumi).where(TorrentCardBangumi.card_id == card.id))
-    for position, bangumi_id in enumerate(record.get("bangumi_ids") or []):
-        session.add(TorrentCardBangumi(card_id=card.id, position=position,
-                                       bangumi_id=bangumi_id))
+    card.bangumi = list(record.get("bangumi_ids") or [])
     processing = record.get("processing")
     if processing is not None:
         recovery.create(session, "torrent_processing", card.info_hash, "wait_download",
