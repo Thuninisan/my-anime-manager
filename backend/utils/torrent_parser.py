@@ -43,18 +43,6 @@ def is_oped(filename: str) -> bool:
     return False
 
 
-def is_special(filename: str) -> bool:
-    """Check if a file is S00 (special/extra).
-
-    Args:
-        filename: The filename to check
-
-    Returns:
-        True if the filename contains S00
-    """
-    return bool(SPECIAL_PATTERN.search(filename))
-
-
 def parse_qbit_file_list(
     file_list: list[dict], label: str = "qBittorrent"
 ) -> dict:

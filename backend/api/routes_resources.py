@@ -22,9 +22,6 @@ class SourceInput(BaseModel):
     index_type: str
 
 
-class PollIntervalInput(BaseModel):
-    minutes: int
-
 router = APIRouter(prefix="/api/resources", tags=["resources"])
 
 

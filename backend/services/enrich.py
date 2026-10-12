@@ -3,7 +3,6 @@
 import logging
 from typing import Any, Callable
 
-from .. import config
 from ..clients import bangumi as bgm_client
 from ..clients import tmdb as tmdb_client
 from ..clients import tvdb as tvdb_client
@@ -976,9 +975,6 @@ async def enrich_subscription(
         return None
 
 
-
-
-_bgm_ep_id_cache: dict[int, dict[int, int]] = {}  # {bangumi_id: {sort: episode_id}}
 _bgm_relations_cache: dict[int, list[dict]] = {}   # {subject_id: relations}
 
 
@@ -989,28 +985,3 @@ async def _get_bangumi_relations(subject_id: int) -> list[dict]:
         rels = await bgm_client.get_relations(subject_id)
         _bgm_relations_cache[subject_id] = rels
     return rels
-
-
-async def _get_bangumi_ep_id(bangumi_id: int, sort: int) -> int | None:
-    """Look up the Bangumi episode ID for a given *sort* number.
-
-    Fetches the full episode list on first call for a *bangumi_id* and
-    caches the mapping in memory for subsequent calls.
-    """
-    if bangumi_id in _bgm_ep_id_cache:
-        return _bgm_ep_id_cache[bangumi_id].get(sort)
-
-    try:
-        eps = await _get_bangumi_episodes(bangumi_id)
-    except Exception:
-        logger.warning("Failed to fetch Bangumi episodes for id=%d", bangumi_id)
-        return None
-
-    sort_to_id: dict[int, int] = {}
-    for ep in eps:
-        ep_sort = ep.get("sort") or ep.get("ep", 0)
-        if ep_sort:
-            sort_to_id[ep_sort] = ep["id"]
-    _bgm_ep_id_cache[bangumi_id] = sort_to_id
-
-    return sort_to_id.get(sort)

@@ -3,7 +3,7 @@
 import logging
 from ..clients import bangumi as bgm_client
 
-from .resource_resolver import unique_relation, select_provider_result
+from .resource_resolver import unique_relation
 
 logger = logging.getLogger(__name__)
 
@@ -366,33 +366,6 @@ async def build_chain_by_date(bgm_search_results: list[dict]) -> tuple[list[dict
         logger.debug(f"   [{i + 1}] {name} ({date}, {eps} 集) [id: {s['id']}]")
 
     return deduped, skipped
-
-
-async def get_episode_count(
-    subject_id: int, cached_subject: dict | None = None
-) -> int:
-    """Get the actual main-story episode count for a Bangumi subject.
-
-    Prefers the subject's eps field. Falls back to episodes API total.
-
-    Args:
-        subject_id: Bangumi subject ID
-        cached_subject: Optionally cached subject data
-
-    Returns:
-        Episode count, or 0 if unavailable
-    """
-    eps_from_wiki = (cached_subject or {}).get("eps") or \
-                    (cached_subject or {}).get("total_episodes") or 0
-    if eps_from_wiki > 0:
-        return eps_from_wiki
-
-    # If wiki eps=0 (unaired/unlisted), try episodes API
-    total = await bgm_client.get_episode_total(subject_id)
-    if total > 0:
-        return total
-
-    return 0
 
 
 def match_episode(episodes: list[dict], target_ep_num: int) -> dict | None:

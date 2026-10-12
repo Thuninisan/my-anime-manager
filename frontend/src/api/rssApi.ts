@@ -327,14 +327,6 @@ export async function deleteEpisodeHistory(bangumiId: number, sort: number): Pro
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
-export async function updateEpisodeHistory(bangumiId: number, sort: number, fields: Record<string, unknown>): Promise<void> {
-  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(fields),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-}
 
 export async function regenEpisodeNfo(bangumiId: number, sort: number): Promise<void> {
   const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}/regen-nfo`, { method: 'POST' });
@@ -349,10 +341,6 @@ export async function regenEpisodeNfo(bangumiId: number, sort: number): Promise<
   }
 }
 
-export async function addEpisodeHistory(bangumiId: number, sort: number): Promise<void> {
-  const res = await fetch(`${API_BASE}/download-history/${bangumiId}/${sort}`, { method: 'POST' });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-}
 
 export async function addEpisodeWithTorrent(
   bangumiId: number,
@@ -394,11 +382,6 @@ export async function replaceEpisodeWithTorrent(
   return res.json();
 }
 
-export async function getDownloadHistory(bangumiId: number): Promise<import('../types/preview').DownloadHistoryResponse> {
-  const res = await fetch(`${API_BASE}/subscriptions/${bangumiId}/history`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
 
 /** Stream download history with live qBittorrent updates via NDJSON.
  *  Returns an AbortController — call .abort() to stop the stream. */

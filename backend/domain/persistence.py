@@ -5,7 +5,7 @@ import math
 
 from pydantic import TypeAdapter
 
-from .episode import EpisodeMapping, create_episode_mapping
+from .episode import EpisodeMapping
 from .resource import validate_resource_identity
 
 RESOURCE_IDENTITY_SCHEMA_VERSION = 1

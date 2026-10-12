@@ -1,26 +1,6 @@
 import { normalizeTorrentPreview } from '@/lib/episodeAdapters';
 import { apiFetch } from './client';
 
-export interface Resource {
-  id: number;
-  source: string;
-  title: string;
-  published_at: string;
-  detail_url: string;
-  rss_description: string;
-  detail_description: string;
-  torrent_url: string;
-  torrent_name: string;
-  info_hash: string;
-  size_label: string;
-  status: string;
-  error: string;
-}
-
-export interface ResourceResult {
-  total: number;
-  items: Resource[];
-}
 
 export interface BangumiResource {
   bangumi_id: number;
@@ -39,13 +19,6 @@ export interface CollectionStatus {
   recognized?: number;
 }
 
-export function listResources(params: { q?: string; source?: string; status?: string; offset?: number }) {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== '') query.set(key, String(value));
-  }
-  return apiFetch<ResourceResult>(`/api/resources?${query}`);
-}
 
 export const collectionStatus = () => apiFetch<CollectionStatus>('/api/resources/status');
 export const collectNow = () => apiFetch<CollectionStatus>('/api/resources/run-once', { method: 'POST' });

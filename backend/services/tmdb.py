@@ -41,15 +41,6 @@ def _format_show(show: dict) -> dict:
     }
 
 
-def _print_candidates(label: str, items: list[dict]) -> None:
-    """Print current candidate list for debugging."""
-    names = [
-        f"{s['name']} ({s.get('first_air_date', '?')[:4]})"
-        for s in items[:4]
-    ]
-    logger.debug(f"   {label}: [{len(items)}] {', '.join(names)}")
-
-
 async def search_tv_show(
     show_name: str, prefer_year: str | None = None
 ) -> dict | None:
@@ -139,36 +130,6 @@ async def get_tv_show_detail(tv_id: int, language: str = "") -> dict:
         "studios": studios,
         "genres": genres,
     }
-
-
-def find_best_episode_group(groups: list[dict]) -> dict | None:
-    """Pick the best episode group from the list.
-
-    Priority:
-    1. Name matches "Seasons" or "All Seasons" (case insensitive)
-    2. Highest group_count
-
-    Args:
-        groups: List of episode group dicts
-
-    Returns:
-        Best matching group dict or None
-    """
-    if not groups:
-        return None
-
-    # First priority: name matches "season" / "all" / "série"
-    season_match = [
-        g for g in groups
-        if any(kw in g.get("name", "").lower() for kw in ("season", "all", "série", "serie"))
-    ]
-    if season_match:
-        season_match.sort(key=lambda g: g.get("group_count", 0), reverse=True)
-        return season_match[0]
-
-    # Second priority: sort by group_count descending
-    sorted_groups = sorted(groups, key=lambda g: g.get("group_count", 0), reverse=True)
-    return sorted_groups[0]
 
 
 async def build_season_episode_map(

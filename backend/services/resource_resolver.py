@@ -75,13 +75,6 @@ def resolve_primary_series_relation(relations: list[dict]) -> dict | None:
     return unique_relation(relations, "主线")
 
 
-def unique_provider_id(values) -> int | None:
-    ids = {int(v) for v in values if v is not None and int(v) > 0}
-    if len(ids) > 1:
-        raise ValueError("ambiguous_resource: conflicting_provider_bindings")
-    return next(iter(ids), None)
-
-
 def resolve_special_binding(subject_id: int, main_identity: ResourceIdentity) -> ResourceResolution:
     """Explicit 主线 linkage keeps the special subject while binding the TV series.
 

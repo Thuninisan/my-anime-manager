@@ -20,7 +20,6 @@ from fastapi.staticfiles import StaticFiles
 from .. import __version__, data
 from ..clients.errors import MissingAPIKeyError
 from ..utils.http_client import http_client_manager
-from ..db import torrents as torrent_store
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
 from ..services import downloader, initial_rss_poll, mapping_sync, nfo_refresh
 from ..services.resource_monitor import worker as resource_worker

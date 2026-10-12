@@ -149,26 +149,6 @@ async def get_relations(subject_id: int) -> list[dict]:
         return []
 
 
-async def get_episode_total(subject_id: int) -> int:
-    """Get total episode count for a subject (lightweight request).
-
-    Args:
-        subject_id: Bangumi subject ID
-
-    Returns:
-        Total episode count, or 0 on failure
-    """
-    try:
-        res = await _retry(
-            _get,
-            "/v0/episodes",
-            params={"subject_id": subject_id, "type": 0, "limit": 1},
-        )
-        data = res.json()
-        return data.get("total", 0)
-    except Exception:
-        return 0
-
 
 async def get_episodes(subject_id: int, ep_type: int | None = 0) -> list[dict]:
     """Get episodes for a subject (paginated).

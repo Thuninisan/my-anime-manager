@@ -40,8 +40,8 @@ have been superseded by Phase 7.
 | merged `site_rating` / `voteAverage` / `vote_average` | `EpisodeMetadata.rating` | 保留既有 merged rating 优先级 |
 
 前后端领域类型分别位于 `frontend/src/types/episode.ts` 和 `backend/domain/episode.py`。
-Python 使用标准库 `TypedDict`，不增加依赖。`EpisodeMetadata`、`ResolvedEpisode` 和
-`SeriesMetadata` 已定义；metadata sources 不明确时保持 null，不推测来源，不发起请求。
+Python 使用标准库 `TypedDict`，不增加依赖。后端 NFO 流程使用 `EpisodeMetadata` 和
+`ResolvedEpisode`；metadata sources 不明确时保持 null，不推测来源，不发起请求。
 
 ## 兼容边界
 
@@ -70,9 +70,8 @@ qBittorrent 行为，也没有新增 provider 请求。Season 0 和缺失 provid
 
 ## 验证
 
-- `cd frontend && npm test`：Episode 匹配、真实 React override hook、字幕关联与兼容转换。
 - `cd frontend && npm run build`：TypeScript project build 和 Vite 构建。
-- `.venv/bin/python -m unittest discover -s tests -p 'test_*.py'`：包含 Episode domain/boundary 回归测试。
+- 后端使用静态检查和实际行为验证；遵守 `AGENTS.md` 中禁止未经明确要求生成测试文件的约定。
 
 Phase 2 已迁移 `merged_ep → EpisodeMetadata → ResolvedEpisode → NFO writer`；详见下面的数据流和兼容边界。
 

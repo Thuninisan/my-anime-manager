@@ -1,5 +1,4 @@
 """Move legacy extension trees into their owning business tables atomically."""
-import json
 from collections import defaultdict
 from sqlalchemy.orm import Session
 from .models import (Subscription, SubscriptionFeed, Resource, ResourceSource,

@@ -126,27 +126,9 @@ async def get_series(series_id: int) -> httpx.Response:
     )
 
 
-async def get_series_extended(series_id: int) -> httpx.Response:
-    """Get extended series information including seasons list."""
-    return await _tvdb_request(
-        "GET",
-        f"/series/{series_id}/extended",
-        label=f"TVDB series/{series_id}/extended",
-    )
-
-
 # ═══════════════════════════════════════════════════════════════════════
 # Season endpoints
 # ═══════════════════════════════════════════════════════════════════════
-
-
-async def get_season_extended(season_id: int) -> httpx.Response:
-    """Get extended season information including episodes list."""
-    return await _tvdb_request(
-        "GET",
-        f"/seasons/{season_id}/extended",
-        label=f"TVDB season/{season_id}/extended",
-    )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -202,15 +184,6 @@ async def get_series_episodes(
 # ═══════════════════════════════════════════════════════════════════════
 # Episode endpoints
 # ═══════════════════════════════════════════════════════════════════════
-
-
-async def get_episode_extended(episode_id: int) -> httpx.Response:
-    """Get extended episode information including credits, directors, writers."""
-    return await _tvdb_request(
-        "GET",
-        f"/episodes/{episode_id}/extended",
-        label=f"TVDB episode/{episode_id}/extended",
-    )
 
 
 # ═══════════════════════════════════════════════════════════════════════

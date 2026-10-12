@@ -32,45 +32,6 @@ export interface EpisodeMapping {
   match_source: EpisodeMatchSource | null;
 }
 
-export type MetadataSource = 'bangumi' | 'tmdb' | 'tvdb' | 'translated';
-
-export interface EpisodeMetadataSources {
-  title: MetadataSource | null;
-  plot: MetadataSource | null;
-  thumbnail: MetadataSource | null;
-  rating: MetadataSource | null;
-}
-
-export interface EpisodeMetadata {
-  title: string;
-  original_title: string | null;
-  plot: string | null;
-  air_date: string | null;
-  runtime_minutes: number | null;
-  rating: number | null;
-  thumbnail_url: string | null;
-  directors: string[];
-  writers: string[];
-  actors: string[];
-  sources: EpisodeMetadataSources;
-}
-
-export interface ResolvedEpisode {
-  mapping: EpisodeMapping;
-  metadata: EpisodeMetadata;
-}
-
-export interface SeriesMetadata {
-  title: string;
-  original_title: string | null;
-  plot: string | null;
-  genres: string[];
-  studios: string[];
-  status: string | null;
-  poster_url: string | null;
-  fanart_url: string | null;
-}
-
 /** Candidates are separate from a particular file's resolved mapping. */
 export interface CatalogEpisode extends TmdbEpisodeRef {
   episode_number: number;
@@ -121,21 +82,4 @@ export interface ResourceCandidate {
   alternative_titles: string[];
   year: number | null;
   source: string;
-}
-
-export interface ResourceResolution {
-  status: 'resolved' | 'ambiguous' | 'unresolved';
-  identity: ResourceIdentity | null;
-  candidates: ResourceCandidate[];
-  reason: string;
-}
-
-export interface EpisodeMappingSnapshot {
-  schema_version: number;
-  resource_identity_schema_version: number;
-  resource_identity: ResourceIdentity | null;
-  identity_revision: number | null;
-  source: string;
-  episode_mapping: EpisodeMapping;
-  processing_result: Record<string, string> | null;
 }

@@ -14,7 +14,6 @@ from ...clients import bangumi as bgm_client
 from ...clients.qbittorrent import (
     login as qb_login,
     add_torrent,
-    get_torrent_files,
     rename_file,
     resume_torrent,
 )

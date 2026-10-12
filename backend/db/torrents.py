@@ -99,12 +99,6 @@ def list_pending_torrents() -> list[dict]:
         return [_as_dict(session, card) for card in cards]
 
 
-def get_torrent(info_hash: str) -> dict | None:
-    with new_session() as session:
-        card = session.scalar(select(TorrentCard).where(TorrentCard.info_hash == info_hash))
-        return _as_dict(session, card) if card else None
-
-
 def finish_torrent(info_hash: str, status: str, *, job: recovery.RecoveryJob,
                    keep_recovery: bool = False) -> None:
     """Commit business completion and remove its recovery checkpoint atomically."""

@@ -10,7 +10,6 @@ from fastapi import APIRouter, Form, HTTPException
 from fastapi.responses import FileResponse
 
 from .. import __version__
-from .. import config
 from ..services.torrent.batch_service import process_torrent
 from ..services.update_check import inspect_remote
 from ..logging.logging_config import new_operation_id, operation_context

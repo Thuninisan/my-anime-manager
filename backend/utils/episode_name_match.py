@@ -48,9 +48,6 @@ def char_similarity(a: str, b: str) -> float:
     return (2.0 * overlap) / (len(sa) + len(sb))
 
 
-# Minimum Dice coefficient for a match (matches frontend threshold).
-MIN_DICE_SIMILARITY = 0.55
-
 # Overall minimum score to accept a match (more conservative than frontend
 # because this runs unattended — false positives waste metadata silently).
 MIN_MATCH_SCORE = 0.6
@@ -89,41 +86,3 @@ def fuzzy_match_episode(bgm_name: str, tmdb_name: str) -> float:
 
     # Round 3: character-level Dice similarity
     return char_similarity(a, b)
-
-
-def match_first_episode(
-    bgm_first_ep_name: str,
-    season_map: dict[int, dict],
-    *,
-    min_score: float = MIN_MATCH_SCORE,
-) -> tuple[int, float] | None:
-    """Find which TMDB season's first episode best matches a Bangumi episode name.
-
-    Iterates over all seasons in *season_map*, extracts each season's first
-    episode name, and runs :func:`fuzzy_match_episode` against
-    *bgm_first_ep_name*.  Returns the best ``(season_number, score)`` if the
-    score meets *min_score*, or ``None``.
-
-    Args:
-        bgm_first_ep_name: Bangumi's first main-story episode name (``name`` field).
-        season_map: TMDB season→episodes map from :func:`tmdb_service.build_season_episode_map`.
-        min_score: Minimum score to accept (default 0.6).
-
-    Returns:
-        ``(season_number, score)`` or ``None``.
-    """
-    best: tuple[int, float] | None = None
-
-    for season_num, season_data in season_map.items():
-        episodes = season_data.get("episodes", [])
-        if not episodes:
-            continue
-        first_ep = episodes[0]
-        tmdb_name = first_ep.get("name", "")
-        if not tmdb_name:
-            continue
-        score = fuzzy_match_episode(bgm_first_ep_name, tmdb_name)
-        if score >= min_score and (best is None or score > best[1]):
-            best = (season_num, score)
-
-    return best

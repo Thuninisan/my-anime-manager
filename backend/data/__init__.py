@@ -73,13 +73,6 @@ def get_bangumi_name(bangumi_id: int) -> str | None:
     return entry.get("title_cn") if entry else None
 
 
-def get_bangumi_name_original(bangumi_id: int) -> str | None:
-    """Get original (Japanese) title from the mapping."""
-    mapping = _mapping_cache()
-    entry = mapping.get(bangumi_id)
-    return entry.get("title_jp") if entry else None
-
-
 def get_tmdb_id(bangumi_id: int) -> int | None:
     mapping = _mapping_cache()
     entry = mapping.get(bangumi_id)
@@ -130,13 +123,6 @@ def add_mapping(bangumi_id: int, name: str, name_original: str = "") -> None:
         _mapping_data = _load()
 
 
-def set_tmdb_id(bangumi_id: int, tmdb_id: int, tmdb_season: int | None = None, *, manual: bool = True) -> bool:
-    fields = {"tmdb_id": tmdb_id}
-    if tmdb_season is not None:
-        fields["tmdb_season"] = tmdb_season
-    return _set_mapping_fields(bangumi_id, fields, manual=manual)
-
-
 def get_tvdb_id(bangumi_id: int) -> int | None:
     """Get TVDB series ID from the Bangumi mapping entry."""
     mapping = _mapping_cache()
@@ -153,29 +139,6 @@ def get_tvdb_season(bangumi_id: int) -> int | None:
     mapping = _mapping_cache()
     entry = mapping.get(bangumi_id)
     return entry.get("tvdb_season") if entry else None
-
-
-def set_tvdb_id(bangumi_id: int, tvdb_id: int, tvdb_season: int | None = None, *, manual: bool = True) -> bool:
-    fields = {"tvdb_id": tvdb_id}
-    if tvdb_season is not None:
-        fields["tvdb_season"] = tvdb_season
-    return _set_mapping_fields(bangumi_id, fields, manual=manual)
-
-
-def get_bangumi_id_by_tvdb_id(tvdb_id: int) -> int | None:
-    """Reverse lookup: TVDB ID → Bangumi ID.
-
-    Args:
-        tvdb_id: TVDB series ID.
-
-    Returns:
-        Bangumi ID, or None if not found.
-    """
-    mapping = _mapping_cache()
-    for bgm_id_str, entry in mapping.items():
-        if entry.get("tvdb_id") == tvdb_id:
-            return int(bgm_id_str)
-    return None
 
 
 def get_map_entries_by_tvdb_id(tvdb_id: int) -> list[dict]:
@@ -202,22 +165,6 @@ def get_movie_map_entries_by_titles(names: list[str]) -> list[dict]:
                    and any(normalized(str(entry.get(key) or "")) in wanted
                            for key in ("title_cn", "title_jp"))),
                   key=lambda entry: entry["bangumi_id"])
-
-
-def get_bangumi_id_by_tmdb_id(tmdb_id: int) -> int | None:
-    """Reverse lookup: TMDB ID → Bangumi ID.
-
-    Args:
-        tmdb_id: TMDB series ID.
-
-    Returns:
-        Bangumi ID, or None if not found.
-    """
-    mapping = _mapping_cache()
-    for bgm_id_str, entry in mapping.items():
-        if entry.get("tmdb_id") == tmdb_id:
-            return int(bgm_id_str)
-    return None
 
 
 def get_map_entry(bangumi_id: int) -> dict | None:
@@ -533,7 +480,6 @@ def reset_fail_count(bangumi_id: int, ep_num: int) -> None:
 # ═══════════════════════════════════════════════════════════════════════
 
 _SETTINGS_FILE = _USER_DATA_DIR / "rss_settings.json"
-_settings_lock = threading.Lock()
 
 _DEFAULT_SETTINGS = {
     "exclude_patterns": ["全集"],
@@ -550,14 +496,6 @@ def get_rss_settings() -> dict:
         except (json.JSONDecodeError, OSError):
             pass
     return dict(_DEFAULT_SETTINGS)
-
-
-def update_rss_settings(changes: dict) -> dict:
-    with _settings_lock:
-        current = get_rss_settings()
-        current.update(changes)
-        update_app_settings({"RSS_EXCLUDE_PATTERNS": current["exclude_patterns"]})
-    return current
 
 
 # ═══════════════════════════════════════════════════════════════════════

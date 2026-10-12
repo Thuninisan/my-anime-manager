@@ -63,14 +63,6 @@ async def get_season_detail(tv_id: int, season_num: int, language: str = "") -> 
     )
 
 
-async def get_episode_group_detail(group_id: str) -> httpx.Response:
-    """Get episode group details."""
-    return await _tmdb_request(
-        f"/tv/episode_group/{group_id}",
-        label=f"TMDB ep_group",
-    )
-
-
 async def get_alternative_titles(tv_id: int) -> httpx.Response:
     """Get all alternative titles for a TV show."""
     return await _tmdb_request(
@@ -85,45 +77,6 @@ async def get_tv_images(tv_id: int, languages: str = "ja,zh,null") -> httpx.Resp
         f"/tv/{tv_id}/images",
         params={"include_image_language": languages},
         label=f"TMDB images",
-    )
-
-
-async def get_episode_credits(
-    tv_id: int,
-    season_number: int,
-    episode_number: int,
-    language: str = "",
-) -> httpx.Response:
-    """Get full cast + crew for a single episode.
-
-    The ``/season/{n}`` endpoint only returns guest stars — this endpoint
-    returns the main voice cast (``cast``) plus directors/writers (``crew``)
-    and actual guest stars (``guest_stars``).
-
-    Pass *language* (e.g. ``"zh-CN"``) for localised actor names.
-    """
-    params = {"language": language} if language else None
-    return await _tmdb_request(
-        f"/tv/{tv_id}/season/{season_number}/episode/{episode_number}/credits",
-        params=params,
-        label=f"TMDB S{season_number}E{episode_number} credits",
-    )
-
-
-async def get_season_credits(
-    tv_id: int,
-    season_number: int,
-    language: str = "",
-) -> httpx.Response:
-    """Get full cast for an entire season.
-
-    Pass *language* (e.g. ``"zh-CN"``) for localised actor names.
-    """
-    params = {"language": language} if language else None
-    return await _tmdb_request(
-        f"/tv/{tv_id}/season/{season_number}/credits",
-        params=params,
-        label=f"TMDB S{season_number} credits",
     )
 
 

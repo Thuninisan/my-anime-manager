@@ -7,9 +7,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
 
-import httpx
-
-from .. import config, data
+from .. import data
 from ..clients.bangumi import get_subject
 from ..utils.http_retry import USER_AGENT
 from ..utils.http_client import http_client_manager

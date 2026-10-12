@@ -1,7 +1,6 @@
 import type { EpisodeMapping } from '@/types/episode';
 import { normalizeTorrentPreview } from '@/lib/episodeAdapters';
 import type { TorrentPreviewResponse } from '@/types/preview';
-import type { CatalogSeason, BangumiCatalogEntry } from '@/types/episode';
 import type { AppConfig } from '../types/preview';
 
 const API_BASE = '/api';
@@ -167,33 +166,7 @@ export async function deleteSubtitle(
   return res.json();
 }
 
-// ── Episode data lookup by ID ──
 
-export async function fetchTmdbSeasonMap(tmdbId: number): Promise<{ name: string; seasons: Record<string, CatalogSeason> }> {
-  const res = await fetch(`${API_BASE}/torrent/catalogs/tmdb/${tmdbId}`);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
-export async function fetchBangumiEpisodes(bangumiId: number): Promise<BangumiCatalogEntry> {
-  const res = await fetch(`${API_BASE}/torrent/catalogs/bangumi/${bangumiId}`);
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
-      throw new Error('Backend not reachable — make sure the FastAPI server is running on port 8000.');
-    }
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`);
-  }
-  const ct = res.headers.get('content-type') || '';
-  if (!ct.includes('application/json')) {
-    const text = await res.text().catch(() => '');
-    if (text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
-      throw new Error('Backend returned HTML — restart the FastAPI server to pick up new endpoints.');
-    }
-    throw new Error(`Expected JSON but got ${ct || 'unknown'}`);
-  }
-  return res.json();
-}
 
 export async function updateConfig(changes: Partial<AppConfig>): Promise<AppConfig> {
   const res = await fetch('/api/settings', {

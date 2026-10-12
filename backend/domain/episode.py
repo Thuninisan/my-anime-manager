@@ -94,18 +94,6 @@ class MetadataResolutionPolicy(TypedDict):
     require_chinese_plot: bool
 
 
-class SeriesMetadata(TypedDict):
-    title: str
-    original_title: str | None
-    plot: str | None
-    genres: list[str]
-    studios: list[str]
-    status: str | None
-    poster_url: str | None
-    fanart_url: str | None
-
-
-
 class CatalogEpisode(TmdbEpisodeRef):
     name: str
     name_cn: NotRequired[str]

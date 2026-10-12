@@ -12,7 +12,6 @@ ignored — use the Settings UI or edit the JSON file directly.
 Sensitive keys (password, api key) are masked in get_all().
 """
 
-import os
 from typing import Any
 from pydantic import ConfigDict, Field, create_model, field_validator
 from urllib.parse import urlsplit

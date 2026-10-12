@@ -37,25 +37,6 @@ def provider_binding_identity(*, title=None, media_type="tv", bangumi_id=None, t
                              tvdb_series_id=(tvdb_id or None) if media_type == "tv" else None)
 
 
-def search_entry_resolution(entry: dict, title: str):
-    """Adapt a per-show legacy context; never borrow another show's provider IDs."""
-    from ..services.resource_resolver import ResourceResolver, unique_provider_id
-    if entry.get("resource_resolution") is not None:
-        return entry["resource_resolution"]
-    tmdb = entry.get("tmdb") or {}
-    bgm = entry.get("bangumi") or {}
-    media_type = entry.get("media_type") or "tv"
-    hints = entry.get("map_entries", [])
-    tvdb_id = unique_provider_id(h.get("tvdb_id") for h in hints)
-    candidates = provider_candidates("tmdb", [tmdb], media_type) + provider_candidates("bangumi", [bgm], media_type)
-    if not candidates and tvdb_id is None:
-        return ResourceResolver().resolve([], title=title, media_type=media_type)
-    identity = provider_binding_identity(title=tmdb.get("name") or bgm.get("name_cn") or bgm.get("name") or title,
-                                    media_type=media_type, tmdb_id=tmdb.get("id"),
-                                    bangumi_id=bgm.get("id"), tvdb_id=tvdb_id)
-    return ResourceResolver().resolve(candidates, known=identity)
-
-
 def subscription_identity(sub: dict, subject_id: int):
     """Repositories expose canonical bindings, including partial old DB views."""
     from .resource import validate_resource_identity
@@ -79,19 +60,6 @@ def select_provider_result(provider, results, title=None, *, year=None, media_ty
              "tvdb": "tvdb_series_id", "bangumi": "bangumi_subject_id"}[provider]
     provider_id = resolution["identity"][field]
     return next(r for r in results if int(r.get("tvdb_id") or r.get("id")) == provider_id)
-
-
-
-def provider_catalog_context(identity, entry: dict) -> dict:
-    """Canonical → compatibility projection for the existing catalog orchestrator."""
-    from .resource import validate_resource_identity
-    validate_resource_identity(identity)
-    result = dict(entry, resource_identity=identity, media_type=identity['media_type'])
-    tmdb_id = identity['tmdb_series_id'] if identity['media_type'] == 'tv' else identity['tmdb_movie_id']
-    result['tmdb'] = dict(entry.get('tmdb') or {}, id=tmdb_id) if tmdb_id is not None else None
-    bid = identity['bangumi_subject_id']
-    result['bangumi'] = dict(entry.get('bangumi') or {}, id=bid) if bid is not None else None
-    return result
 
 
 def monitor_resource_candidates(rows, index_type, *, title=None):

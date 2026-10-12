@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from .. import config, data
+from .. import data
 from ..clients.qbittorrent import delete_torrent, get_torrent_files, get_torrents_by_hashes
 from . import downloader
 
