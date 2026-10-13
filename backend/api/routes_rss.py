@@ -17,7 +17,7 @@ from ..clients.qbittorrent import (
     login as qb_login,
 )
 from ..services import mapping_sync
-from ..services.enrich import _compute_rss_offset, enrich_subscription
+from ..services.subscriptions import enrichment
 from ..services import initial_rss_poll
 from ..services import rss as rss_service
 from ..services import rss_poster
@@ -257,13 +257,12 @@ async def create_subscription(body: SubscriptionIn):
         exclude_patterns=body.exclude_patterns,
         backup_exclude_patterns=body.backup_exclude_patterns,
     )
-    # Enrichment is done asynchronously via the enrich-stream endpoint.
-    # The subscription is returned immediately without enrichment data.
-    # If a sibling subscription already has cached bgm_season, copy it.
+    # New subscriptions use the server-owned first poll; existing subscriptions
+    # can refresh via enrich-stream. Return immediately, retaining saved fields.
     all_subs = data.list_subscriptions()
     for s in all_subs:
         if s["bangumi_id"] == body.bangumi_id and "bgm" in s:
-            cached = {g: s[g] for g in ENRICH_GROUPS if g in s}
+            cached = enrichment.copy_enrichment_fields(s)
             sub.update(cached)
             break
 
@@ -309,53 +308,6 @@ async def initial_poll_status(bangumi_id: int):
     return status
 
 
-ENRICH_GROUPS = ("bgm", "tvdb", "tmdb", "series_name", "resource_identity")
-
-
-def _get_cached_enrichment(bangumi_id: int) -> dict | None:
-    """Return cached enrichment fields if this bangumi_id already has them.
-
-    When a subscription already has enrichment data (e.g. from a sibling
-    primary/backup subscription), we can skip the full Bangumi API chain.
-
-    Only returns cached data that looks valid — a failed enrichment
-    (sortrange [0,0] with no IDs) is treated as no cache so it can be
-    retried on the next attempt.
-    """
-    subs = data.list_subscriptions()
-    for s in subs:
-        if s.get("bangumi_id") != bangumi_id:
-            continue
-        bgm = s.get("bgm")
-        if not bgm:
-            continue
-        # A valid enrichment has at least one of: episode range, TVDB ID, or TMDB ID
-        has_eps = (bgm.get("sortrange") or [0, 0])[1] > 0
-        has_tvdb = s["resource_identity"]["tvdb_series_id"] is not None
-        has_tmdb = s["resource_identity"]["tmdb_series_id"] is not None or s["resource_identity"]["tmdb_movie_id"] is not None
-        # A partial cache must not hide community bindings added since enrichment.
-        if s["resource_identity"]["media_type"] == "tv" and (
-            (not has_tmdb and data.get_tmdb_id(bangumi_id))
-            or (not has_tvdb and data.get_tvdb_id(bangumi_id))
-        ):
-            return None
-        if has_eps or has_tvdb or has_tmdb:
-            mapping = data.get_mapping(bangumi_id)
-            if not mapping.get("bangumi_subject_title_cn") and not mapping.get("bangumi_subject_title_jp"):
-                return None
-            for provider in ("tmdb", "tvdb"):
-                if s["resource_identity"][f"{provider}_series_id"] is not None:
-                    if (mapping.get(f"{provider}_id") != s["resource_identity"][f"{provider}_series_id"]
-                            or mapping.get(f"{provider}_ep_offset") is None
-                            or not mapping.get(f"{provider}_series_title_cn")
-                            or not mapping.get(f"{provider}_series_title_jp")):
-                        return None
-            return {g: s[g] for g in ENRICH_GROUPS if g in s}
-        # Stale/failed enrichment — ignore and re-run
-        return None
-    return None
-
-
 @router.post("/api/rss/subscriptions/{bangumi_id}/enrich-stream")
 async def enrich_subscription_stream(bangumi_id: int):
     """Stream enrichment progress as NDJSON (one JSON object per line).
@@ -369,50 +321,12 @@ async def enrich_subscription_stream(bangumi_id: int):
     """
 
     async def generate():
-        # Check for cached enrichment — if this bangumi_id already has
-        # enrichment data from a sibling subscription, skip the expensive
-        # Bangumi API chain.  We still compute RSS offsets because they
-        # depend on the RSS feed contents, not on Bangumi metadata, and may
-        # have been wiped (e.g. when adding a second feed via add_subscription).
-        cached = _get_cached_enrichment(bangumi_id)
+        # Keep cache refresh request-owned and emit its step before fetching feeds.
+        cached = enrichment.get_cached_enrichment(bangumi_id)
         if cached:
             yield (_json.dumps({"type": "step", "message": "Using cached enrichment"}, ensure_ascii=False) + "\n").encode("utf-8")
-
-            # Re-compute RSS offsets from cached bgm data + current RSS URLs
-            subs = data.list_subscriptions()
-            sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
-            primary_rss = sub.get("primary", {}).get("rss_url", "") if sub else ""
-            backup_rss = sub.get("backup", {}).get("rss_url", "") if sub else ""
-
-            primary_offset: int | None = None
-            backup_offset: int | None = None
-            bgm_sortrange = cached.get("bgm", {}).get("sortrange")
-            air_date = cached.get("bgm", {}).get("air_date", "")
-            if bgm_sortrange and bgm_sortrange[0] > 0 and air_date:
-                first_sort = bgm_sortrange[0]
-                feeds = {}
-                for url in dict.fromkeys(url for url in (primary_rss, backup_rss) if url):
-                    try:
-                        feeds[url] = await rss_service.fetch_rss_snapshot(url)
-                    except Exception:
-                        feeds[url] = {"items": []}
-                if primary_rss:
-                    smallest = _compute_rss_offset(feeds[primary_rss], air_date)
-                    if smallest is not None:
-                        primary_offset = first_sort - smallest
-                if backup_rss:
-                    smallest = _compute_rss_offset(feeds[backup_rss], air_date)
-                    if smallest is not None:
-                        backup_offset = first_sort - smallest
-
-            if primary_offset is not None:
-                data.set_subscription_rss_offset(bangumi_id, "primary", primary_offset)
-            if backup_offset is not None:
-                data.set_subscription_rss_offset(bangumi_id, "backup", backup_offset)
-
-            cached["primary_offset"] = primary_offset
-            cached["backup_offset"] = backup_offset
-            yield (_json.dumps({"type": "done", "result": cached}, ensure_ascii=False) + "\n").encode("utf-8")
+            result = await enrichment.refresh_cached_enrichment(bangumi_id, cached)
+            yield (_json.dumps({"type": "done", "result": result}, ensure_ascii=False) + "\n").encode("utf-8")
             return
 
         queue: asyncio.Queue = asyncio.Queue()
@@ -422,35 +336,14 @@ async def enrich_subscription_stream(bangumi_id: int):
 
         async def run():
             try:
-                # Look up subscription to get RSS URLs for offset computation
-                subs = data.list_subscriptions()
-                sub = next((s for s in subs if s["bangumi_id"] == bangumi_id), None)
-                primary_rss = sub.get("primary", {}).get("rss_url", "") if sub else ""
-                backup_rss = sub.get("backup", {}).get("rss_url", "") if sub else ""
-
-                result = await enrich_subscription(
+                result = await enrichment.enrich_saved_subscription(
                     bangumi_id, on_progress=on_progress,
-                    primary_rss_url=primary_rss,
-                    backup_rss_url=backup_rss,
                 )
-                if result:
-                    # Pop offsets before top-level update_subscription
-                    primary_offset = result.pop("primary_offset", None)
-                    backup_offset = result.pop("backup_offset", None)
-                    data.update_subscription(bangumi_id, result, identity_source=(result.get("resource_resolution") or {}).get("reason", "legacy_unknown"))
-                    result = next((s for s in data.list_subscriptions() if s["bangumi_id"] == bangumi_id), {})
-                    # Write offsets into nested primary/backup keys
-                    if primary_offset is not None:
-                        data.set_subscription_rss_offset(bangumi_id, "primary", primary_offset)
-                    if backup_offset is not None:
-                        data.set_subscription_rss_offset(bangumi_id, "backup", backup_offset)
-                    # Restore for the stream response
-                    result["primary_offset"] = primary_offset
-                    result["backup_offset"] = backup_offset
                 queue.put_nowait({"type": "done", "result": result})
             except Exception as exc:
                 queue.put_nowait({"type": "error", "message": str(exc)})
 
+        # Full enrichment remains independent of the streaming connection.
         asyncio.create_task(run())
 
         while True:
