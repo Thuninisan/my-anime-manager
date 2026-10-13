@@ -2,8 +2,9 @@
 
 from fastapi import APIRouter
 
+from .. import config
+from ..clients.qbittorrent import check_connection
 from ..services.subscriptions import worker
-from ..services.downloads import episode_submission
 
 router = APIRouter()
 
@@ -38,4 +39,12 @@ async def downloader_run_once():
 @router.get("/api/rss/downloader/qbit-check")
 async def downloader_qbit_check():
     """Test qBittorrent connectivity."""
-    return await episode_submission.check_qbit()
+    try:
+        version = await check_connection(
+            config.QBITTORRENT_URL,
+            config.QBITTORRENT_USERNAME,
+            config.QBITTORRENT_PASSWORD,
+        )
+        return {"ok": True, "url": config.QBITTORRENT_URL, "version": version, "error": ""}
+    except Exception as e:
+        return {"ok": False, "url": config.QBITTORRENT_URL, "version": "", "error": str(e)}

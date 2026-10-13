@@ -10,7 +10,7 @@ from .subscriptions.worker import (
     run_once, poll_subscription,
 )
 from .downloads.episode_submission import (
-    check_qbit, submit_episode_torrent, VIDEO_EXTENSIONS,
+    submit_episode_torrent, VIDEO_EXTENSIONS,
 )
 from .subscriptions.paths import resolve_episode_paths
 from .subscriptions.episode_nfo import regen_episode_nfo
@@ -18,7 +18,7 @@ from .subscriptions.inference import enrich_subscription
 
 __all__ = [
     "get_status", "get_config", "start", "stop", "set_interval", "apply_interval",
-    "run_once", "poll_subscription", "check_qbit", "submit_episode_torrent",
+    "run_once", "poll_subscription", "submit_episode_torrent",
     "VIDEO_EXTENSIONS", "resolve_episode_paths", "regen_episode_nfo",
     "enrich_subscription",
 ]

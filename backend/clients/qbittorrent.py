@@ -68,6 +68,12 @@ async def login(qb_url: str, username: str, password: str) -> qbittorrentapi.Cli
     return client
 
 
+async def check_connection(qb_url: str, username: str, password: str) -> str:
+    """Authenticate and return the server version, raising on failure."""
+    client = await login(qb_url, username, password)
+    return await asyncio.to_thread(lambda: client.app.version or "?")
+
+
 async def add_torrent(
     client: qbittorrentapi.Client,
     torrent_file_path: str,

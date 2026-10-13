@@ -24,16 +24,6 @@ logger = logging.getLogger(__name__)
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".mka", ".avi", ".mov", ".ts", ".wmv", ".flv", ".webm"}
 
 
-async def check_qbit() -> dict:
-    """Test qBittorrent connectivity and return status info."""
-    try:
-        qb = await qb_login(config.QBITTORRENT_URL, config.QBITTORRENT_USERNAME, config.QBITTORRENT_PASSWORD)
-        info = qb.app.version or "?"
-        return {"ok": True, "url": config.QBITTORRENT_URL, "version": info, "error": ""}
-    except Exception as e:
-        return {"ok": False, "url": config.QBITTORRENT_URL, "version": "", "error": str(e)}
-
-
 async def submit_episode_torrent(
     torrent_path: str, bangumi_id: int, sort: int, source: str, *,
     sub: dict, guid: str, pub_date: str = "",

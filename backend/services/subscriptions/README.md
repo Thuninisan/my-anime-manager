@@ -14,7 +14,7 @@ RSS 下载按订阅业务和单集提交拆分。模块之间不通过旧 `downl
 | `polling.py` | 单订阅主备轮询、Feed 快照复用、偏移补算、范围刷新和完结判定 | worker |
 | `selection.py` | 标签、排除词、日期、集数、去重、失败上限和来源优先级 | polling、RSS 单集下载 |
 | `episode_download.py` | RSS 补全回退、自动替换、种子获取与临时文件清理 | polling |
-| `../downloads/episode_submission.py` | 单集映射、暂停添加、元数据与重命名、恢复、历史保存；连接检查 | RSS 单集下载、人工补集/替换 API |
+| `../downloads/episode_submission.py` | 单集映射、暂停添加、元数据与重命名、恢复、历史保存 | RSS 单集下载、人工补集/替换 API |
 | `../downloads/episode_metadata.py` | 单集 NFO/图片生成编排及可选 qBittorrent 重命名 | 单集提交、单集 NFO |
 | `paths.py` | 优先读取实际媒体路径，缺失时使用已有路径模板 | 单集 API、NFO、BD 替换 |
 | `episode_nfo.py` | 使用历史映射重生成单集 NFO 和图片，不调用 qBittorrent | 历史 API |
