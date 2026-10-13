@@ -21,7 +21,8 @@ from .. import __version__, data
 from ..clients.errors import MissingAPIKeyError
 from ..utils.http_client import http_client_manager
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
-from ..services import downloader, initial_rss_poll, mapping_sync, nfo_refresh
+from ..services import initial_rss_poll, mapping_sync, nfo_refresh
+from ..services.subscriptions import worker as rss_worker
 from ..services.resource_monitor import worker as resource_worker
 from ..services.torrent import recovery as torrent_recovery
 from . import state
@@ -90,7 +91,7 @@ async def lifespan(_app: FastAPI):
 
     # Stop RSS downloader
     try:
-        await asyncio.wait_for(downloader.stop(), timeout=10)
+        await asyncio.wait_for(rss_worker.stop(), timeout=10)
         logger.info("RSS downloader stopped.")
     except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
         logger.warning("RSS downloader stop: %s", e)

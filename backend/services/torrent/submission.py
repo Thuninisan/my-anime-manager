@@ -27,6 +27,7 @@ from ...db import torrents as torrent_store
 from ...utils.torrent_file_reader import read_torrent_file_list
 from ...utils.torrent_hash import compute_info_hash
 from .. import bd_replacement, rss_poster
+from ..subscriptions.paths import resolve_episode_paths
 from ..nfo import format_download_path
 from . import recovery
 from .metadata import pre_generate_nfo
@@ -184,7 +185,7 @@ async def submit_download(body: dict) -> dict:
             if item.get("is_subtitle"):
                 continue
             sort = int(item["episode_mapping"]["bangumi"]["episode_absolute"])
-            sub, _, _ = bd_replacement.downloader.resolve_episode_paths(replace_bangumi_id, sort)
+            sub, _, _ = resolve_episode_paths(replace_bangumi_id, sort)
             tvdb_episode_number = sort + (sub.get("tvdb", {}).get("ep_offset") or 0)
             rel = format_download_path(config.RSS_PATH_TEMPLATE, sub, sort=sort, tvdb_episode=tvdb_episode_number).lstrip("/")
             item["replacement_target"] = str(Path(rel).with_suffix(Path(item["torrent_path"]).suffix))

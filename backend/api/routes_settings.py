@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import ValidationError
 
 from .. import config
-from ..services import downloader
+from ..services.subscriptions import worker as rss_worker
 from ..services.resource_monitor import worker as resource_worker
 from ..services.torrent import recovery as torrent_recovery
 
@@ -24,7 +24,7 @@ async def update_config(changes: dict[str, object]):
     except ValidationError as exc:
         raise HTTPException(422, exc.errors(include_context=False)) from exc
     if "RSS_POLL_INTERVAL_MIN" in changes:
-        await downloader.apply_interval()
+        await rss_worker.apply_interval()
     if "RESOURCE_POLL_INTERVAL_MIN" in changes:
         resource_worker.notify_interval_changed()
     if changes.get("FONTINASS_ENABLED") and config.FONTINASS_ENABLED:

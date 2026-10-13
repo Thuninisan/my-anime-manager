@@ -17,12 +17,11 @@ from ..clients.qbittorrent import (
     login as qb_login,
 )
 from ..services import mapping_sync
-from ..services import downloader
+from ..services.enrich import _compute_rss_offset, enrich_subscription
 from ..services import initial_rss_poll
 from ..services import rss as rss_service
 from ..services import rss_poster
 from ..services import tmdb as tmdb_service
-from ..services.enrich import _compute_rss_offset
 from .models import (
     AssignMikanRequest,
     BangumiRssResponse,
@@ -429,7 +428,7 @@ async def enrich_subscription_stream(bangumi_id: int):
                 primary_rss = sub.get("primary", {}).get("rss_url", "") if sub else ""
                 backup_rss = sub.get("backup", {}).get("rss_url", "") if sub else ""
 
-                result = await downloader.enrich_subscription(
+                result = await enrich_subscription(
                     bangumi_id, on_progress=on_progress,
                     primary_rss_url=primary_rss,
                     backup_rss_url=backup_rss,

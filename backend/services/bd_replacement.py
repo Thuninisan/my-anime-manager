@@ -8,14 +8,14 @@ from fastapi import HTTPException
 
 from .. import data
 from ..clients.qbittorrent import delete_torrent, get_torrent_files, get_torrents_by_hashes
-from . import downloader
+from .subscriptions.paths import resolve_episode_paths
 
 logger = logging.getLogger(__name__)
 
 
 def validate_mapping(bangumi_id: int, files: list[dict]) -> dict[str, dict]:
     """Require one BD video for every recorded episode of this subscription."""
-    downloader.resolve_episode_paths(bangumi_id, 1)
+    resolve_episode_paths(bangumi_id, 1)
     episodes = data.get_all_episodes(bangumi_id)
     if not episodes:
         raise HTTPException(400, "此订阅没有可替换的下载记录")
@@ -50,7 +50,7 @@ async def old_files(qb, bangumi_id: int, episodes: dict[str, dict], new_hash: st
         raise HTTPException(400, "未找到 RSS 本地文件")
     links: set[Path] = set()
     for sort in episodes:
-        _, season_dir, _ = downloader.resolve_episode_paths(bangumi_id, int(sort))
+        _, season_dir, _ = resolve_episode_paths(bangumi_id, int(sort))
         root = Path(season_dir)
         if root.is_dir():
             for path in root.iterdir():

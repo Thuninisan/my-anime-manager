@@ -13,7 +13,9 @@ from ..clients.qbittorrent import (
     delete_torrent,
     login as qb_login,
 )
-from ..services import downloader, nfo_refresh
+from ..services import nfo_refresh
+from ..services.downloads import episode_submission
+from ..services.subscriptions import paths, episode_nfo
 from ..utils.torrent_file_reader import read_torrent_file_list
 
 router = APIRouter()
@@ -93,7 +95,7 @@ async def replace_episode_torrent(bangumi_id: int, sort: int, file: UploadFile =
 async def _submit_uploaded_episode(bangumi_id: int, sort: int, file: UploadFile, *, replace: bool):
     if not file.filename or not file.filename.lower().endswith(".torrent"):
         raise HTTPException(400, "Only .torrent files are accepted")
-    sub, _, _ = downloader.resolve_episode_paths(bangumi_id, sort)
+    sub, _, _ = paths.resolve_episode_paths(bangumi_id, sort)
     tmp = tempfile.NamedTemporaryFile(suffix=".torrent", delete=False)
     try:
         tmp.write(await file.read())
@@ -102,14 +104,14 @@ async def _submit_uploaded_episode(bangumi_id: int, sort: int, file: UploadFile,
             meta = bencodepy.decode(Path(tmp.name).read_bytes())
             torrent_name = meta[b"info"][b"name"].decode("utf-8", errors="replace")
             files = read_torrent_file_list(tmp.name)
-            videos = [f for f in files if Path(f["name"]).suffix.lower() in downloader.VIDEO_EXTENSIONS]
+            videos = [f for f in files if Path(f["name"]).suffix.lower() in episode_submission.VIDEO_EXTENSIONS]
             if len(videos) != 1:
                 raise HTTPException(400, f"种子中视频文件数量不为1 (found {len(videos)})，请上传单集种子")
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(400, "无效的 .torrent 文件") from exc
-        info_hash = await downloader.submit_episode_torrent(
+        info_hash = await episode_submission.submit_episode_torrent(
             tmp.name, bangumi_id, sort, "edit" if replace else "add",
             sub=sub, guid=torrent_name,
             pub_date=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
@@ -157,7 +159,7 @@ async def update_episode_overrides(
     if regen_nfo:
         try:
             async with nfo_refresh.write_lock:
-                await downloader.regen_episode_nfo(bangumi_id, sort)
+                await episode_nfo.regen_episode_nfo(bangumi_id, sort)
         except Exception:
             logger.exception("overrides+PATCH: NFO regeneration failed")
 
@@ -172,7 +174,7 @@ async def regen_episode_nfo(bangumi_id: int, sort: int):
     nfo_refresh.ensure_idle(bangumi_id)
     try:
         async with nfo_refresh.write_lock:
-            await downloader.regen_episode_nfo(bangumi_id, sort)
+            await episode_nfo.regen_episode_nfo(bangumi_id, sort)
     except HTTPException:
         raise
     except Exception as e:
