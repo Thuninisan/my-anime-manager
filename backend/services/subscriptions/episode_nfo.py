@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from ... import config
 from ...data import get_all_episodes
-from ..downloads.episode_metadata import generate_metadata
+from ..metadata.nfo.generator import batch_nfo_generator
 from .paths import resolve_episode_paths
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     (no rename), so it works even after the torrent has been removed.
     Raises HTTPException(4xx) on missing data, HTTPException(500) on failure.
     """
-    sub, season_dir, show_dir = resolve_episode_paths(bangumi_id, sort)
+    sub, _, _ = resolve_episode_paths(bangumi_id, sort)
     ep = get_all_episodes(bangumi_id).get(str(sort))
     if not ep:
         raise HTTPException(404, "该集的下载记录不存在")
@@ -38,21 +38,11 @@ async def regen_episode_nfo(bangumi_id: int, sort: int) -> None:
     historical_mapping = episode_mapping(bangumi_id, sort, stored_mapping)
     series_name = sub.get("series_name") or sub.get("name", str(bangumi_id))
 
-    # qb_client / info_hash / old_torrent_path are only consumed by the
-    # rename step, which regen skips (rename_in_qbit=False) — placeholders.
-    ok = await generate_metadata(
-        None,
-        "",
-        "",
-        season_dir=season_dir,
-        show_dir=show_dir,
-        series_name=series_name,
-        episode_mapping=historical_mapping,
-        rename_in_qbit=False,
-        overwrite=True,
-        base_path=Path(ep["download_path"]).anchor if ep.get("download_path") else (config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH),
-        download_path=ep.get("download_path"),
+    summary = await batch_nfo_generator(
+        Path(ep["download_path"]).anchor if ep.get("download_path") else (config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH),
+        [{"episode_mapping": historical_mapping, "download_path": ep.get("download_path")}],
+        series_name=series_name, overwrite=True,
     )
-    if not ok:
+    if not summary.get("episodesProcessed", summary.get("nfoGenerated", 0)):
         raise HTTPException(500, "NFO 生成失败")
     logger.info("regen-nfo: NFO regenerated for bangumi=%d sort=%d", bangumi_id, sort)

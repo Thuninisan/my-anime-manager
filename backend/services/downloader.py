@@ -10,8 +10,9 @@ from .subscriptions.worker import (
     run_once, poll_subscription,
 )
 from .downloads.episode_submission import (
-    submit_episode_torrent, VIDEO_EXTENSIONS,
+    VIDEO_EXTENSIONS,
 )
+from .subscriptions.episode_download import submit_episode as submit_episode_torrent
 from .subscriptions.paths import resolve_episode_paths
 from .subscriptions.episode_nfo import regen_episode_nfo
 from .subscriptions.inference import enrich_subscription

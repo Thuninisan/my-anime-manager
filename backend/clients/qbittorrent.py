@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Seconds before giving up on a qBittorrent connection (connect + read).
 _QB_TIMEOUT = 8
+_ADD_LOCK = asyncio.Lock()
 
 
 def _make_client(qb_url: str) -> qbittorrentapi.Client:
@@ -79,18 +80,20 @@ async def add_torrent(
     torrent_file_path: str,
     save_path: str,
     rename: str | None = None,
+    *,
+    submission_result: dict | None = None,
 ) -> str:
     """Add a torrent to qBittorrent in paused state.
 
-    Uses hash-diff (primary) to locate the newly-added torrent.
-    Falls back to a pre-computed info-hash lookup when qBittorrent
-    deduplicates the torrent (same info_hash already present).
+    根据预计算的 info hash 查找提交的种子。应用内添加操作串行执行，
+    避免并发提交影响新增任务的归属判断。
 
     Args:
         client: Authenticated qbittorrentapi.Client
         torrent_file_path: Path to .torrent file
         save_path: Download save path
         rename: Optional rename for the torrent
+        submission_result: 可选输出，记录是否为本次新增任务
 
     Returns:
         Info hash string of the added torrent
@@ -100,9 +103,15 @@ async def add_torrent(
     # Pre-compute the info hash from the .torrent file so we can look it
     # up directly when qBittorrent deduplicates (hash-diff finds nothing).
     expected_hash = compute_info_hash(torrent_file_path)
+    if not expected_hash:
+        raise ValueError("无法计算种子 info hash")
 
     def _do_add():
         before_hashes = {t.hash for t in client.torrents.info()}
+        if submission_result is not None:
+            submission_result["created_new"] = False
+        if submission_result is not None and expected_hash in before_hashes:
+            return expected_hash
 
         with open(torrent_file_path, "rb") as f:
             client.torrents.add(
@@ -121,19 +130,15 @@ async def add_torrent(
             if attempt > 0:
                 time.sleep(0.5)
             for torrent in client.torrents.info():
-                if torrent.hash not in before_hashes:
+                if torrent.hash == expected_hash:
+                    if submission_result is not None:
+                        submission_result["created_new"] = torrent.hash not in before_hashes
                     return torrent.hash
-            # Fallback: look up by pre-computed info hash (handles
-            # deduplication when the same .torrent was already present).
-            if expected_hash:
-                for torrent in client.torrents.info():
-                    if torrent.hash == expected_hash:
-                        return torrent.hash
-
         raise RuntimeError(f"添加种子后未找到 torrent: {torrent_name}")
 
     try:
-        return await asyncio.to_thread(_do_add)
+        async with _ADD_LOCK:
+            return await asyncio.to_thread(_do_add)
     except RuntimeError:
         raise
     except Exception as e:

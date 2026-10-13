@@ -25,6 +25,7 @@ from ..services.subscriptions import initial_poll as initial_rss_poll
 from ..services.mappings import sync as mapping_sync
 from ..services.metadata import refresh as nfo_refresh
 from ..services.subscriptions import worker as rss_worker
+from ..services.subscriptions import episode_download
 from ..services.resources import worker as resource_worker
 from ..services.torrent import recovery as torrent_recovery
 from ..services.system import directory_tasks
@@ -92,6 +93,7 @@ async def lifespan(_app: FastAPI):
 
     await torrent_recovery.stop()
 
+    await episode_download.stop_nfo_tasks()
     await http_client_manager.aclose()
     logger.info("All workers stopped — safe to restart.")
 

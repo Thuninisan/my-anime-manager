@@ -12,7 +12,7 @@ clients 负责外部服务请求；db 负责持久化；domain 保存统一模�
 | `subscriptions/` | Feed、订阅补全、主备筛选、首次/定时轮询、历史路径和单集 NFO | `enrichment`、`worker`、`initial_poll`，详见包内 README |
 | `resources/` | 来源验证、Feed/详情/种子采集、资源识别、从资源建立预览 | `sources.add_source`、`worker.trigger`、`recognition.recognize_resource`、`preview.preview_cached_torrent` |
 | `torrent/` | 多文件预览、候选维护、提交、合集查询、BD 替换和任务恢复 | `preview`、`preview_session`、`submission.submit_download`、`queries.list_collections`、`recovery` |
-| `downloads/` | RSS/人工单集下载提交、元数据生成后的 qBittorrent 重命名 | `episode_submission.submit_episode_torrent`、`episode_metadata.generate_metadata` |
+| `downloads/` | 按确定的目标路径暂停添加种子、重命名及恢复下载 | `episode_submission.submit_torrent` |
 | `metadata/` | 平台业务目录、短期缓存、中文元数据解析、翻译、封面、NFO/图片和批量刷新 | `providers`、`context.MetadataContext`、`resolution.resolve_nfo_episode`、`nfo`、`refresh` |
 | `media/` | 共享命名规则、文件计划、硬链接和可恢复的 ASS 处理 | `paths.format_download_path`、`planning.build_processing`、`linking.install_hardlink`、`fonts` |
 | `mappings/` | 社区映射同步及用户明确选择的平台绑定 | `sync.synchronize`、`sync.run_scheduler`、`bindings.select_bangumi` |
@@ -41,7 +41,7 @@ EpisodeCatalog、EpisodeMapping 和 ResolvedEpisode 为准。HTTP 协议和数�
 1. services 不导入 `backend.api`。新业务入口返回数据或抛出业务异常，由路由映射为 HTTP 响应。
    原有下载、预览会话、单集/批量 NFO 和 BD 接口仍保留既有 HTTPException 契约；目录迁移不重写这些异常语义。
 2. `metadata` 不反向依赖 `subscriptions`、`torrent` 或 `downloads`。Bangumi 剧集缓存归 provider，
-   快照读取归 domain；qBittorrent 的单集重命名归 downloads。
+   快照读取归 domain；qBittorrent 的单集重命名归 downloads；单集提交判断、后台 NFO 和历史记录归 subscriptions.episode_download。
 3. `media` 不调用订阅或种子流程。Torrent monitor 负责等待下载并协调文件操作；
    recovery 独占任务注册、阶段推进和恢复，文件计划及实际硬链接归 media。
 4. 定时轮询和首次轮询通过 subscriptions.worker 共用锁。拆包不复制缓存、任务表或写入锁。

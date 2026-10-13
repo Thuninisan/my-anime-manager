@@ -1,7 +1,6 @@
 """Jellyfin NFO writers, image assets and batch generation.
 
-Path-template rules belong to media.paths; qBittorrent rename orchestration
-belongs to downloads.episode_metadata.
+路径模板规则归 media.paths；qBittorrent 重命名编排归 downloads.episode_submission。
 """
 
 from .generator import batch_nfo_generator

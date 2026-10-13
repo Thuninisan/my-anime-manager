@@ -13,9 +13,8 @@ RSS 下载按订阅业务和单集提交拆分。模块之间不通过旧 `downl
 | `worker.py` | 启停、调度、共享锁、全量轮询状态和累计统计 | 下载器 API、设置 API、应用生命周期、首次订阅任务 |
 | `polling.py` | 单订阅主备轮询、Feed 快照复用、偏移补算、范围刷新和完结判定 | worker |
 | `selection.py` | 标签、排除词、日期、集数、去重、失败上限和来源优先级 | polling、RSS 单集下载 |
-| `episode_download.py` | RSS 补全回退、自动替换、种子获取与临时文件清理 | polling |
-| `../downloads/episode_submission.py` | 单集映射、暂停添加、元数据与重命名、恢复、历史保存 | RSS 单集下载、人工补集/替换 API |
-| `../downloads/episode_metadata.py` | 单集 NFO/图片生成编排及可选 qBittorrent 重命名 | 单集提交、单集 NFO |
+| `episode_download.py` | RSS 补全、种子获取、单集提交判断、映射与路径、替换、后台 NFO 和历史保存 | polling、人工补集/替换 API |
+| `../downloads/episode_submission.py` | 按明确的保存目录和相对路径暂停添加、重命名、恢复及失败清理 | episode_download |
 | `paths.py` | 优先读取实际媒体路径，缺失时使用已有路径模板 | 单集 API、NFO、BD 替换 |
 | `episode_nfo.py` | 使用历史映射重生成单集 NFO 和图片，不调用 qBittorrent | 历史 API |
 
@@ -34,7 +33,7 @@ polling 返回本次成功提交数量，不修改调度状态。worker 只在�
 - 主来源先处理，备用来源随后补集。筛选和自动替换共用
   `selection.SOURCE_PRIORITY`，未知来源仍按 -1 处理。
 - Feed 快照和 MetadataContext 按一次订阅处理复用；主备来源各自保存偏移。
-- 自动 RSS 替换与人工单集替换保留各自原有的旧种子删除时机和失败处理。
+- 自动 RSS 替换与人工单集替换共用提交入口，先解析新种子、准备映射与路径，再删除旧任务。
 - 提交服务仅处理订阅单集种子，不承接 Torrent 多文件/整季提交。
 - 单集 NFO 的冲突检查和写入锁仍由 API 与 `../metadata/refresh.py` 管理。
   单集生成保留图片处理；整订阅批量刷新仍使用原有 NFO-only 流程。
@@ -58,3 +57,5 @@ polling 返回本次成功提交数量，不修改调度状态。worker 只在�
 
 新增筛选条件放入 selection；新增订阅处理步骤放入 polling；
 修改单集提交顺序应同时检查自动 RSS 和人工补集/替换的行为。
+
+单集提交先固定映射和媒体目标路径，再并发执行下载与后台 NFO 生成。下载不等待 NFO；NFO 失败只记录日志，不改变下载结果。下载历史仅由下载执行结果决定。替换先准备新种子与路径，再删除旧任务；同集提交串行，后台 NFO 与手动重生成、批量刷新共用元数据写入锁。应用关闭时取消并等待后台 NFO 任务。
