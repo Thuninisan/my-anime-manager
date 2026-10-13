@@ -16,9 +16,9 @@ from ...clients.qbittorrent import get_torrents_by_hashes, login as qb_login
 from ...db import recovery as recovery_store
 from ...db import torrents as torrent_store
 from ...logging.logging_config import operation_context
-from .. import bd_replacement
-from ..workflow_recovery import execution
-from . import fontinass
+from . import replacement as bd_replacement
+from ..workflows.execution import execution
+from ..media import fonts as fontinass
 from .monitor import monitor_download, monitor_processing
 
 logger = logging.getLogger(__name__)

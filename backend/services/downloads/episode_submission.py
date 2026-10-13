@@ -15,8 +15,9 @@ from ...clients.qbittorrent import (
 )
 from ...data import get_all_episodes, mark_downloaded, reset_fail_count
 from ...utils.torrent_hash import compute_info_hash
-from ..nfo import generate_metadata, format_download_path
-from ..nfo.metadata_context import MetadataContext
+from .episode_metadata import generate_metadata
+from ..media.paths import format_download_path
+from ..metadata.context import MetadataContext
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ async def submit_episode_torrent(
     torrent_hash = compute_info_hash(torrent_path)
     rss_base = config.RSS_DOWNLOAD_PATH or config.QBITTORRENT_SAVE_PATH
     from ...domain.rss_episode import rss_episode_ref
-    from ..rss_episode_matcher import subscription_episode_mapping
+    from ..subscriptions.episode_mapping import subscription_episode_mapping
     metadata_ctx = metadata_ctx or MetadataContext()
     old = get_all_episodes(bangumi_id).get(str(sort), {})
     mapping_sub = {**sub, "tmdb": {**tmdb, "id": tmdb_id}, "tvdb": {**tvdb, "id": tvdb_id}}

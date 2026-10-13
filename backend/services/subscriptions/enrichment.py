@@ -7,8 +7,8 @@ fetching feeds. Full enrichment continues to use the existing provider engine.
 from collections.abc import Callable
 
 from ... import data
-from .. import rss as rss_service
-from ..enrich import _compute_rss_offset, enrich_subscription
+from . import feeds as rss_service
+from .inference import _compute_rss_offset, enrich_subscription
 
 _ENRICH_GROUPS = ("bgm", "tvdb", "tmdb", "series_name", "resource_identity")
 

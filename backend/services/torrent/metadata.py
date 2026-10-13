@@ -43,13 +43,13 @@ async def pre_generate_nfo(
                 raise ValueError("ambiguous_resource: movie_nfo_context")
             identity = selected_resources[0]
             tmdb_id = identity["tmdb_movie_id"]
-            from ..nfo.generator import sanitize_path_name
+            from ..media.paths import sanitize_path_name
             tmdb_name = sanitize_path_name(next(f["tmdb_show_name"] for f in files if not f.get("is_subtitle")))
             bangumi_id = identity["bangumi_subject_id"] or 0
             # Movie output path: {MOVIE_HARDLINK_PATH}/{tmdb_name}/
             movie_output_dir = Path(config.MOVIE_HARDLINK_PATH) / tmdb_name
             movie_output_dir.mkdir(parents=True, exist_ok=True)
-            from ..nfo.nfo_xml import generate_movie_nfo
+            from ..metadata.nfo.nfo_xml import generate_movie_nfo
             nfo_path = generate_movie_nfo(
                 tmdb_id=tmdb_id,
                 bangumi_id=bangumi_id,
@@ -73,8 +73,8 @@ async def pre_generate_nfo(
                     continue
                 nfo_episodes.append({"episode_mapping": f["episode_mapping"]})
             if nfo_episodes:
-                from ..nfo.generator import batch_nfo_generator
-                from ..nfo.metadata_context import MetadataContext
+                from ..metadata.nfo.generator import batch_nfo_generator
+                from ..metadata.context import MetadataContext
                 metadata_ctx = MetadataContext()
                 metadata_ctx.preview_snapshot = preview_snapshot
                 for mapping in (entry["episode_mapping"] for entry in nfo_episodes):

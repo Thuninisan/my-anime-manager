@@ -1,5 +1,14 @@
 # Current canonical contract (Phase 7)
 
+Pure rules now live beside the canonical models: `resource_resolution.py`,
+`rss_mapping.py`, `batch_episode.py`, `scanned_episode.py`, `bangumi_chain.py`,
+`metadata_resolution.py` and `preview_metadata.py`. These modules do not import
+services, clients, repositories or API routes. `resource_sources.py` holds the
+built-in source definitions shared by persistence initialization and feed parsing.
+I/O orchestration lives in the capability packages documented in
+[`../services/README.md`](../services/README.md). Historical paths below are retained
+as phase records, not current import instructions.
+
 Normal runtime accepts ResourceIdentity and EpisodeMapping only. Public torrent previews
 use v2 sessions, `episode_catalog`, `episode_match_source`, canonical series contexts and
 ResourceCandidate evidence. Downloads contain `preview_id`, `preview_revision`, `file_id`

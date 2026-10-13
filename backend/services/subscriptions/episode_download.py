@@ -17,8 +17,8 @@ from ...data import (
     remove_episode_record, increment_fail_count, MAX_FAIL_COUNT,
 )
 from ...logging.logging_config import safe_url
-from ..enrich import enrich_subscription
-from ..nfo.metadata_context import MetadataContext
+from .inference import enrich_subscription
+from ..metadata.context import MetadataContext
 from ..downloads.episode_submission import submit_episode_torrent
 from .selection import SOURCE_PRIORITY
 

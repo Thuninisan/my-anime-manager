@@ -4,7 +4,7 @@ My Anime Manager 是 FastAPI + React 的番剧管理应用：匹配 TMDB/Bangumi
 
 ## 目录与技术栈
 
-- `backend/`：Python 3.11+ 包。`api/` 提供 FastAPI 路由；`clients/` 封装外部服务；`services/` 包含 RSS 下载、资源采集、torrent 处理和 NFO；`db/` 使用 SQLAlchemy + SQLite；`data/` 负责 JSON 数据与社区映射；`utils/` 是路径、解析与 HTTP 工具。
+- `backend/`：Python 3.11+ 包。`api/` 提供 FastAPI 路由；`clients/` 封装外部服务；`services/` 按业务能力组织，职责与依赖见 `backend/services/README.md`；`domain/` 保存统一模型和纯业务规则；`db/` 使用 SQLAlchemy + SQLite；`data/` 提供数据访问兼容入口与 JSON 设置；`utils/` 是路径、解析与 HTTP 工具。
 - `frontend/`：React 19 + TypeScript + Vite + Tailwind CSS v4。`src/pages/` 是页面入口，`src/components/{rss,torrent,settings,shared,ui}/` 是组件，`src/api/` 是 API 调用层。
 - `scripts/`：版本同步、映射下载与调试脚本。
 - `Dockerfile`：构建带 Git、Node.js 和 Python 依赖的基础镜像；`docker-entrypoint.sh` 在容器启动时拉取源码、安装后端并构建前端；`docker-compose.yml`：本地构建与持久化挂载。
@@ -24,7 +24,7 @@ docker compose up -d --build
 
 - `backend/config.py` 集中定义默认值、类型与范围；`GET/PATCH /api/settings` 读取或更新应用设置。敏感值在读取时脱敏，空字符串或 `***` 不覆盖已有密钥。
 - 设置保存在 `MAM_DATA_DIR/settings.json`；首次启动且文件不存在时，同名环境变量仅用于初始化。旧 `rss_settings.json` 的排除词在首次读取时迁入。RSS 下载和资源采集轮询间隔也保存在设置中。
-- 用户数据由 `MAM_DATA_DIR` 控制，Docker 默认 `/app/data`。订阅和历史仍在 JSON 文件；资源及种子关系数据在 `mam.sqlite3`。不要提交密钥、下载历史、数据库、日志、上传字幕等运行数据。
+- 用户数据由 `MAM_DATA_DIR` 控制，Docker 默认 `/app/data`。订阅、下载历史、种子、资源及社区映射保存在 `mam.sqlite3`；设置仍使用 JSON。旧业务 JSON 会自动导入且保留原文件，此后以数据库为准。不要提交密钥、下载历史、数据库、日志、上传字幕等运行数据。
 - 部署参数（如 `MAM_DATA_DIR`、`WATCH_DIR`、日志目录和级别）可由环境变量指定。Docker 使用公开仓库 `MAM_REPO_URL` 和 `MAM_BRANCH` 拉取源码；`mam-source` 卷保留检出的源码。
 
 ## 主要流程

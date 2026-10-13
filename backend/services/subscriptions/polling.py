@@ -9,9 +9,10 @@ import logging
 
 from ...data import list_subscriptions, get_all_episodes
 from ...logging.logging_config import safe_url
-from .. import rss as rss_service
-from ..enrich import _bgm_ep_cache, _get_bangumi_episodes, _compute_rss_offset
-from ..nfo.metadata_context import MetadataContext
+from . import feeds as rss_service
+from ..metadata.providers.bangumi import invalidate_episode_cache, get_cached_episodes
+from .inference import _compute_rss_offset
+from ..metadata.context import MetadataContext
 from . import selection, episode_download
 
 logger = logging.getLogger(__name__)
@@ -162,8 +163,8 @@ async def _refresh_sortrange(bangumi_id: int, sub: dict):
     sub_bak = sub.get("bgm", {}).get("sortrange")
     try:
         # Clear cached episodes so we get the latest from the API
-        _bgm_ep_cache.pop(bangumi_id, None)
-        eps = await _get_bangumi_episodes(bangumi_id)
+        invalidate_episode_cache(bangumi_id)
+        eps = await get_cached_episodes(bangumi_id)
         sorts = [e["sort"] for e in eps if e.get("sort") is not None]
         new_range = [min(sorts), max(sorts)] if sorts else [0, 0]
 
@@ -177,7 +178,7 @@ async def _refresh_sortrange(bangumi_id: int, sub: dict):
     except Exception:
         logger.warning("Failed to refresh bgm_sortrange (non-fatal)", exc_info=True)
         # Revert cache pop on error so next call can retry with existing cache
-        _bgm_ep_cache.pop(bangumi_id, None)
+        invalidate_episode_cache(bangumi_id)
 
 
 async def _check_completion(bangumi_id: int, sub: dict):

@@ -18,8 +18,8 @@ from ...vendor.anitopy import parse as anitopy_parse
 from ...clients import tmdb as tmdb_client
 from ...clients import bangumi as bgm_client
 from ...clients import tvdb as tvdb_client
-from .. import tmdb as tmdb_service
-from .. import bangumi as bangumi_service
+from ..metadata.providers import tmdb as tmdb_service
+from ..metadata.providers import bangumi as bangumi_service
 from ... import data as data_store
 from ... import config
 
@@ -235,7 +235,7 @@ def _deduplicate_show_names(parsed_files: list[dict]) -> list[str]:
 def _preview_provider_result(provider, results, title=None, *, year=None, media_type="tv", source=None):
     """Preview keeps ordinary uncertainty as canonical evidence."""
     from ...domain.resource_adapters import provider_candidates
-    from ..resource_resolver import rank_resource_candidates
+    from ...domain.resource_resolution import rank_resource_candidates
     candidates = rank_resource_candidates(provider_candidates(provider, results, media_type, source), title=title, year=year)
     selected = next((r for r in results if candidates and str(r.get("id")) == str(candidates[0]["provider_id"])), None)
     return selected, {"candidates": candidates, "status": "suggested" if candidates else "unresolved"}
@@ -570,7 +570,7 @@ async def _fetch_provider_catalogs(search_results: dict, parsed_files: list[dict
         return str(bid), {"name": name, "episodes": clean_eps}
 
     tvdb_data: dict = {}
-    from ..tvdb import fetch_tvdb_series_episodes
+    from ..metadata.providers.tvdb import fetch_tvdb_series_episodes
     tvdb_sem = asyncio.Semaphore(2)
 
     async def _fetch_one_tvdb(tid):

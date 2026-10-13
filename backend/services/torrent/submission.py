@@ -26,12 +26,13 @@ from ...clients.qbittorrent import (
 from ...db import torrents as torrent_store
 from ...utils.torrent_file_reader import read_torrent_file_list
 from ...utils.torrent_hash import compute_info_hash
-from .. import bd_replacement, rss_poster
+from . import replacement as bd_replacement
+from ..metadata import posters as rss_poster
 from ..subscriptions.paths import resolve_episode_paths
-from ..nfo import format_download_path
+from ..media.paths import format_download_path
 from . import recovery
 from .metadata import pre_generate_nfo
-from .monitor import build_processing
+from ..media.planning import build_processing
 from .preview import derive_series_name
 
 logger = logging.getLogger(__name__)

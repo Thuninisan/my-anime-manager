@@ -18,12 +18,12 @@ from ...clients.qbittorrent import (
     resume_torrent,
 )
 from ... import config
-from .. import tmdb as tmdb_service
-from .. import bangumi as bangumi_service
-from ..mapper import find_target_entry
-from ..nfo.images import download_season_poster, download_show_images
-from ..nfo.nfo_xml import generate_season_nfo, generate_tv_show_nfo
-from ..nfo.plot_fallback import resolve_season_plot
+from ..metadata.providers import tmdb as tmdb_service
+from ..metadata.providers import bangumi as bangumi_service
+from ...domain.bangumi_chain import find_target_entry
+from ..metadata.nfo.images import download_season_poster, download_show_images
+from ..metadata.nfo.nfo_xml import generate_season_nfo, generate_tv_show_nfo
+from ..metadata.plots import resolve_season_plot
 from ...utils.torrent_parser import parse_qbit_file_list
 from ...utils.torrent_file_reader import read_torrent_file_list
 
@@ -55,7 +55,7 @@ def _pick_show_name(file_list: list[dict]) -> tuple[str, str | None]:
 
 def _find_entry_in_chain(target_title: str, chain: list[dict]) -> int:
     """Find the chain entry whose name best matches the target title."""
-    from ..resource_resolver import select_provider_result
+    from ...domain.resource_resolution import select_provider_result
     selected = select_provider_result("bangumi", chain, target_title, source="bangumi_relation")
     if selected is None:
         raise ValueError("unresolved_resource")
@@ -105,7 +105,7 @@ async def build_preview(torrent_path: str) -> dict:
     if not episodes:
         raise RuntimeError("没有找到可处理的剧集文件")
 
-    from ..resource_resolver import normalized_title
+    from ...domain.resource_resolution import normalized_title
     show_keys = {normalized_title(e.get("showName")) for e in episodes if e.get("showName")}
     if len(show_keys) > 1:
         raise ValueError("ambiguous_resource: batch_multiple_series; split torrents by series")
@@ -161,7 +161,7 @@ async def build_preview(torrent_path: str) -> dict:
         raise RuntimeError("Bangumi 未找到该节目")
 
     logger.debug("🔗 遍历 Bangumi 条目链...")
-    from ..resource_resolver import select_provider_result
+    from ...domain.resource_resolution import select_provider_result
     selected_subject = select_provider_result("bangumi", bgm_results, jp_name)
     if selected_subject is None:
         raise ValueError("unresolved_resource")
@@ -447,7 +447,7 @@ async def build_preview(torrent_path: str) -> dict:
                 "guest_stars": tmdb_episode_payload.get("guestStars", []) if tmdb_episode_payload else [],
             } if tmdb_episode_payload else None,
         }
-        from ..batch_episode_mapper import normalize_batch_episode
+        from ...domain.batch_episode import normalize_batch_episode
         from ...domain.episode import create_episode_mapping
         ep_block["episode_mapping"] = create_episode_mapping(
             {"season_number": None, "episode_number": None},
@@ -593,12 +593,12 @@ async def generate_metadata_collection(
     Returns:
         ``{nfoGenerated: int, imagesDownloaded: int}``.
     """
-    from ..batch_episode_mapper import normalize_batch_episode
+    from ...domain.batch_episode import normalize_batch_episode
     from ...domain.episode_metadata_adapters import provider_metadata_candidates
-    from ..episode_metadata_resolver import resolve_nfo_episode, LEGACY_NFO_METADATA_POLICY
-    from ..nfo.metadata_context import MetadataContext
-    from ..nfo.nfo_xml import generate_episode_nfo
-    from ..nfo.images import download_episode_thumb
+    from ..metadata.resolution import resolve_nfo_episode, LEGACY_NFO_METADATA_POLICY
+    from ..metadata.context import MetadataContext
+    from ..metadata.nfo.nfo_xml import generate_episode_nfo
+    from ..metadata.nfo.images import download_episode_thumb
     metadata_ctx = metadata_ctx or MetadataContext()
     mappings = {name: normalize_batch_episode(ep) for name, ep in episodes.items()}
     summary = {"nfoGenerated": 0, "imagesDownloaded": 0}
@@ -805,7 +805,8 @@ async def execute_confirm(
 
         # ── Copy user-uploaded subtitles alongside media files ──
         # Subtitles are matched to video files by original filename stem.
-        subtitle_src_dir = Path(__file__).parent.parent / "data" / "subtitles" / torrent_name
+        from ...utils.paths import SUBTITLE_DIR
+        subtitle_src_dir = SUBTITLE_DIR / torrent_name
         if subtitle_src_dir.is_dir():
             logger.debug(f"📝 复制用户上传的字幕文件...")
             subtitle_files_list = list(subtitle_src_dir.iterdir())
@@ -842,7 +843,7 @@ async def execute_confirm(
                 logger.debug(f"   无字幕文件")
 
         # ── NFO + images (shared with RSS flow via write_episode_files) ──
-        from ..nfo.metadata_context import MetadataContext
+        from ..metadata.context import MetadataContext
         from ...domain.episode_metadata_adapters import seed_provider_catalogs
         metadata_ctx = MetadataContext()
         seed_provider_catalogs(metadata_ctx, batch_preview.get("provider_catalogs", {}))
@@ -882,7 +883,7 @@ async def process_torrent(torrent_path: str) -> bool:
     (``--scan``).
     """
     batch_preview = await build_preview(torrent_path)
-    from ..scan_episode_matcher import resolve_scanned_episode
+    from ...domain.scanned_episode import resolve_scanned_episode
     for name, episode in batch_preview["episodes"].items():
         episode["episode_mapping"] = resolve_scanned_episode({
             "torrent_path": torrent_path, "file_path": episode["oldPath"], "file_name": name,

@@ -9,7 +9,7 @@ from ...data import (
     MAX_FAIL_COUNT,
 )
 from ...utils.rss_dates import publication_datetime, published_before_air_date
-from .. import rss as rss_service
+from . import feeds as rss_service
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +101,7 @@ async def fetch_passed_items(
             log_skip(item, f"标签不匹配: 缺少 {missing_tags}; 资源标签 {item.get('tags', [])}")
             continue
         from ...domain.rss_episode import item_episode_ref
-        from ..rss_episode_matcher import normalize_episode_number
+        from ...domain.rss_mapping import normalize_episode_number
         ref = item_episode_ref(item)
         rss_ep = ref["rss_episode_number"]
         if rss_ep is None:

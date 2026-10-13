@@ -6,11 +6,16 @@ RSS 下载按订阅业务和单集提交拆分。模块之间不通过旧 `downl
 | 模块 | 职责 | 主要调用方 |
 | --- | --- | --- |
 | `enrichment.py` | 补全缓存判断、缓存来源偏移补算、完整补全编排与保存 | RSS 补全流式 API、创建订阅响应 |
+| `inference.py` | Bangumi 关联链、TMDB/TVDB 推断、平台与 RSS 集数偏移 | enrichment、首次轮询、自动下载回退 |
+| `feeds.py` | 蜜柑关联、Feed 获取解析及条目展示 | RSS API、polling、首次轮询 |
+| `initial_poll.py` | 新订阅补全、状态与首次下载检查 | 创建订阅、首次任务查询、应用生命周期 |
+| `episode_mapping.py` | 获取本次单集的平台目录，再调用纯集数规则 | 单集下载提交 |
 | `worker.py` | 启停、调度、共享锁、全量轮询状态和累计统计 | 下载器 API、设置 API、应用生命周期、首次订阅任务 |
 | `polling.py` | 单订阅主备轮询、Feed 快照复用、偏移补算、范围刷新和完结判定 | worker |
 | `selection.py` | 标签、排除词、日期、集数、去重、失败上限和来源优先级 | polling、RSS 单集下载 |
 | `episode_download.py` | RSS 补全回退、自动替换、种子获取与临时文件清理 | polling |
 | `../downloads/episode_submission.py` | 单集映射、暂停添加、元数据与重命名、恢复、历史保存；连接检查 | RSS 单集下载、人工补集/替换 API |
+| `../downloads/episode_metadata.py` | 单集 NFO/图片生成编排及可选 qBittorrent 重命名 | 单集提交、单集 NFO |
 | `paths.py` | 优先读取实际媒体路径，缺失时使用已有路径模板 | 单集 API、NFO、BD 替换 |
 | `episode_nfo.py` | 使用历史映射重生成单集 NFO 和图片，不调用 qBittorrent | 历史 API |
 
@@ -31,10 +36,10 @@ polling 返回本次成功提交数量，不修改调度状态。worker 只在�
 - Feed 快照和 MetadataContext 按一次订阅处理复用；主备来源各自保存偏移。
 - 自动 RSS 替换与人工单集替换保留各自原有的旧种子删除时机和失败处理。
 - 提交服务仅处理订阅单集种子，不承接 Torrent 多文件/整季提交。
-- 单集 NFO 的冲突检查和写入锁仍由 API 与现有 `nfo_refresh` 管理。
+- 单集 NFO 的冲突检查和写入锁仍由 API 与 `../metadata/refresh.py` 管理。
   单集生成保留图片处理；整订阅批量刷新仍使用原有 NFO-only 流程。
-- `rss.py`、`enrich.py`、`rss_episode_matcher.py`、`nfo/` 和现有数据访问层
-  继续提供 Feed、元数据、映射、输出及持久化能力，本次拆分不重组这些模块。
+- 纯 RSS 集数规则归 `../../domain/rss_mapping.py`；平台缓存与 NFO/图片归
+  `../metadata/`；共享输出路径归 `../media/paths.py`。数据访问层仍负责持久化。
 
 ## 已保存订阅的补全入口
 
@@ -43,7 +48,7 @@ polling 返回本次成功提交数量，不修改调度状态。worker 只在�
 - 缓存命中后调用 `refresh_cached_enrichment()`，仍按当前主备 RSS 重算来源偏移。
   相同 URL 共用一份快照；仅保存非 `None` 偏移，保留零和负数。
 - 缓存未命中时调用 `enrich_saved_subscription()`，通过可选回调报告进度，
-  使用现有 `enrich.py` 补全并持久化。保存保留映射预期值与身份版本校验，
+  使用 `inference.py` 补全并持久化。保存保留映射预期值与身份版本校验，
   冲突向调用方传播；底层返回 `None` 时仍返回 `None`。
 - API 负责进度队列、`step/done/error` 事件及 NDJSON 编码。缓存分支属于请求生命周期，
   缓存命中消息在获取 Feed 前发送；完整补全由独立任务执行，断开连接后继续。

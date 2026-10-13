@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backend.services.mapping_sync import synchronize
+from backend.services.mappings.sync import synchronize
 from backend.utils.http_client import http_client_manager
 
 

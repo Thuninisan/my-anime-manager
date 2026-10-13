@@ -15,10 +15,14 @@ from ... import config
 from ...db import preview_sessions as repository
 from ...db.models import TorrentPreviewSession
 from ...domain.preview import PREVIEW_SCHEMA_VERSION, PreviewContextSnapshot, PreviewDownloadRequest
-from ...domain.episode import EpisodeMapping, EpisodeMetadataCandidates
+from ...domain.episode import EpisodeMapping
 from ...domain.episode_adapters import episode_catalog
 from ...domain.episode_metadata_adapters import provider_metadata_candidates
 from ...utils.paths import USER_DATA_DIR
+
+from ...domain.preview_metadata import (
+    coordinate_metadata_key, catalog_episodes, metadata_candidates,
+)
 
 PREVIEW_DIR = USER_DATA_DIR / "previews"
 _MAPPING_ADAPTER = TypeAdapter(EpisodeMapping)
@@ -37,11 +41,6 @@ def expiry() -> str:
 def file_id(path: str) -> str:
     normalized = posixpath.normpath(path.replace("\\", "/"))
     return hashlib.sha256(normalized.encode()).hexdigest()[:24]
-
-
-def coordinate_metadata_key(provider: str, series_id: str | int | None, season_number: int | None, episode_number: float | None) -> str:
-    coordinate = int(episode_number) if episode_number is not None and int(episode_number) == episode_number else episode_number
-    return f"{provider}:coordinates:{series_id}:{season_number}:{coordinate}"
 
 
 def normalize_metadata(data: dict) -> dict:
@@ -248,14 +247,6 @@ def cleanup_expired_preview_sessions() -> int:
     return len(ids)
 
 
-def catalog_episodes(snapshot: PreviewContextSnapshot, provider: str, series_id: int | None) -> list[dict]:
-    entry = snapshot["episode_catalog"][provider].get(str(series_id), {})
-    if provider == "bangumi":
-        return entry.get("episodes", [])
-    seasons = entry.get("seasons", {}) if provider == "tvdb" else entry
-    return [ep for season in seasons.values() for ep in season["episodes"]]
-
-
 def validate_mapping(snapshot: PreviewContextSnapshot, mapping: EpisodeMapping, context=None) -> None:
     try:
         for provider in ("tmdb", "tvdb", "bangumi"):
@@ -288,31 +279,6 @@ def validate_mapping(snapshot: PreviewContextSnapshot, mapping: EpisodeMapping, 
                 raise ValueError()
     except (KeyError, TypeError, ValueError):
         raise HTTPException(422, "invalid_episode_mapping")
-
-
-def metadata_candidates(snapshot: PreviewContextSnapshot, mapping: EpisodeMapping) -> EpisodeMetadataCandidates:
-    result = {"tmdb": None, "tvdb": None, "bangumi": None}
-    for provider in result:
-        ref = mapping[provider]
-        episode_id = ref["episode_id"]
-        if episode_id is None:
-            # Preserve Phase 2 exact-coordinate overrides without mutating identity.
-            series_id = ref["subject_id" if provider == "bangumi" else "series_id"]
-            for ep in catalog_episodes(snapshot, provider, series_id):
-                matches = (ref["episode_absolute"] is not None and ep["episode_absolute"] == ref["episode_absolute"]) if provider == "bangumi" else (
-                    ref["season_number"] is not None and ref["episode_number"] is not None and
-                    ep["season_number"] == ref["season_number"] and ep["episode_number"] == ref["episode_number"])
-                if matches:
-                    episode_id = ep["episode_id"]
-                    break
-        if episode_id is not None:
-            result[provider] = snapshot["episode_metadata"].get(f"{provider}:{episode_id}")
-        else:
-            result[provider] = snapshot["episode_metadata"].get(coordinate_metadata_key(provider,
-                ref["subject_id" if provider == "bangumi" else "series_id"],
-                None if provider == "bangumi" else ref["season_number"],
-                ref["episode_absolute"] if provider == "bangumi" else ref["episode_number"]))
-    return result
 
 
 def restore_download_request(body: dict) -> dict:
@@ -426,7 +392,7 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
         if detail.get("id") != provider_id:
             raise HTTPException(422, "invalid_preview_candidate")
         if not movie and not cached:
-            from ..tmdb import build_season_episode_map
+            from ..metadata.providers.tmdb import build_season_episode_map
             data = {"tmdb": {str(provider_id): await build_season_episode_map(provider_id, strict=True)}}
     elif provider == "tvdb":
         from ...clients import tvdb
@@ -434,7 +400,7 @@ async def augment_preview_session(preview_id: str, revision: int, show_key: str,
         detail = payload.get("data") or {}
         if detail.get("id") != provider_id:
             raise HTTPException(422, "invalid_preview_candidate")
-        from ..tvdb import fetch_tvdb_series_episodes
+        from ..metadata.providers.tvdb import fetch_tvdb_series_episodes
         directory = snapshot["episode_catalog"][provider].get(str(provider_id)) if cached else await fetch_tvdb_series_episodes(provider_id)
         if directory is None:
             raise HTTPException(502, "preview_provider_fetch_failed")

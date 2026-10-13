@@ -7,81 +7,17 @@ downloads and executes media/subtitle file operations, independently of the API.
 
 import asyncio
 import logging
-import os
-import re
 from pathlib import Path
 
 from ... import config
 from ...domain.episode_metadata_adapters import episode_path_parameters
 from ...clients.qbittorrent import get_torrents_by_hashes, login as qb_login
 from ...utils.paths import SUBTITLE_DIR
-from .fontinass import copy_subtitle
+from ..media.fonts import copy_subtitle
+from ..media.planning import subtitle_suffix, sanitize_torrent_name, subscription_path_context
+from ..media.linking import install_hardlink
 
 logger = logging.getLogger(__name__)
-
-
-def _subtitle_suffix(item: dict, fallback: str) -> str:
-    suffix = item.get("subtitle_suffix", "")
-    return suffix if re.fullmatch(r"(?:\.sub[1-9][0-9]*)?(?:\.zh-(?:CN|TW))?\.[a-zA-Z0-9]+", suffix) else fallback
-
-
-
-def build_processing(context: dict) -> dict:
-    """Resolve confirmed selections into file operations before download starts."""
-    from ..nfo import format_download_path
-
-    root = Path(context["hardlink_root"])
-    movie_meta = context.get("movie_meta")
-    torrent_name = context["torrent_name"]
-    subtitle_dir = SUBTITLE_DIR / _sanitize(torrent_name)
-    operations: list[dict] = []
-
-    def destination(item: dict, suffix: str, *, is_subtitle: bool) -> Path:
-        if is_subtitle:
-            suffix = _subtitle_suffix(item, suffix)
-        if movie_meta:
-            title = movie_meta["tmdb_name"]
-            return root / title / f"{title}{suffix}"
-        sub = _make_sub_for_path(item, context.get("series_name", ""))
-        rel = format_download_path(
-            config.RSS_PATH_TEMPLATE, sub,
-            **episode_path_parameters(item),
-        ).lstrip("/")
-        rel = str(Path(rel).with_suffix(suffix))
-        target = root / item.get("replacement_target", rel)
-        if item.get("replacement_target") and not is_subtitle:
-            target = target.with_name(target.name + ".mam-bd-pending")
-        return target
-
-    for item in context["files"]:
-        is_subtitle = bool(item.get("is_subtitle"))
-        operation = {
-            "torrent_path": item["torrent_path"],
-            "target_path": str(destination(item, Path(item["torrent_path"]).suffix, is_subtitle=is_subtitle)),
-            "action": "copy" if is_subtitle else "hardlink",
-        }
-        if not is_subtitle and item.get("episode_mapping") is not None:
-            from ...domain.persistence import episode_mapping_snapshot
-            operation["episode_mapping_snapshot"] = episode_mapping_snapshot(
-                item["episode_mapping"], item.get("resource_identity"), revision=item.get("identity_revision"))
-        if not is_subtitle and item.get("resource_identity") is not None:
-            operation["resource_identity"] = item["resource_identity"]
-        operations.append(operation)
-
-    for item in context.get("uploaded_subtitles", []):
-        stored = item.get("stored_filename", "")
-        operations.append({
-            "source_path": str(subtitle_dir / stored),
-            "target_path": str(destination(item, Path(stored).suffix, is_subtitle=True)),
-            "action": "copy",
-        })
-
-    return {
-        "mode": "movie" if movie_meta else "tv",
-        "replace_bangumi_id": context.get("replace_bangumi_id"),
-        "replaced_history": context.get("replaced_history"),
-        "files": operations,
-    }
 
 
 async def monitor_processing(info_hash: str, torrent_name: str, processing: dict) -> set[Path] | None:
@@ -115,10 +51,7 @@ async def monitor_processing(info_hash: str, torrent_name: str, processing: dict
                     continue
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 if operation["action"] == "hardlink":
-                    staged = dest.with_name(dest.name + ".mam-new")
-                    staged.unlink(missing_ok=True)
-                    os.link(src, staged)
-                    os.replace(staged, dest)
+                    install_hardlink(src, dest)
                     linked.add(dest)
                 else:
                     copy_subtitle(info_hash, src, dest)
@@ -127,32 +60,6 @@ async def monitor_processing(info_hash: str, torrent_name: str, processing: dict
         return linked
     logger.warning("下载监控超时 [%s] (24h)", torrent_name)
     return None
-
-def _sanitize(name: str) -> str:
-    """Remove characters that are illegal in directory / file names."""
-    return re.sub(r'[<>:"/\\|?*]', "_", name).strip()
-
-
-
-def _make_sub_for_path(f: dict, series_name: str = "") -> dict:
-    """Build a pseudo-subscription dict for :func:`format_download_path`."""
-    mapping = f["episode_mapping"]
-    bgm_name = f.get("bangumi_show_name", "")
-    return {
-        "name": bgm_name,
-        "series_name": series_name or f.get("tmdb_show_name") or bgm_name,
-        "bgm": {
-            "subject_name": bgm_name,
-            "season": 1,
-        },
-        "tvdb": {
-            "season": mapping["tvdb"]["season_number"] if mapping["tvdb"]["season_number"] is not None else mapping["tmdb"]["season_number"],
-        },
-        "tmdb": {
-            "season": mapping["tmdb"]["season_number"],
-        },
-    }
-
 
 
 async def monitor_download(
@@ -172,7 +79,7 @@ async def monitor_download(
     When *skip_nfo* is True the inline NFO generation is skipped (it was
     already done before the torrent was resumed).
     """
-    subtitle_dir = SUBTITLE_DIR / _sanitize(torrent_name)
+    subtitle_dir = SUBTITLE_DIR / sanitize_torrent_name(torrent_name)
 
     # Login for the background task
     try:
@@ -222,7 +129,7 @@ async def monitor_download(
                 for f in files:
                     torrent_path = f["torrent_path"]
                     is_sub = f.get("is_subtitle", False)
-                    src_ext = _subtitle_suffix(f, Path(torrent_path).suffix) if is_sub else Path(torrent_path).suffix
+                    src_ext = subtitle_suffix(f, Path(torrent_path).suffix) if is_sub else Path(torrent_path).suffix
                     src_path = Path(save_path) / torrent_path
 
                     if is_sub:
@@ -235,10 +142,7 @@ async def monitor_download(
                             if is_sub:
                                 copy_subtitle(info_hash, src_path, dest_path)
                             else:
-                                staged = dest_path.with_name(dest_path.name + ".mam-new")
-                                staged.unlink(missing_ok=True)
-                                os.link(src_path, staged)
-                                os.replace(staged, dest_path)
+                                install_hardlink(src_path, dest_path)
                                 linked_videos.add(dest_path)
                             created += 1
                             logger.info("   %s → %s [%s]", src_path.name, dest_path, "copy" if is_sub else "hardlink")
@@ -254,7 +158,7 @@ async def monitor_download(
                     if not src_sub.exists():
                         logger.warning("   上传的字幕文件不存在: %s", src_sub)
                         continue
-                    dest_path = movie_dir / f"{tmdb_name}{_subtitle_suffix(usub, src_sub.suffix)}"
+                    dest_path = movie_dir / f"{tmdb_name}{subtitle_suffix(usub, src_sub.suffix)}"
                     try:
                         copy_subtitle(info_hash, src_sub, dest_path)
                         created += 1
@@ -265,11 +169,8 @@ async def monitor_download(
             else:
                 # ── TV mode: path template ──
                 template = config.RSS_PATH_TEMPLATE
-                from ..nfo import format_download_path
-                from ..nfo import (
-                    generate_tv_show_nfo,
-                    generate_season_nfo,
-                )
+                from ..media.paths import format_download_path
+                from ..metadata.nfo import generate_tv_show_nfo, generate_season_nfo
 
                 seen_show_dirs: set[str] = set()
                 seen_season_dirs: set[str] = set()
@@ -277,9 +178,9 @@ async def monitor_download(
                 for f in files:
                     torrent_path = f["torrent_path"]
                     is_sub = f.get("is_subtitle", False)
-                    src_ext = _subtitle_suffix(f, Path(torrent_path).suffix) if is_sub else Path(torrent_path).suffix
+                    src_ext = subtitle_suffix(f, Path(torrent_path).suffix) if is_sub else Path(torrent_path).suffix
 
-                    sub = _make_sub_for_path(f, series_name)
+                    sub = subscription_path_context(f, series_name)
 
                     rel_path = format_download_path(
                         template, sub,
@@ -301,10 +202,7 @@ async def monitor_download(
                             if is_sub:
                                 copy_subtitle(info_hash, src_path, dest_path)
                             else:
-                                staged = dest_path.with_name(dest_path.name + ".mam-new")
-                                staged.unlink(missing_ok=True)
-                                os.link(src_path, staged)
-                                os.replace(staged, dest_path)
+                                install_hardlink(src_path, dest_path)
                                 linked_videos.add(dest_path)
                             created += 1
                             logger.info("   %s → %s [%s]", src_path.name, dest_path, "copy" if is_sub else "hardlink")
@@ -321,13 +219,13 @@ async def monitor_download(
                         logger.warning("   上传的字幕文件不存在: %s", src_sub)
                         continue
 
-                    sub = _make_sub_for_path(usub, series_name)
+                    sub = subscription_path_context(usub, series_name)
 
                     rel_path = format_download_path(
                         template, sub,
                         **episode_path_parameters(usub),
                     ).lstrip("/")
-                    rel_path = str(Path(rel_path).with_suffix(_subtitle_suffix(usub, src_sub.suffix)))
+                    rel_path = str(Path(rel_path).with_suffix(subtitle_suffix(usub, src_sub.suffix)))
 
                     dest_path = Path(hardlink_root) / rel_path
                     dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -353,7 +251,7 @@ async def monitor_download(
                     if is_sub:
                         continue
 
-                    sub = _make_sub_for_path(f, series_name)
+                    sub = subscription_path_context(f, series_name)
 
                     # Compute paths via template
                     rel_path = format_download_path(
@@ -403,9 +301,9 @@ async def monitor_download(
                         logger.info("   season.nfo → %s", season_dir / "season.nfo")
 
                     # Resolve the already confirmed mapping; no compatibility numbering.
-                    from ..episode_metadata_resolver import resolve_nfo_episode
+                    from ..metadata.resolution import resolve_nfo_episode
                     from ...domain.episode_metadata_adapters import provider_metadata_candidates
-                    from ..nfo.nfo_xml import generate_episode_nfo
+                    from ..metadata.nfo.nfo_xml import generate_episode_nfo
                     resolved = await resolve_nfo_episode(f["episode_mapping"], provider_metadata_candidates(),
                         show_name=f.get("tmdb_show_name", ""))
                     resolved["metadata"]["original_title"] = f.get("bangumi_show_name", "")

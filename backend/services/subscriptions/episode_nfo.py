@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from ... import config
 from ...data import get_all_episodes
-from ..nfo import generate_metadata
+from ..downloads.episode_metadata import generate_metadata
 from .paths import resolve_episode_paths
 
 logger = logging.getLogger(__name__)

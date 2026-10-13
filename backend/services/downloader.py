@@ -14,7 +14,7 @@ from .downloads.episode_submission import (
 )
 from .subscriptions.paths import resolve_episode_paths
 from .subscriptions.episode_nfo import regen_episode_nfo
-from .enrich import enrich_subscription
+from .subscriptions.inference import enrich_subscription
 
 __all__ = [
     "get_status", "get_config", "start", "stop", "set_interval", "apply_interval",

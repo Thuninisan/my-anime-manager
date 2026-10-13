@@ -13,7 +13,7 @@ from ..clients.qbittorrent import (
     delete_torrent,
     login as qb_login,
 )
-from ..services import nfo_refresh
+from ..services.metadata import refresh as nfo_refresh
 from ..services.downloads import episode_submission
 from ..services.subscriptions import paths, episode_nfo
 from ..utils.torrent_file_reader import read_torrent_file_list

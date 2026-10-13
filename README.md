@@ -20,7 +20,9 @@ Dockerfile               前端构建 + Python 运行镜像
 docker-compose.yml       本地构建及持久化挂载
 ```
 
-后端 Python 包名是 `backend`。`backend/api/` 定义 API，`backend/services/` 处理下载、元数据和资源采集，`backend/db/` 管理 SQLite，`backend/data/` 提供数据访问接口并管理仍使用 JSON 的历史和设置。设置由 `backend/config.py` 定义，并通过 `GET/PATCH /api/settings` 读写。
+后端 Python 包名是 `backend`。`backend/api/` 定义 API，`backend/services/` 按业务能力组织流程，`backend/domain/` 保存统一模型和纯业务规则，`backend/clients/` 封装外部请求，`backend/db/` 管理 SQLite，`backend/data/` 提供数据访问兼容入口并保存 JSON 设置。订阅、下载历史、种子、资源与映射均以 SQLite 为准。设置由 `backend/config.py` 定义，并通过 `GET/PATCH /api/settings` 读写。
+
+服务分为 `discovery`、`subscriptions`、`resources`、`torrent`、`downloads`、`metadata`、`media`、`mappings`、`system` 和共用执行上下文 `workflows`。模块职责、依赖方向和扩展位置见 [services 开发说明](backend/services/README.md)；RSS 调度和补全入口见 [subscriptions 说明](backend/services/subscriptions/README.md)。
 
 ## Docker 安装
 

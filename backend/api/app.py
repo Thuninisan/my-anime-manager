@@ -21,18 +21,20 @@ from .. import __version__, data
 from ..clients.errors import MissingAPIKeyError
 from ..utils.http_client import http_client_manager
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
-from ..services import initial_rss_poll, mapping_sync, nfo_refresh
+from ..services.subscriptions import initial_poll as initial_rss_poll
+from ..services.mappings import sync as mapping_sync
+from ..services.metadata import refresh as nfo_refresh
 from ..services.subscriptions import worker as rss_worker
-from ..services.resource_monitor import worker as resource_worker
+from ..services.resources import worker as resource_worker
 from ..services.torrent import recovery as torrent_recovery
-from . import state
+from ..services.system import directory_tasks
 from .routes_downloader import router as downloader_router
 from .routes_explore import router as explore_router
 from .routes_history import router as history_router
 from .routes_rss import router as rss_router
 from .routes_resources import router as resources_router
 from .routes_settings import router as settings_router
-from .routes_system import router as system_router, _watch_worker
+from .routes_system import router as system_router
 from .routes_torrent import router as torrent_router
 
 configure_logging()
@@ -61,7 +63,7 @@ async def lifespan(_app: FastAPI):
     # Auto-start directory watcher if WATCH_DIR env var is set
     watch_dir = os.environ.get("WATCH_DIR", "")
     if watch_dir:
-        state._watch_task = asyncio.create_task(_watch_worker(watch_dir))
+        directory_tasks.start_watch(watch_dir)
 
     mapping_task = asyncio.create_task(mapping_sync.run_scheduler())
     recovery_task = asyncio.create_task(torrent_recovery.run_scheduler())
@@ -79,15 +81,7 @@ async def lifespan(_app: FastAPI):
     await resource_worker.stop()
     await nfo_refresh.stop()
 
-    # Cancel watch worker
-    if state._watch_task and not state._watch_task.done():
-        state._watch_task.cancel()
-        logger.info("Watch worker cancelled.")
-
-    # Cancel scan worker
-    if state._scan_task and not state._scan_task.done():
-        state._scan_task.cancel()
-        logger.info("Scan worker cancelled.")
+    await directory_tasks.stop()
 
     # Stop RSS downloader
     try:
@@ -170,15 +164,16 @@ async def root():
             headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
         )
 
+    watch = directory_tasks.watch_status()
     return {
         "service": "My Anime Manager",
         "version": __version__,
         "docs": "/docs",
         "watch": {
-            "running": state._watch_status["running"],
-            "dir": state._watch_status["dir"],
-            "processed": state._watch_status["processed"],
-            "failed": state._watch_status["failed"],
+            "running": watch["running"],
+            "dir": watch["dir"],
+            "processed": watch["processed"],
+            "failed": watch["failed"],
         },
     }
 

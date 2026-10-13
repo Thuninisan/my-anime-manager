@@ -16,12 +16,14 @@ from ..clients.qbittorrent import (
     get_torrents_by_hashes,
     login as qb_login,
 )
-from ..services import mapping_sync
+from ..services.mappings import sync as mapping_sync
 from ..services.subscriptions import enrichment
-from ..services import initial_rss_poll
-from ..services import rss as rss_service
-from ..services import rss_poster
-from ..services import tmdb as tmdb_service
+from ..services.discovery import search as discovery_search
+from ..services.mappings import bindings
+from ..services.subscriptions import initial_poll as initial_rss_poll
+from ..services.subscriptions import feeds as rss_service
+from ..services.metadata import posters as rss_poster
+from ..services.metadata.providers import tmdb as tmdb_service
 from .models import (
     AssignMikanRequest,
     BangumiRssResponse,
@@ -92,24 +94,10 @@ async def search_bangumi(q: str):
 
 @router.get("/api/rss/bangumi-search")
 async def search_bangumi_online(q: str = ""):
-    if not q.strip():
-        return []
     try:
-        subjects = await bgm_client.search_subjects(q.strip())
-    except Exception as e:
-        raise HTTPException(502, f"Bangumi 搜索失败: {e}") from e
-    results = []
-    for item in subjects:
-        if not item.get("id"):
-            continue
-        poster = (item.get("images") or {}).get("small") or ""
-        has_poster = rss_poster.remember_search_poster(item["id"], poster)
-        results.append({
-            "bangumi_id": item["id"], "name": item.get("name_cn") or item.get("name") or str(item["id"]),
-            "name_original": item.get("name") or "", "date": item.get("date") or "",
-            "poster_url": f"/api/rss/bangumi-search/{item['id']}/poster" if has_poster else "",
-        })
-    return results
+        return await discovery_search.search_bangumi(q)
+    except discovery_search.SearchUnavailable as exc:
+        raise HTTPException(502, str(exc)) from exc
 
 
 class BangumiSelection(BaseModel):
@@ -120,11 +108,10 @@ class BangumiSelection(BaseModel):
 
 @router.post("/api/rss/bangumi-selection")
 async def save_bangumi_selection(body: BangumiSelection):
-    if body.bangumi_id <= 0 or not body.name.strip():
-        raise HTTPException(422, "无效的 Bangumi 条目")
-    data.add_mapping(body.bangumi_id, body.name.strip(), body.name_original.strip())
-    return {"name": data.get_bangumi_name(body.bangumi_id),
-            "has_mikan_id": data.get_mikan_id(body.bangumi_id) is not None}
+    try:
+        return bindings.select_bangumi(body.bangumi_id, body.name, body.name_original)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/api/rss/mikan-search")

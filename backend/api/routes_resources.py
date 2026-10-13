@@ -7,11 +7,9 @@ from fastapi.responses import FileResponse
 
 from ..db import resources
 from ..db import resource_recognitions
-from ..db.resource_sources import list_sources, save_source
-from ..services.resource_monitor import worker
-from ..services.resource_monitor.feeds import parse_feed
-from ..services.resource_monitor.recognize import recognize_resource
-from ..utils.http_retry import fetch_with_retry
+from ..db.resource_sources import list_sources
+from ..services.resources import worker, sources, preview
+from ..services.resources.recognition import recognize_resource
 from pydantic import BaseModel
 
 
@@ -55,15 +53,7 @@ def list_bangumi_resources():
 @router.post("/sources")
 async def add_source(body: SourceInput):
     try:
-        if body.index_type not in {"tmdb", "tvdb"}:
-            raise ValueError("index_type 必须是 tmdb 或 tvdb")
-        if not body.rss_url.startswith("https://"):
-            raise ValueError("RSS URL 必须使用 HTTPS")
-        response = await fetch_with_retry(body.rss_url, label=f"{body.name} feed")
-        items = parse_feed(body.name, response.content, body.model_dump())
-        if not items:
-            raise ValueError("Feed 中没有可验证的条目")
-        return save_source(body.name, body.rss_url, body.downloadtag, body.index_type)
+        return await sources.add_source(body.name, body.rss_url, body.downloadtag, body.index_type)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -111,50 +101,9 @@ def get_cached_torrent(resource_id: int):
 @router.post("/{resource_id}/torrent-preview")
 async def preview_cached_torrent(resource_id: int):
     """Only a server-selected saved torrent may enter the manual matching flow."""
-    resource = resources.get_resource(resource_id)
-    if resource is None or not resource["torrent_path"]:
-        raise HTTPException(404, "已保存的种子文件不存在")
-    expected = resources.torrent_file_path(resource["source"], resource["source_id"])
-    path = Path(resource["torrent_path"])
-    if path != expected or not path.is_file():
-        raise HTTPException(404, "已保存的种子文件不存在")
-    from ..services.torrent.preview import parse_and_search
     try:
-        result = await parse_and_search(str(path))
-    except RuntimeError as error:
-        provider_errors = {
-            "preview_provider_fetch_failed: tmdb": "TMDB",
-            "preview_provider_fetch_failed: bangumi": "Bangumi",
-            "preview_provider_fetch_failed: tvdb": "TVDB",
-        }
-        provider = provider_errors.get(str(error))
-        if provider:
-            raise HTTPException(502, f"{provider} 数据获取失败，请检查网络或代理设置后重试") from error
-        if str(error) == "resource_provider_request_failed":
-            raise HTTPException(502, "外部元数据服务请求失败，请检查网络或代理设置后重试") from error
-        raise
-    result["resource_id"] = resource_id
-
-    recognition = resource_recognitions.get(resource_id)
-    candidates = (recognition or {}).get("resource_candidates", [])
-    from ..services.resource_resolver import normalized_title
-    for candidate in candidates:
-        matching = [entry for key, entry in result["search_results"].items()
-                    if len(result["search_results"]) == 1 or normalized_title(key) in {
-                        normalized_title(candidate["title"]), normalized_title(candidate["original_title"]),
-                        *(normalized_title(title) for title in candidate["alternative_titles"])}]
-        if not matching:
-            continue
-        from ..services.torrent.preview_session import deduplicate_candidates
-        for context in matching:
-            provider = candidate["provider"]
-            if (context["media_type"] == "movie" and provider == "tvdb") or candidate["media_type"] not in (context["media_type"], "special", "unknown"):
-                continue
-            context["candidates"][provider] = deduplicate_candidates(context["candidates"][provider] + [candidate])
-        # Historical candidates remain selectable; their directories load on
-        # selection rather than extending the bounded initial discovery.
-    from ..services.torrent.preview_session import create_preview_session
-    from ..services.torrent.preview_view import session_view
-    row = create_preview_session(result, str(path))
-    view = session_view(row)
-    return view
+        return await preview.preview_cached_torrent(resource_id)
+    except preview.CachedTorrentMissing as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except preview.MetadataProviderUnavailable as exc:
+        raise HTTPException(502, str(exc)) from exc

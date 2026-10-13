@@ -19,8 +19,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.db.connection import DB_PATH
 from backend.db import resource_recognitions
-from backend.services.resource_monitor.recognize import recognize_resource
-from backend.services.resource_monitor.titles import parse_title
+from backend.services.resources.recognition import recognize_resource
+from backend.services.resources.titles import parse_title
 
 
 EDGE_CASES = (

@@ -13,7 +13,7 @@ def _downloadtag(session, source: ResourceSource) -> dict:
 
 
 def list_sources() -> dict[str, dict]:
-    from ..services.resource_monitor.feeds import SOURCES
+    from ..domain.resource_sources import SOURCES
     with new_session() as session, session.begin():
         for slug, config in SOURCES.items():
             if session.get(ResourceSource, slug) is None:

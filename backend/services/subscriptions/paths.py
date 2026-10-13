@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from ... import config
 from ...data import list_subscriptions, get_all_episodes
-from ..nfo import format_download_path
+from ..media.paths import format_download_path
 
 
 def resolve_episode_paths(bangumi_id: int, sort: int) -> tuple[dict, str, str]:

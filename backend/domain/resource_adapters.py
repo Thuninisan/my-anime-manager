@@ -49,7 +49,7 @@ def subscription_identity(sub: dict, subject_id: int):
 
 def select_provider_result(provider, results, title=None, *, year=None, media_type="tv", source=None):
     """Compatibility projection after a canonical decision; never chooses first."""
-    from ..services.resource_resolver import ResourceResolver
+    from .resource_resolution import ResourceResolver
     resolution = ResourceResolver().resolve(provider_candidates(provider, results, media_type, source),
                                             title=title, year=year, media_type=media_type)
     if resolution["status"] == "ambiguous":
