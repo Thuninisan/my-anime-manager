@@ -29,9 +29,6 @@ _watch_status: dict = {
     "errors": [],
 }
 
-# ── Download monitor ──
-_download_tasks: dict[str, asyncio.Task] = {}
-
 # ── Update ──
 _SOURCE_DIR: str = ""
 _update_cache: dict = {"checked_at": None, "result": None}

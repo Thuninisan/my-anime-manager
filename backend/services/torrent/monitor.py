@@ -1,8 +1,8 @@
 """Torrent download monitor — poll qBittorrent, create hardlinks, copy subtitles.
 
-Background task spawned by the torrent download route.  Cleanup of the
-task registry (``state._download_tasks``) is handled by the caller so
-this module stays independent of the API layer.
+File processing is invoked by ``torrent.recovery``, which owns the task
+registry, checkpoint stages and cancellation. This module only waits for
+downloads and executes media/subtitle file operations, independently of the API.
 """
 
 import asyncio

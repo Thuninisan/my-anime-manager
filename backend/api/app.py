@@ -23,6 +23,7 @@ from ..utils.http_client import http_client_manager
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
 from ..services import downloader, initial_rss_poll, mapping_sync, nfo_refresh
 from ..services.resource_monitor import worker as resource_worker
+from ..services.torrent import recovery as torrent_recovery
 from . import state
 from .routes_downloader import router as downloader_router
 from .routes_explore import router as explore_router
@@ -31,7 +32,7 @@ from .routes_rss import router as rss_router
 from .routes_resources import router as resources_router
 from .routes_settings import router as settings_router
 from .routes_system import router as system_router, _watch_worker
-from .routes_torrent import router as torrent_router, recover_torrent_monitors
+from .routes_torrent import router as torrent_router
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -61,16 +62,8 @@ async def lifespan(_app: FastAPI):
     if watch_dir:
         state._watch_task = asyncio.create_task(_watch_worker(watch_dir))
 
-    async def recover_pending_torrents() -> None:
-        while True:
-            try:
-                await recover_torrent_monitors()
-            except Exception:
-                logger.exception("恢复任务调度失败，将在下一轮重试")
-            await asyncio.sleep(60)
-
     mapping_task = asyncio.create_task(mapping_sync.run_scheduler())
-    recovery_task = asyncio.create_task(recover_pending_torrents())
+    recovery_task = asyncio.create_task(torrent_recovery.run_scheduler())
     resource_worker.start()
 
     yield
@@ -80,6 +73,7 @@ async def lifespan(_app: FastAPI):
     mapping_task.cancel()
     await asyncio.gather(mapping_task, return_exceptions=True)
     recovery_task.cancel()
+    await asyncio.gather(recovery_task, return_exceptions=True)
     await initial_rss_poll.stop()
     await resource_worker.stop()
     await nfo_refresh.stop()
@@ -101,15 +95,7 @@ async def lifespan(_app: FastAPI):
     except (asyncio.TimeoutError, asyncio.CancelledError, Exception) as e:
         logger.warning("RSS downloader stop: %s", e)
 
-    # Cancel download monitor tasks
-    download_tasks = list(state._download_tasks.items())
-    for info_hash, task in download_tasks:
-        if not task.done():
-            task.cancel()
-            logger.info("Download monitor cancelled: %s", info_hash[:8])
-    if download_tasks:
-        await asyncio.gather(*(task for _, task in download_tasks), return_exceptions=True)
-    state._download_tasks.clear()
+    await torrent_recovery.stop()
 
     await http_client_manager.aclose()
     logger.info("All workers stopped — safe to restart.")
