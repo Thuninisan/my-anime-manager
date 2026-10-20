@@ -182,7 +182,7 @@ export default function MappingCard({
         <div className="flex items-center gap-2">
           <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">BGM Entry</span>
           <select
-            className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[100px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
+            className="text-[11px] py-0.5 px-1 bg-transparent border-slate-200 dark:border-white/10 rounded font-medium max-w-[260px] truncate focus:ring-1 focus:ring-primary/30 cursor-pointer"
             value={currentEntryId || ''}
             onChange={(e) => onBgmEntryChange(e.target.value)}
           >
@@ -207,8 +207,8 @@ export default function MappingCard({
               onChange={(e) => onBgmEpChange?.(e.target.value)}
               title={`${row.bgm_ep_name}${row.bgm_ep_name_cn ? ` / ${row.bgm_ep_name_cn}` : ''}`}
             >
-              {currentEps.length === 0 && (
-                <option value="" disabled>{row.bgm_ep_name || '-'}</option>
+              {(currentEps.length === 0 || row.mapping.bangumi.episode_id == null) && (
+                <option value="" disabled>{currentEps.length ? '请选择 Bangumi 剧集' : '暂无 Bangumi 剧集'}</option>
               )}
               {currentEps.map((ep) => (
                 <option key={`${i}-bgm-${ep.episode_id}`} value={ep.episode_id}>
@@ -226,7 +226,7 @@ export default function MappingCard({
               value={tmdbSeasonValue ?? ''}
               onChange={(e) => onTmdbSeasonChange?.(e.target.value)}
             >
-              {tmdbSeasonValue == null && <option value="" disabled>-</option>}
+              <option value="" disabled>{tmdbSeasonOptions?.length ? '请选择 TMDB 季' : '暂无 TMDB 目录'}</option>
               {(tmdbSeasonOptions || []).map((opt) => (
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
@@ -247,8 +247,8 @@ export default function MappingCard({
               onChange={(e) => onTmdbEpChange?.(e.target.value)}
               title={tmdbEpTitle}
             >
-              {(tmdbEpOptions || []).length === 0 && (
-                <option value="" disabled>{row.mapping.tmdb.season_number == null ? '请先选择 TMDB 季' : '该季暂无集数'}</option>
+              {((tmdbEpOptions || []).length === 0 || tmdbEpValue === '' || tmdbEpValue == null) && (
+                <option value="" disabled>{row.mapping.tmdb.season_number == null ? '请先选择 TMDB 季' : tmdbEpOptions?.length ? '请选择 TMDB 剧集' : '该季暂无集数'}</option>
               )}
               {(tmdbEpOptions || []).map((ep) => {
                 const ambiguous = tmdbEpOptions!.some(other => other !== ep && other.episode_number === ep.episode_number);
@@ -271,7 +271,7 @@ export default function MappingCard({
                 value={tvdbSeasonValue ?? ''}
                 onChange={(e) => onTvdbSeasonChange?.(e.target.value)}
               >
-                {tvdbSeasonValue == null && <option value="" disabled>-</option>}
+                <option value="" disabled>{tvdbSeasonOptions?.length ? '请选择 TVDB 季' : '暂无 TVDB 目录'}</option>
                 {(tvdbSeasonOptions || []).map((opt) => (
                   <option key={opt.value} value={opt.value}>{opt.label}</option>
                 ))}
@@ -285,8 +285,8 @@ export default function MappingCard({
                 onChange={(e) => onTvdbEpChange?.(e.target.value)}
                 title={tvdbEpTitle}
               >
-                {(tvdbEpOptions || []).length === 0 && (
-                  <option value="" disabled>{tvdbEpTitle || '-'}</option>
+                {((tvdbEpOptions || []).length === 0 || tvdbEpValue === '' || tvdbEpValue == null) && (
+                  <option value="" disabled>{tvdbEpOptions?.length ? '请选择 TVDB 剧集' : tvdbEpTitle || '-'}</option>
                 )}
                 {(tvdbEpOptions || []).map((ep) => {
                   const ambiguous = tvdbEpOptions!.some(other => other !== ep && other.episode_number === ep.episode_number);

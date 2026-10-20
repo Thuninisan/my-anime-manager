@@ -57,26 +57,16 @@ export function useMatchOverrides(
     const seen = new Set<number>();
 
     for (const entry of Object.values(searchResults)) {
-      if (recommendedId(entry, 'bangumi') && !seen.has(recommendedId(entry, 'bangumi')!)) {
-        seen.add(recommendedId(entry, 'bangumi')!);
-        options.push({
-          id: recommendedId(entry, 'bangumi')!,
-          name: entry.bangumi_display_name || entry.bangumi_display_name || `ID ${recommendedId(entry, 'bangumi')}`,
-        });
-      }
-    }
-
-    const bgmData: Record<string, BgmEntry> = episodeData.bangumi || {};
-    for (const [idStr, entry] of Object.entries(bgmData)) {
-      const id = Number(idStr);
-      if (!seen.has(id)) {
+      for (const candidate of entry.candidates.bangumi) {
+        const id = candidate.provider_id;
+        if (seen.has(id)) continue;
         seen.add(id);
-        options.push({ id, name: entry.name || `ID ${id}` });
+        const catalogName = episodeData.bangumi[String(id)]?.name;
+        options.push({ id, name: candidate.title || catalogName || candidate.original_title || `ID ${id}` });
       }
     }
 
-    const available = new Set(Object.values(searchResults).flatMap(entry => candidateIds(entry, 'bangumi')));
-    return options.filter(option => available.has(option.id)).sort((a, b) => a.name.localeCompare(b.name));
+    return options.sort((a, b) => a.name.localeCompare(b.name));
   }, [searchResults, episodeData]);
 
   // ── Initial auto-computed rows ──

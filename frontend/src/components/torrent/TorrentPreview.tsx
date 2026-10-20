@@ -1,6 +1,5 @@
 import { automaticVideoFiles, processableVideoFiles, ignoredFiles, subtitleFiles, candidateIds } from '@/lib/episodeAdapters';
 import type { TorrentPreviewResponse } from '@/types/preview';
-import type { EpisodeCatalog } from '@/types/episode';
 import { useMemo, useState, useCallback } from 'react';
 import MatchTable, { type MatchRow } from '@/components/torrent/MatchTable';
 import { subtitleStatus, subtitleDestinationSuffix, type SubtitleAssociations, type SubtitleFilter } from '@/lib/subtitleMatching';
@@ -10,8 +9,7 @@ import { submitDownload, setPreviewMatchSource, type DownloadFileEntry, type Upl
 interface TorrentPreviewProps {
   replaceBangumiId?: number;
   searchResult: TorrentPreviewResponse;
-  augmentedEpData: EpisodeCatalog | null;
-  onEpisodeDataChange: (data: EpisodeCatalog) => void;
+  onPreviewChange: (view: TorrentPreviewResponse) => void;
   onClose: () => void;
   onTorrentAdded?: () => void;
 }
@@ -41,18 +39,11 @@ function computeStats(searchResult: TorrentPreviewResponse) {
 
 export default function TorrentPreview({
   replaceBangumiId,
-  searchResult: initialSearchResult,
-  augmentedEpData,
-  onEpisodeDataChange,
+  searchResult,
+  onPreviewChange,
   onClose,
   onTorrentAdded,
 }: TorrentPreviewProps) {
-  const [sessionView, setSessionView] = useState(initialSearchResult);
-  const searchResult = sessionView.preview_id === initialSearchResult.preview_id ? sessionView : initialSearchResult;
-  const mergedResult = useMemo(() => augmentedEpData && searchResult
-    ? { ...searchResult, episode_catalog: augmentedEpData }
-    : searchResult, [augmentedEpData, searchResult]);
-
   const [indexLoading, setIndexLoading] = useState(false);
   const [indexError, setIndexError] = useState('');
 
@@ -235,9 +226,7 @@ export default function TorrentPreview({
         {/* ── Metadata Source Overrides ── */}
         <InfoCards
           searchResult={searchResult}
-          episodeDataOverride={mergedResult.episode_catalog}
-          onPreviewChange={view => { setSessionView(view); onEpisodeDataChange(view.episode_catalog); }}
-          onEpisodeDataChange={onEpisodeDataChange}
+          onPreviewChange={onPreviewChange}
         />
 
         <div className="rounded-xl border border-border p-4 space-y-2">
@@ -255,7 +244,7 @@ export default function TorrentPreview({
                   if (source === searchResult.episode_match_source) return;
                   setIndexLoading(true); setIndexError('');
                   try { const view = await setPreviewMatchSource(searchResult, source);
-                    setSessionView(view); onEpisodeDataChange(view.episode_catalog);
+                    onPreviewChange(view);
                   } catch (error) { setIndexError(error instanceof Error ? error.message : '切换失败'); }
                   finally { setIndexLoading(false); }
                 }}>{source.toUpperCase()}</button>;
@@ -268,7 +257,7 @@ export default function TorrentPreview({
         {/* ── Match tables ── */}
         <MatchTable
           key={searchResult.preview_id}
-          data={mergedResult}
+          data={searchResult}
           subtitleFilter={subtitleFilter}
           onAssociationsChange={setAssociations}
           onRowsComputed={handleRowsComputed}

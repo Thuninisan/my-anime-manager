@@ -1,5 +1,4 @@
 import type { TorrentPreviewResponse } from '@/types/preview';
-import type { EpisodeCatalog } from '@/types/episode';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import TorrentUpload from '@/components/torrent/TorrentUpload';
 import TorrentPreview from '@/components/torrent/TorrentPreview';
@@ -13,7 +12,6 @@ export default function TorrentPage() {
   const navigate = useNavigate();
   const replacement = location.state as { replaceBangumiId?: number; replaceName?: string; resourceId?: number } | null;
   const [searchResult, setSearchResult] = useState<TorrentPreviewResponse | null>(null);
-  const [augmentedEpData, setAugmentedEpData] = useState<EpisodeCatalog | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [resourceLoading, setResourceLoading] = useState(false);
   const [resourceAttempt, setResourceAttempt] = useState(0);
@@ -64,7 +62,6 @@ export default function TorrentPage() {
       if (!active) return;
       completedResourceRequest.current = requestKey;
       setSearchResult(result);
-      setAugmentedEpData(null);
     }).catch((cause) => {
       if (active) setError(cause instanceof Error ? cause.message : '资源种子预览失败');
     }).finally(() => {
@@ -81,7 +78,6 @@ export default function TorrentPage() {
     try {
       const result = await parseAndSearchTorrent(file);
       setSearchResult(result);
-      setAugmentedEpData(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
       setSearchResult(null);
@@ -90,7 +86,6 @@ export default function TorrentPage() {
 
   const handleClosePreview = () => {
     setSearchResult(null);
-    setAugmentedEpData(null);
     if (replacement?.replaceBangumiId || replacement?.resourceId) navigate('/torrent', { replace: true, state: null });
   };
 
@@ -187,8 +182,7 @@ export default function TorrentPage() {
             <TorrentPreview
               replaceBangumiId={replacement?.replaceBangumiId}
               searchResult={searchResult}
-              augmentedEpData={augmentedEpData}
-              onEpisodeDataChange={setAugmentedEpData}
+              onPreviewChange={setSearchResult}
               onClose={handleClosePreview}
               onTorrentAdded={() => void refreshCollections()}
             />

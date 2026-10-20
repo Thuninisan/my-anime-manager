@@ -2,12 +2,9 @@ import { useState } from 'react';
 import { augmentPreview, removePreviewCandidate } from '@/api/torrentApi';
 import { searchBangumi } from '@/api/rssApi';
 import type { TorrentPreviewResponse } from '@/types/preview';
-import type { EpisodeCatalog } from '@/types/episode';
 
 interface Props {
   searchResult: TorrentPreviewResponse;
-  episodeDataOverride?: EpisodeCatalog;
-  onEpisodeDataChange: (catalog: EpisodeCatalog) => void;
   onPreviewChange: (view: TorrentPreviewResponse) => void;
 }
 

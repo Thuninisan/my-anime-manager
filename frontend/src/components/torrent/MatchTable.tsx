@@ -251,8 +251,8 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
 
               // SP TMDB options (aggregate all shows)
               const tmdbSeasonOpts = buildSpSeasonOptions(episodeData, searchResults, 'tmdb');
-              const tmdbSeasonVal = ov?.tmdbShowId && ov.tmdbSeason != null
-                ? `${ov.tmdbShowId}:${ov.tmdbSeason}` : (r.mapping.tmdb.season_number ?? '');
+              const tmdbSeasonVal = r.mapping.tmdb.series_id != null && r.mapping.tmdb.season_number != null
+                ? `${r.mapping.tmdb.series_id}:${r.mapping.tmdb.season_number}` : '';
 
               const lookupTmdbId = ov?.tmdbShowId ?? r.mapping.tmdb.series_id ?? recommendedId(searchResults[r.show_name], 'tmdb');
               const lookupSeasons: Record<string, TmdbSeason> =
@@ -263,8 +263,8 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
 
               // SP TVDB options (aggregate all shows)
               const tvdbSeasonOpts = buildSpSeasonOptions(episodeData, searchResults, 'tvdb');
-              const tvdbSeasonVal = ov?.tvdbShowId && ov.tvdbSeason != null
-                ? `${ov.tvdbShowId}:${ov.tvdbSeason}` : (r.mapping.tvdb.season_number ?? '');
+              const tvdbSeasonVal = r.mapping.tvdb.series_id != null && r.mapping.tvdb.season_number != null
+                ? `${r.mapping.tvdb.series_id}:${r.mapping.tvdb.season_number}` : '';
 
               const { seasons: spTvdbSeasons, opts: _tvdbSOpts } =
                 buildTvdbSeasonOptions(currentEntryId, r.show_name, searchResults, episodeData, ov?.tvdbShowId ?? r.mapping.tvdb.series_id ?? undefined);
