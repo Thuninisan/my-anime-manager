@@ -36,6 +36,7 @@ docker compose up -d --build
 ## 开发约定
 
 - **未经用户明确要求，禁止创建、编写、修改或生成任何形式的测试文件。** 此规则适用于所有工具和方法，包括测试脚本、单元测试、集成测试、端到端测试、临时测试文件以及由工具自动生成的测试文件；不得以验证改动为由绕过此限制。
+- 注释使用中文
 - 前端组件按用途放入小写目录；组件文件使用 PascalCase，hook 使用 `use` + PascalCase。前端图标用 SVG，禁止 emoji。
 - 异步 HTTP 使用 httpx，经 `backend/clients/` 或相关工具封装。业务流程使用标准 `logging`，避免 `print()`。
 - Python 相对导入按包层级计算。保持 `backend` 包、`uvicorn backend.api:app`、Docker 及脚本中的路径一致。
