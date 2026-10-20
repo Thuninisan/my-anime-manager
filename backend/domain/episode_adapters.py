@@ -55,19 +55,20 @@ def episode_catalog(data: dict) -> EpisodeCatalog:
             for season, value in seasons.items():
                 if not isinstance(value, dict) or "episodes" not in value:
                     continue
-                output[str(season)] = {"name": value.get("name", ""), "episodes": [
+                # 平台可能显式返回 null；目录名称统一为空字符串，保留严格字符串契约。
+                output[str(season)] = {"name": value.get("name") or "", "episodes": [
                     {"series_id": int(sid), "episode_id": ep.get("tmdbId" if provider == "tmdb" else "tvdbId"),
                      "season_number": int(season), "episode_number": ep.get("epNum"),
-                     "episode_absolute": ep.get("absoluteNumber"), "name": ep.get("name", ""),
-                     **({"name_cn": ep["name_cn"]} if "name_cn" in ep else {})}
+                     "episode_absolute": ep.get("absoluteNumber"), "name": ep.get("name") or "",
+                     **({"name_cn": ep["name_cn"] or ""} if "name_cn" in ep else {})}
                     for ep in value.get("episodes", [])]}
-            result[provider][str(sid)] = {"name": entry.get("name", ""), "seasons": output} if provider == "tvdb" else output
+            result[provider][str(sid)] = {"name": entry.get("name") or "", "seasons": output} if provider == "tvdb" else output
     for sid, entry in data.get("bangumi", {}).items():
-        result["bangumi"][str(sid)] = {"name": entry.get("name", ""), "episodes": [
+        result["bangumi"][str(sid)] = {"name": entry.get("name") or "", "episodes": [
             {"subject_id": int(sid), "episode_id": ep.get("id"),
              "episode_number": ep.get("ep"), "episode_absolute": ep.get("raw_sort", ep.get("sort")),
              "matching_absolute": ep.get("sort"),
-             "name": ep.get("name", ""), **({"name_cn": ep["name_cn"]} if "name_cn" in ep else {})}
+             "name": ep.get("name") or "", **({"name_cn": ep["name_cn"] or ""} if "name_cn" in ep else {})}
             for ep in entry.get("episodes", [])]}
     return result
 

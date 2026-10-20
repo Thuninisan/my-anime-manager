@@ -55,7 +55,7 @@ async def get_episode(
         if (ep.get("seasonNumber") == season
                 and ep.get("number") == episode):
             return {
-                "name": ep.get("name", ""),
+                "name": ep.get("name") or "",
                 "overview": ep.get("overview", ""),
                 "air_date": ep.get("aired", ""),
                 "runtime": ep.get("runtime", 0),
@@ -115,7 +115,7 @@ async def fetch_tvdb_series_episodes(
         seasons[sn]["episodes"].append({
             "epNum": ep.get("number", 0),
             "tvdbId": ep.get("id", 0),
-            "name": ep.get("name", ""),
+            "name": ep.get("name") or "",
             "overview": ep.get("overview", ""),
             "airDate": ep.get("aired", ""),
             "runtime": ep.get("runtime", 0),
