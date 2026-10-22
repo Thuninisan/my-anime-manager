@@ -32,6 +32,7 @@ from ..services.resources import worker as resource_worker
 from ..services.torrent import recovery as torrent_recovery
 from ..services.system import directory_tasks
 from .routes_downloader import router as downloader_router
+from .routes_discovery import router as discovery_router
 from .routes_explore import router as explore_router
 from .routes_history import router as history_router
 from .routes_rss import router as rss_router
@@ -138,6 +139,7 @@ async def log_request_context(request, call_next):
 
 app.include_router(settings_router)
 app.include_router(explore_router)
+app.include_router(discovery_router)
 app.include_router(downloader_router)
 app.include_router(torrent_router)
 app.include_router(rss_router)

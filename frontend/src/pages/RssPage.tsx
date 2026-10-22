@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { RssFeedResponse } from '@/types/preview';
 import * as rssApi from '@/api/rssApi';
+import { bangumiSearchItem } from '@/api/searchApi';
 import { showLoadingToast, updateToast } from '@/lib/toast';
 import RssSearchBar from '@/components/rss/RssSearchBar';
 import SearchResultDialog from '@/components/shared/SearchResultDialog';
@@ -204,7 +205,8 @@ export default function RssPage() {
         />
       </div>
 
-      {onlineSearch && <SearchResultDialog {...onlineSearch} onClose={() => setOnlineSearch(null)} onSelect={item => { void handleOnlineSelect(item); }} />}
+      {onlineSearch && <SearchResultDialog {...onlineSearch} provider="bangumi" results={onlineSearch.results.map(bangumiSearchItem)}
+        onClose={() => setOnlineSearch(null)} onSelect={item => { void handleOnlineSelect({ ...item, bangumi_id: item.provider_id }); }} />}
 
       {result && (
         <SubtitleGroupDialog
