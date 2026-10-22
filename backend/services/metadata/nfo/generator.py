@@ -25,6 +25,8 @@ async def batch_nfo_generator(
     *,
     overwrite_assets: bool = False,
     download_images: bool = True,
+    download_episode_images: bool | None = None,
+    thumbnail_results: list[dict] | None = None,
     refresh_results: list[dict] | None = None,
     path_template: str | None = None,
 ) -> dict:
@@ -41,6 +43,8 @@ async def batch_nfo_generator(
         overwrite: Rewrite episode NFO + thumbs even if they exist (regen).
         overwrite_assets: Also rewrite existing show/season NFOs.
         download_images: Disable image requests and reuse local thumbnails.
+        download_episode_images: 单独控制单集缩略图，默认沿用 download_images。
+        thumbnail_results: 记录缩略图的成功、无图片与下载失败状态。
         refresh_results: Collect per-file outcomes and continue after write errors.
         path_template: Frozen template for a background refresh job.
 
@@ -54,6 +58,7 @@ async def batch_nfo_generator(
 
     if not episodes:
         return {"nfoGenerated": 0, "imagesDownloaded": 0}
+    download_thumbnails = download_images if download_episode_images is None else download_episode_images
     from ..context import MetadataContext
     metadata_ctx = metadata_ctx or MetadataContext()
 
@@ -337,7 +342,7 @@ async def batch_nfo_generator(
         # ── Episode: collect thumb coroutine + metadata ──
         # Coordinates and still provenance are already resolved.
         still = resolved["metadata"]["still_path"]
-        if download_images and still:
+        if download_thumbnails and still:
             if still_source == "tvdb":
                 thumb_coros.append((
                     download_tvdb_episode_thumb(
@@ -364,6 +369,8 @@ async def batch_nfo_generator(
             "file_stem": file_stem,
             "tmdb_series_id": tmdb_id,
             "has_thumb": bool(still),
+            "thumb_metadata_complete": all(candidates.get(provider) for provider in ("tmdb", "tvdb")
+                                           if mapping[provider]["series_id"] is not None),
         })
 
     # ── Phase 3b: Download all thumbnails concurrently ────────────────
@@ -381,11 +388,23 @@ async def batch_nfo_generator(
     # ── Phase 3c: Generate episode NFOs ───────────────────────────────
     for i, rec in enumerate(pending_eps):
         thumb_path = thumb_results.get(i, "")
-        if not download_images:
+        if not download_thumbnails:
             existing_thumb = next((Path(rec["season_dir"]) / f"{rec['file_stem']}-thumb{suffix}"
-                                   for suffix in (".jpg", ".png", ".webp", ".jpeg")
+                                   for suffix in (".jpg", ".png", ".webp", ".jpeg", ".gif")
                                    if (Path(rec["season_dir"]) / f"{rec['file_stem']}-thumb{suffix}").is_file()), None)
             thumb_path = str(existing_thumb) if existing_thumb else ""
+        if thumbnail_results is not None:
+            if thumb_path:
+                status, message = "success", "单集缩略图已生成"
+            elif download_thumbnails and rec["has_thumb"]:
+                status, message = "failed", "单集缩略图下载失败"
+            elif not rec["thumb_metadata_complete"]:
+                status, message = "failed", "部分平台剧集元数据不可用，无法确认缩略图是否缺失"
+            else:
+                status, message = "missing", "新映射没有可用的单集缩略图"
+            thumbnail_results.append({"status": status, "path": thumb_path, "message": message})
+            if status == "failed":
+                continue
         episode_nfo_exists = (Path(rec["season_dir"]) / f"{rec['file_stem']}.nfo").exists()
         if overwrite or not episode_nfo_exists:
             logger.info("NFO [%s] 字段来源：标题=%s；简介=%s；"

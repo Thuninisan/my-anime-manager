@@ -41,7 +41,15 @@ export interface MappingChangeTask {
   failed?: number;
   current_sort?: number | null;
   deletion_started?: boolean;
-  results: { path: string; status: 'success' | 'failed'; message: string; sort?: number }[];
+  thumbnails?: { updated: number; missing: number; failed: number };
+  results: {
+    path: string;
+    status: 'success' | 'failed';
+    message: string;
+    sort?: number;
+    thumbnail_status?: 'success' | 'missing' | 'failed' | 'not_attempted';
+    thumbnail_path?: string;
+  }[];
 }
 
 export interface MappingChangePreview {

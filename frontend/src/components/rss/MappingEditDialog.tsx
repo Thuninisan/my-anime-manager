@@ -230,7 +230,7 @@ export default function MappingEditDialog({ bangumiId, name, isMovie, onClose, o
             <p className="text-xs text-muted-foreground">Bangumi ID: {bangumiId} · {mapping?.override ? '手动映射' : '平台映射'}</p>
           </div>
           <p id="mapping-description" className="text-xs text-muted-foreground">
-            更改 Mikan 映射时，有旧订阅将先确认清理文件与订阅。仅更改 TMDB/TVDB 映射时，保存后可选择重建 NFO。社区同步会保留手动修改。
+            更改 Mikan 映射时，有旧订阅将先确认清理文件与订阅。仅更改 TMDB/TVDB 映射时，保存后可选择重建 NFO 和单集缩略图。社区同步会保留手动修改。
           </p>
           {(preview || task) && <MappingChangeConfirmDialog preview={preview} task={task} busy={saving}
             onConfirm={() => void confirmChange()}

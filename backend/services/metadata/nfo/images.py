@@ -1,6 +1,8 @@
 """Image downloading utilities for TMDB and Bangumi."""
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 
 from ....clients.tmdb import TMDB_IMAGE_BASE, get_tv_images
@@ -19,8 +21,7 @@ async def _download_image(url: str, file_path_no_ext: str, overwrite: bool = Fal
     Args:
         url: Image URL
         file_path_no_ext: Save path without file extension
-        overwrite: Re-download even if a file with the same base name
-            exists (old files are removed first, e.g. regen)
+        overwrite: 同名图片存在时也重新下载，成功后再替换旧文件。
 
     Returns:
         Full saved path with extension, or None on failure
@@ -31,16 +32,15 @@ async def _download_image(url: str, file_path_no_ext: str, overwrite: bool = Fal
     # Skip if any file with same base name already exists (any extension)
     parent = Path(file_path_no_ext).parent
     base = Path(file_path_no_ext).name
-    existing = list(parent.glob(base + ".*"))
+    existing = [path for path in parent.iterdir() if path.name.startswith(base + ".")
+                and path.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp", ".gif"} and path.is_file()]
     if existing and not overwrite:
         logger.debug(f"   ⏭️ 图片已存在，跳过: {existing[0]}")
         return str(existing[0])
-    if existing and overwrite:
-        for stale in existing:
-            stale.unlink()
 
     try:
         res = await fetch_with_retry(url, timeout=30.0, label="图片")
+        res.raise_for_status()
 
         # Infer extension from Content-Type
         content_type = res.headers.get("content-type", "")
@@ -54,7 +54,20 @@ async def _download_image(url: str, file_path_no_ext: str, overwrite: bool = Fal
             ext = ".jpg"
 
         full_path = Path(file_path_no_ext + ext)
-        full_path.write_bytes(res.content)
+        fd, temporary = tempfile.mkstemp(prefix=".image-", dir=parent)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(res.content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, full_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+        if overwrite:
+            for stale in existing:
+                if stale != full_path:
+                    stale.unlink(missing_ok=True)
         return str(full_path)
     except Exception as e:
         logger.warning("图片下载失败: %s (%s)", safe_url(url), type(e).__name__)

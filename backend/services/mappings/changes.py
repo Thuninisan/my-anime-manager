@@ -148,7 +148,7 @@ async def _run(task):
                 await asyncio.wait_for(episode_download.wait_for_subscription(bid), timeout=300)
                 nfo_refresh.ensure_idle(bid)
                 store.verify(task)
-                task.update(status="running", message="正在清理旧订阅" if task["kind"] == "cleanup" else "正在重建 NFO")
+                task.update(status="running", message="正在清理旧订阅" if task["kind"] == "cleanup" else "正在重建 NFO 和单集缩略图")
                 store.put(task)
                 if task["kind"] == "cleanup":
                     async with nfo_refresh.write_lock:
@@ -158,7 +158,7 @@ async def _run(task):
                 else:
                     await nfo_rebuild.rebuild_for_mapping(task, store.put)
                     task.update(status="completed" if task["failed"] == 0 else "partial_failed",
-                                message="NFO 重建完成" if task["failed"] == 0 else "部分 NFO 重建失败，请查看明细")
+                                message="NFO 和单集缩略图重建完成" if task["failed"] == 0 else "部分 NFO 或缩略图重建失败，请查看明细")
                     task["mapping_snapshot"] = store.read_snapshot(bid)["mapping"]
                     store.put(task)
         except asyncio.CancelledError:
