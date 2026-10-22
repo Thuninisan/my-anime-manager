@@ -1,6 +1,6 @@
 import type { BangumiRssResponse, ManualSubscribeIn, MikanSearchResult, RssDataStatus, RssFeedResponse, RssSettings, SubscriptionIn, SubscriptionOut } from '../types/preview';
 import type { NfoRefreshTask } from '../types/nfoRefresh';
-import type { BangumiMapping, MappingUpdate } from '../types/mapping';
+import type { BangumiMapping, MappingUpdate, MappingChangePreview, MappingChangeTask } from '../types/mapping';
 
 const API_BASE = '/api/rss';
 
@@ -24,6 +24,45 @@ export async function updateBangumiMapping(bangumiId: number, changes: MappingUp
   return readMappingResponse(await fetch(`${API_BASE}/bangumi/${bangumiId}/mapping`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes),
   }));
+}
+
+async function readMappingAction<T>(res: Response): Promise<T> {
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail = body?.detail;
+    throw new Error(typeof detail === 'string' ? detail : `映射操作失败 (HTTP ${res.status})`);
+  }
+  return body as T;
+}
+
+export async function previewMappingChange(bangumiId: number, changes: MappingUpdate): Promise<MappingChangePreview> {
+  return readMappingAction(await fetch(`${API_BASE}/bangumi/${bangumiId}/mapping/preview`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes),
+  }));
+}
+
+export async function confirmMappingChange(bangumiId: number, taskId: string): Promise<MappingChangeTask> {
+  return readMappingAction(await fetch(`${API_BASE}/bangumi/${bangumiId}/mapping/confirm`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: taskId }),
+  }));
+}
+
+export async function startMappingNfoRebuild(bangumiId: number, taskId: string): Promise<MappingChangeTask> {
+  return readMappingAction(await fetch(`${API_BASE}/bangumi/${bangumiId}/mapping/regen-nfo`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task_id: taskId }),
+  }));
+}
+
+export async function retryMappingTask(bangumiId: number, taskId: string): Promise<MappingChangeTask> {
+  return readMappingAction(await fetch(`${API_BASE}/bangumi/${bangumiId}/mapping/tasks/${taskId}/retry`, { method: 'POST' }));
+}
+
+export async function getMappingTask(bangumiId: number, taskId: string): Promise<MappingChangeTask> {
+  return readMappingAction(await fetch(`${API_BASE}/bangumi/${bangumiId}/mapping/tasks/${taskId}`, { cache: 'no-store' }));
+}
+
+export async function getLatestMappingTask(bangumiId: number): Promise<MappingChangeTask | null> {
+  return readMappingAction(await fetch(`${API_BASE}/bangumi/${bangumiId}/mapping/tasks`, { cache: 'no-store' }));
 }
 
 export async function getNfoRefreshTask(bangumiId: number): Promise<NfoRefreshTask | null> {

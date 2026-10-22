@@ -29,6 +29,7 @@ from .models import (
     BangumiRssResponse,
     ManualSubscribeIn,
     MappingPatch,
+    MappingChangeConfirm,
     MikanSearchResult,
     RssFeedResponse,
     SeasonInfo,
@@ -40,6 +41,8 @@ from .models import (
 )
 
 from .external_api_v1_adapter import V1SubscriptionOut
+from ..db.mapping_changes import MappingConflict
+from ..services.mappings import changes as mapping_changes
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -58,11 +61,77 @@ async def get_bangumi_mapping(bangumi_id: int):
 @router.patch("/api/rss/bangumi/{bangumi_id}/mapping")
 async def patch_bangumi_mapping(bangumi_id: int, body: MappingPatch):
     try:
-        if not data.edit_mapping(bangumi_id, body.model_dump(exclude_unset=True)):
+        changes = body.model_dump(exclude_unset=True)
+        current = data.get_mapping(bangumi_id)
+        if ("mikan_id" in changes and changes["mikan_id"] != current.get("mikan_id")
+                and any(sub["bangumi_id"] == bangumi_id for sub in data.list_subscriptions())):
+            raise MappingConflict("已有订阅，修改 Mikan ID 前须确认旧订阅和文件清理")
+        if not data.edit_mapping(bangumi_id, changes):
             raise HTTPException(404, "映射不存在")
+    except MappingConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return await get_bangumi_mapping(bangumi_id)
+
+
+@router.post("/api/rss/bangumi/{bangumi_id}/mapping/preview")
+async def preview_mapping_change(bangumi_id: int, body: MappingPatch):
+    changes = body.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(422, "没有需要保存的修改")
+    try:
+        return await mapping_changes.preview(bangumi_id, changes)
+    except MappingConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("映射影响预览失败：bangumi=%s", bangumi_id)
+        raise HTTPException(502, f"无法读取旧订阅的文件清单：{exc}") from exc
+
+
+@router.post("/api/rss/bangumi/{bangumi_id}/mapping/confirm", status_code=202)
+async def confirm_mapping_change(bangumi_id: int, body: MappingChangeConfirm):
+    try:
+        return mapping_changes.confirm(bangumi_id, body.task_id)
+    except MappingConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.post("/api/rss/bangumi/{bangumi_id}/mapping/regen-nfo", status_code=202)
+async def regenerate_mapping_nfo(bangumi_id: int, body: MappingChangeConfirm):
+    try:
+        return mapping_changes.start_nfo(bangumi_id, body.task_id)
+    except MappingConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/api/rss/bangumi/{bangumi_id}/mapping/tasks/{task_id}/retry", status_code=202)
+async def retry_mapping_task(bangumi_id: int, task_id: str):
+    try:
+        return mapping_changes.retry(bangumi_id, task_id)
+    except MappingConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+@router.get("/api/rss/bangumi/{bangumi_id}/mapping/tasks/{task_id}")
+async def mapping_task_status(bangumi_id: int, task_id: str):
+    task = mapping_changes.get_task(bangumi_id, task_id)
+    if task is None:
+        raise HTTPException(404, "任务不存在")
+    return task
+
+
+@router.get("/api/rss/bangumi/{bangumi_id}/mapping/tasks")
+async def latest_mapping_task(bangumi_id: int):
+    return mapping_changes.latest_task(bangumi_id)
 
 
 @router.get("/api/rss/bangumi/{bangumi_id}/poster")
@@ -172,6 +241,11 @@ async def assign_mikan_id(bangumi_id: int, body: AssignMikanRequest):
     Saves the mapping in SQLite so future lookups work.
     Then fetches subtitle groups from Mikan for the given mikan_id.
     """
+    from ..db.mapping_changes import ensure_idle
+    ensure_idle(bangumi_id)
+    if (data.get_mikan_id(bangumi_id) != body.mikan_id
+            and any(sub["bangumi_id"] == bangumi_id for sub in data.list_subscriptions())):
+        raise HTTPException(409, "已有订阅，请通过编辑映射确认清理旧订阅后更换 Mikan ID")
     name = data.get_bangumi_name(bangumi_id)
     if not name:
         raise HTTPException(404, f"Bangumi ID {bangumi_id} 不存在于映射表中")
@@ -408,6 +482,8 @@ async def delete_subscription(bangumi_id: int, delete_files: bool = False):
     - Delete all related torrents from qBittorrent (with files)
     - Clear download history for this bangumi_id
     """
+    from ..db.mapping_changes import ensure_idle
+    ensure_idle(bangumi_id)
     if delete_files:
         eps = data.get_all_episodes(bangumi_id)
         hashes = [e["info_hash"] for e in eps.values() if e.get("info_hash")]

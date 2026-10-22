@@ -45,4 +45,6 @@ def mutate_episode(bangumi_id: int, ep_num: int, operation):
 
 def clear(bangumi_id: int):
     with new_session() as session, session.begin():
+        from .mapping_changes import ensure_idle_in_session
+        ensure_idle_in_session(session, bangumi_id)
         return session.execute(delete(DownloadEpisode).where(DownloadEpisode.bangumi_id == bangumi_id)).rowcount

@@ -93,6 +93,13 @@ def edit_mapping(bangumi_id: int, fields: dict) -> bool:
     return saved
 
 
+def invalidate_mapping_cache() -> None:
+    """数据库事务直接写映射后，清除进程内只读缓存。"""
+    global _mapping_data
+    with _mapping_lock:
+        _mapping_data = None
+
+
 def get_tmdb_season(bangumi_id: int) -> int | None:
     """Get TMDB season number from the Bangumi→Mikan mapping.
 
@@ -375,6 +382,8 @@ def get_episode_pub_date(bangumi_id: int, ep_num: int) -> str | None:
 
 def remove_episode_record(bangumi_id: int, ep_num: int) -> bool:
     def operation(session, row):
+        from ..db.mapping_changes import ensure_idle_in_session
+        ensure_idle_in_session(session, bangumi_id)
         if row is None:
             return False
         session.delete(row)
@@ -414,6 +423,8 @@ def set_episode_mapping(
     from ..db.models import BangumiMapping
 
     def operation(session, row):
+        from ..db.mapping_changes import ensure_idle_in_session
+        ensure_idle_in_session(session, bangumi_id)
         if row is None:
             return False
         mapping = row

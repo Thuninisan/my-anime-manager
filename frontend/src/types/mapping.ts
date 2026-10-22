@@ -18,3 +18,38 @@ export interface BangumiMapping extends MappingFields {
 }
 
 export type MappingUpdate = Partial<MappingFields>;
+
+export interface MappingChangeTask {
+  task_id: string;
+  bangumi_id: number;
+  kind: 'cleanup' | 'nfo';
+  status: 'preview' | 'queued' | 'running' | 'completed' | 'partial_failed' | 'failed';
+  message: string;
+  plan?: {
+    files: { path: string }[];
+    torrents: { hash: string }[];
+    warnings: string[];
+    media_count: number;
+    nfo_count: number;
+  };
+  old_mikan_id?: number | null;
+  new_mikan_id?: number | null;
+  episode_count?: number;
+  total?: number;
+  processed?: number;
+  succeeded?: number;
+  failed?: number;
+  current_sort?: number | null;
+  deletion_started?: boolean;
+  results: { path: string; status: 'success' | 'failed'; message: string; sort?: number }[];
+}
+
+export interface MappingChangePreview {
+  kind: 'cleanup' | 'nfo_offer' | 'simple';
+  bangumi_id: number;
+  episode_count: number;
+  task_id?: string;
+  old_mikan_id: number | null;
+  new_mikan_id: number | null;
+  plan?: MappingChangeTask['plan'];
+}

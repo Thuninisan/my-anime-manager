@@ -78,6 +78,8 @@ def ensure_idle(bangumi_id: int):
 
 
 def start(bangumi_id: int):
+    from ...db.mapping_changes import ensure_idle
+    ensure_idle(bangumi_id)
     previous = _latest.get(bangumi_id)
     if previous and previous["status"] in ACTIVE:
         return deepcopy(previous)

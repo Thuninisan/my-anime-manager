@@ -15,7 +15,7 @@ clients 负责外部服务请求；db 负责持久化；domain 保存统一模�
 | `downloads/` | 按确定的目标路径暂停添加种子、重命名及恢复下载 | `episode_submission.submit_torrent` |
 | `metadata/` | 平台业务目录、短期缓存、中文元数据解析、翻译、封面、NFO/图片和批量刷新 | `providers`、`context.MetadataContext`、`resolution.resolve_nfo_episode`、`nfo`、`refresh` |
 | `media/` | 共享命名规则、文件计划、硬链接和可恢复的 ASS 处理 | `paths.format_download_path`、`planning.build_processing`、`linking.install_hardlink`、`fonts` |
-| `mappings/` | 社区映射同步及用户明确选择的平台绑定 | `sync.synchronize`、`sync.run_scheduler`、`bindings.select_bangumi` |
+| `mappings/` | 社区映射同步、平台绑定、变更影响预览及确认任务 | `sync.synchronize`、`sync.run_scheduler`、`bindings.select_bangumi`、`changes.preview`、`changes.confirm` |
 | `system/` | 设置生效、目录扫描/监控、源码更新检查和重启触发 | `settings.update`、`directory_tasks`、`updates` |
 | `workflows/` | 后处理执行上下文及恢复检查点租约续期 | `execution.execution`、`execution.current_job` |
 

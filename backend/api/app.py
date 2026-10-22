@@ -23,6 +23,8 @@ from ..utils.http_client import http_client_manager
 from ..logging.logging_config import configure_logging, new_operation_id, operation_context
 from ..services.subscriptions import initial_poll as initial_rss_poll
 from ..services.mappings import sync as mapping_sync
+from ..services.mappings import changes as mapping_changes
+from ..db import mapping_changes as mapping_change_store
 from ..services.metadata import refresh as nfo_refresh
 from ..services.subscriptions import worker as rss_worker
 from ..services.subscriptions import episode_download
@@ -50,6 +52,7 @@ async def lifespan(_app: FastAPI):
     # ── Startup ──
     # Initialize the database before workers start.
     await asyncio.to_thread(data.mapping_count)
+    await asyncio.to_thread(mapping_change_store.initialize)
     nfo_refresh.initialize()
     # Mount static assets after all routes are registered (production mode)
     if _frontend_dist.exists() and _frontend_dist.is_dir():
@@ -81,6 +84,7 @@ async def lifespan(_app: FastAPI):
     await initial_rss_poll.stop()
     await resource_worker.stop()
     await nfo_refresh.stop()
+    await mapping_changes.stop()
 
     await directory_tasks.stop()
 
@@ -109,6 +113,11 @@ app = FastAPI(
 @app.exception_handler(MissingAPIKeyError)
 async def missing_api_key_handler(_request: Request, exc: MissingAPIKeyError):
     return JSONResponse(status_code=503, content={"detail": str(exc)})
+
+
+@app.exception_handler(mapping_change_store.MappingConflict)
+async def mapping_conflict_handler(_request: Request, exc: mapping_change_store.MappingConflict):
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @app.middleware("http")

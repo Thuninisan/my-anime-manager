@@ -7,6 +7,7 @@ worker statistics; the single-subscription entry returns its own result.
 import asyncio
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from ... import config
 from ...data import list_subscriptions
@@ -25,6 +26,13 @@ _worker_status: dict = {
     "poll_interval_min": config.RSS_POLL_INTERVAL_MIN,
 }
 _worker_lock = asyncio.Lock()
+
+
+@asynccontextmanager
+async def maintenance():
+    """映射变更与所有 RSS 轮询共用串行边界。"""
+    async with _worker_lock:
+        yield
 
 
 def get_status() -> dict:

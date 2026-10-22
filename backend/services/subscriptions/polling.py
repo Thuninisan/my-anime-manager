@@ -24,6 +24,9 @@ async def process_subscription(
 ) -> int:
     """Process both feeds and return successful submissions; caller owns the lock."""
     bangumi_id = sub["bangumi_id"]
+    from ...db.mapping_changes import blocked
+    if blocked(bangumi_id):
+        return 0
     metadata_ctx = MetadataContext()
 
     # A full poll may have loaded its subscription list while enrichment was

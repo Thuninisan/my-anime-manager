@@ -158,6 +158,8 @@ def mutate_subscription(bangumi_id: int, operation, *, mapping_fields=None, mapp
                         mapping_expected=None, identity_expected=None):
     with new_session() as session, session.begin():
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        from .mapping_changes import ensure_idle_in_session
+        ensure_idle_in_session(session, bangumi_id)
         row = session.get(Subscription, bangumi_id)
         if row and identity_expected is not None and (row.identity_revision or 1) != identity_expected:
             raise ValueError("Subscription identity changed during enrichment; retry")
@@ -273,6 +275,8 @@ def mapping_count() -> int:
 def set_mapping_fields(bangumi_id: int, fields: dict, *, manual: bool = True) -> bool:
     with new_session() as session, session.begin():
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        from .mapping_changes import ensure_idle_in_session
+        ensure_idle_in_session(session, bangumi_id)
         row = session.get(BangumiMapping, bangumi_id)
         if row is None:
             return False
@@ -290,6 +294,8 @@ def edit_mapping(bangumi_id: int, fields: dict) -> bool:
     from ..domain.resource_adapters import provider_binding_identity
     with new_session() as session, session.begin():
         session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        from .mapping_changes import ensure_idle_in_session
+        ensure_idle_in_session(session, bangumi_id)
         mapping = session.get(BangumiMapping, bangumi_id)
         if mapping is None:
             return False

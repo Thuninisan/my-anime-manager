@@ -49,6 +49,8 @@ def _coordinate(value, field, *, integer=False):
 @router.delete("/api/rss/download-history/{bangumi_id}/{sort}")
 async def delete_episode_history(bangumi_id: int, sort: int):
     """Remove a single episode from download history AND qBittorrent."""
+    from ..db.mapping_changes import ensure_idle
+    ensure_idle(bangumi_id)
     # Get info_hash before removing the record
     ep = data.get_all_episodes(bangumi_id).get(str(sort))
     info_hash = ep.get("info_hash", "") if ep else ""
@@ -75,6 +77,8 @@ async def delete_episode_history(bangumi_id: int, sort: int):
 @router.post("/api/rss/download-history/{bangumi_id}/{sort}")
 async def add_episode_history(bangumi_id: int, sort: int):
     """Manually mark a missing episode as downloaded (source='manual')."""
+    from ..db.mapping_changes import ensure_idle
+    ensure_idle(bangumi_id)
     data.mark_downloaded(
         bangumi_id, sort,
         guid="", source="manual", pub_date="", info_hash="",
@@ -170,6 +174,8 @@ async def regen_episode_nfo(bangumi_id: int, sort: int):
     No request body — all inputs (subscription, per-episode mapping,
     paths) are derived server-side.  NFO-only, never touches qBittorrent.
     """
+    from ..db.mapping_changes import ensure_idle
+    ensure_idle(bangumi_id)
     nfo_refresh.ensure_idle(bangumi_id)
     try:
         async with nfo_refresh.write_lock:

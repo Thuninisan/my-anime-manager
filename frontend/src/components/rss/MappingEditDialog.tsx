@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import * as rssApi from '@/api/rssApi';
-import type { BangumiMapping, MappingFields, MappingUpdate } from '@/types/mapping';
+import type { BangumiMapping, MappingFields, MappingUpdate, MappingChangePreview, MappingChangeTask } from '@/types/mapping';
 import type { CatalogSeason } from '@/types/episode';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogBody, DialogFooter } from '@/components/ui/dialog';
+import MappingChangeConfirmDialog from './MappingChangeConfirmDialog';
 
 interface Props {
   bangumiId: number;
   name: string;
   isMovie: boolean;
   onClose: () => void;
-  onSaved: (mapping: BangumiMapping, previous: BangumiMapping) => void;
+  onSaved: (mapping: BangumiMapping, previous: BangumiMapping, close?: boolean) => void;
 }
 
 type Form = Record<keyof MappingFields, string>;
@@ -24,6 +25,11 @@ export default function MappingEditDialog({ bangumiId, name, isMovie, onClose, o
   const [form, setForm] = useState<Form>(emptyForm);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [preview, setPreview] = useState<MappingChangePreview | null>(null);
+  const [task, setTask] = useState<MappingChangeTask | null>(null);
+  const taskId = task?.task_id;
+  const taskStatus = task?.status;
+  const taskKind = task?.kind;
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
   const [query, setQuery] = useState(name);
@@ -55,6 +61,37 @@ export default function MappingEditDialog({ bangumiId, name, isMovie, onClose, o
     }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [bangumiId, reload]);
+
+  useEffect(() => {
+    let active = true;
+    rssApi.getLatestMappingTask(bangumiId).then(value => {
+      if (active && value && (value.status === 'queued' || value.status === 'running' ||
+        value.status === 'failed' || value.status === 'partial_failed')) setTask(value);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [bangumiId]);
+
+  useEffect(() => {
+    if (!taskId || (taskStatus !== 'queued' && taskStatus !== 'running')) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      rssApi.getMappingTask(bangumiId, taskId).then(value => {
+        if (!active) return;
+        setError('');
+        setTask(value);
+      }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : '任务状态读取失败'); });
+    }, 1500);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [taskId, taskStatus, bangumiId]);
+
+  useEffect(() => {
+    if (taskStatus !== 'completed' || taskKind !== 'cleanup' || !mapping) return;
+    let active = true;
+    rssApi.getBangumiMapping(bangumiId).then(saved => {
+      if (active) onSaved(saved, mapping);
+    }).catch(cause => { if (active) setError(cause instanceof Error ? cause.message : '映射读取失败'); });
+    return () => { active = false; };
+  }, [taskStatus, taskKind, bangumiId, mapping, onSaved]);
 
   useEffect(() => {
     let active = true;
@@ -137,8 +174,17 @@ export default function MappingEditDialog({ bangumiId, name, isMovie, onClose, o
     setSaving(true);
     setError('');
     try {
-      const saved = await rssApi.updateBangumiMapping(bangumiId, changes);
-      onSaved(saved, mapping);
+      const impact = await rssApi.previewMappingChange(bangumiId, changes);
+      if (impact.kind === 'cleanup') {
+        setPreview(impact);
+      } else {
+        const saved = await rssApi.updateBangumiMapping(bangumiId, changes);
+        if (impact.kind === 'nfo_offer') {
+          setPreview(impact);
+          setMapping(saved);
+          onSaved(saved, mapping, false);
+        } else onSaved(saved, mapping);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '保存映射失败');
     } finally {
@@ -146,12 +192,36 @@ export default function MappingEditDialog({ bangumiId, name, isMovie, onClose, o
     }
   };
 
+  const confirmChange = async () => {
+    if (!preview || saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      const next = preview.kind === 'cleanup'
+        ? await rssApi.confirmMappingChange(bangumiId, preview.task_id!)
+        : await rssApi.startMappingNfoRebuild(bangumiId, preview.task_id!);
+      setTask(next);
+      setPreview(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '启动任务失败');
+    } finally { setSaving(false); }
+  };
+
+  const retryTask = async () => {
+    if (!task || saving) return;
+    setSaving(true);
+    setError('');
+    try { setTask(await rssApi.retryMappingTask(bangumiId, task.task_id)); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '重试失败'); }
+    finally { setSaving(false); }
+  };
+
   const seasonKeys = Object.keys(seasons).sort((a, b) => Number(a) - Number(b));
   const tmdbTitle = selectedTitle || (Number(form.tmdb_id) === mapping?.tmdb_id
     ? mapping.tmdb_series_title_cn || mapping.tmdb_series_title_jp : '');
 
   return (
-    <DialogRoot open onOpenChange={open => { if (!open && !saving) onClose(); }}>
+    <DialogRoot open onOpenChange={open => { if (!open && !saving && task?.status !== 'running' && task?.status !== 'queued') onClose(); }}>
       <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col" aria-describedby="mapping-description">
         <DialogHeader><DialogTitle>编辑映射</DialogTitle></DialogHeader>
         <DialogBody className="space-y-4 overflow-y-auto">
@@ -160,9 +230,14 @@ export default function MappingEditDialog({ bangumiId, name, isMovie, onClose, o
             <p className="text-xs text-muted-foreground">Bangumi ID: {bangumiId} · {mapping?.override ? '手动映射' : '平台映射'}</p>
           </div>
           <p id="mapping-description" className="text-xs text-muted-foreground">
-            保存后用于后续匹配和下载，社区同步会保留手动修改。已下载单集映射、NFO 和媒体路径不会自动重写。已有主备 RSS 地址保留，可重新选择字幕组更新。
+            更改 Mikan 映射时，有旧订阅将先确认清理文件与订阅。仅更改 TMDB/TVDB 映射时，保存后可选择重建 NFO。社区同步会保留手动修改。
           </p>
-          {loading ? <p role="status">正在读取映射…</p> : mapping && (
+          {(preview || task) && <MappingChangeConfirmDialog preview={preview} task={task} busy={saving}
+            onConfirm={() => void confirmChange()}
+            onEdit={() => { setTask(null); setPreview(null); setError(''); setLoading(true); setReload(value => value + 1); }}
+            onCancel={() => { if (task?.kind === 'nfo' && mapping) onSaved(mapping, mapping); else if (task) onClose(); else if (preview?.kind === 'cleanup') setPreview(null); else onClose(); }}
+            onRetry={() => void retryTask()} />}
+          {!preview && !task && (loading ? <p role="status">正在读取映射…</p> : mapping && (
             <fieldset disabled={saving} className="space-y-4">
               <section className="rounded-lg border p-4 space-y-2">
                 <label htmlFor="mapping-mikan-id" className="text-sm font-medium">Mikan ID</label>
@@ -220,14 +295,14 @@ export default function MappingEditDialog({ bangumiId, name, isMovie, onClose, o
                 ))}
               </fieldset>
             </fieldset>
-          )}
+          ))}
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
-          {!loading && !mapping && <Button variant="outline" onClick={() => { setLoading(true); setError(''); setReload(value => value + 1); }}>重新读取</Button>}
+          {!preview && !task && !loading && !mapping && <Button variant="outline" onClick={() => { setLoading(true); setError(''); setReload(value => value + 1); }}>重新读取</Button>}
         </DialogBody>
-        <DialogFooter>
+        {!preview && !task && <DialogFooter>
           <Button variant="outline" disabled={saving} onClick={onClose}>取消</Button>
           <Button disabled={loading || saving || !mapping} onClick={() => void save()}>{saving ? '保存中…' : '保存修改'}</Button>
-        </DialogFooter>
+        </DialogFooter>}
       </DialogContent>
     </DialogRoot>
   );

@@ -166,6 +166,18 @@ async def download_item(item: dict, bangumi_id: int, source: str, sub: dict, met
 
 _episode_locks: dict[tuple, tuple[asyncio.Lock, int]] = {}
 _nfo_tasks: set[asyncio.Task] = set()
+_subscription_nfo_tasks: dict[asyncio.Task, int] = {}
+
+
+async def wait_for_subscription(bangumi_id: int):
+    """新提交被任务状态阻止后，等待已有提交与后台 NFO 完成。"""
+    locks = [lock for key, (lock, _) in tuple(_episode_locks.items()) if key[1] == bangumi_id]
+    for lock in locks:
+        async with lock:
+            pass
+    tasks = [task for task, bid in tuple(_subscription_nfo_tasks.items()) if bid == bangumi_id]
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def stop_nfo_tasks() -> None:
@@ -217,6 +229,8 @@ async def submit_episode(
 ) -> str | None:
     """准备单集下载目标，执行下载并独立生成 NFO；RSS 跳过时返回 None。"""
     async with _episode_lock(("submit", bangumi_id, sort)):
+        from ...db.mapping_changes import ensure_idle
+        ensure_idle(bangumi_id)
         current = next((s for s in list_subscriptions() if s["bangumi_id"] == bangumi_id), None)
         if current is None:
             raise HTTPException(404, "订阅不存在")
@@ -289,7 +303,9 @@ async def submit_episode(
             replace_existing, metadata_ctx, template,
         ))
         _nfo_tasks.add(task)
+        _subscription_nfo_tasks[task] = bangumi_id
         task.add_done_callback(_nfo_tasks.discard)
+        task.add_done_callback(lambda done: _subscription_nfo_tasks.pop(done, None))
         result = await submit_torrent(torrent_path, target)
         mark_downloaded(
             bangumi_id, sort, guid, source, pub_date=pub_date,

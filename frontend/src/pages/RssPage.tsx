@@ -101,17 +101,17 @@ export default function RssPage() {
     setMappingDialog({ bangumi_id: bangumiId, name });
   };
 
-  const handleMappingSaved = (saved: BangumiMapping, previous: BangumiMapping) => {
-    setMappingDialog(null);
+  const handleMappingSaved = (saved: BangumiMapping, previous: BangumiMapping, close = true) => {
+    if (close) setMappingDialog(null);
     toast.success('映射已保存，后续匹配和下载将使用新映射');
     void refreshSubs();
-    if (result?.bangumi_id === saved.bangumi_id && saved.mikan_id !== previous.mikan_id) {
+    if (saved.mikan_id !== previous.mikan_id) {
       // 重新读取新来源，避免继续展示和选择旧来源的字幕组。
       setExpanded({});
       setFilterTags({});
       setTagBoxOpen({});
       setExcludePatterns({});
-      void search(String(saved.bangumi_id), { has_mikan_id: saved.mikan_id !== null, name: result.name });
+      void search(String(saved.bangumi_id), { has_mikan_id: saved.mikan_id !== null, name: mappingDialog?.name || result?.name || String(saved.bangumi_id) });
     }
   };
 

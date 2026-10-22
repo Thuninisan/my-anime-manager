@@ -8,6 +8,17 @@ class Base(DeclarativeBase):
     pass
 
 
+class MappingChangeTask(Base):
+    """映射变更的预览凭证、执行状态和重试检查点。"""
+    __tablename__ = "mapping_change_tasks"
+
+    task_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    bangumi_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
 class Resource(Base):
     __tablename__ = "resources"
     recognition_title_snapshot: Mapped[dict | None] = mapped_column(JSON)

@@ -183,3 +183,7 @@ class MappingPatch(BaseModel):
     # 平台季内集数 = Bangumi sort + ep_offset；显式 null 用于清除，0 为已确认相同。
     tmdb_ep_offset: int | None = None
     tvdb_ep_offset: int | None = None
+
+
+class MappingChangeConfirm(BaseModel):
+    task_id: str

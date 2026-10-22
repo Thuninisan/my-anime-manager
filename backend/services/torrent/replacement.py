@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 def validate_mapping(bangumi_id: int, files: list[dict]) -> dict[str, dict]:
     """Require one BD video for every recorded episode of this subscription."""
+    from ...db.mapping_changes import ensure_idle
+    ensure_idle(bangumi_id)
     resolve_episode_paths(bangumi_id, 1)
     episodes = data.get_all_episodes(bangumi_id)
     if not episodes:
