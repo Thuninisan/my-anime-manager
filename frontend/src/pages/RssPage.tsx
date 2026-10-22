@@ -4,7 +4,7 @@ import type { RssFeedResponse } from '@/types/preview';
 import * as rssApi from '@/api/rssApi';
 import { showLoadingToast, updateToast } from '@/lib/toast';
 import RssSearchBar from '@/components/rss/RssSearchBar';
-import BangumiSearchDialog from '@/components/rss/BangumiSearchDialog';
+import SearchResultDialog from '@/components/shared/SearchResultDialog';
 import SubtitleGroupDialog from '@/components/rss/SubtitleGroupDialog';
 import MikanSearchDialog from '@/components/rss/MikanSearchDialog';
 import SubscriptionList from '@/components/rss/SubscriptionList';
@@ -204,7 +204,7 @@ export default function RssPage() {
         />
       </div>
 
-      {onlineSearch && <BangumiSearchDialog {...onlineSearch} onClose={() => setOnlineSearch(null)} onSelect={item => { void handleOnlineSelect(item); }} />}
+      {onlineSearch && <SearchResultDialog {...onlineSearch} onClose={() => setOnlineSearch(null)} onSelect={item => { void handleOnlineSelect(item); }} />}
 
       {result && (
         <SubtitleGroupDialog

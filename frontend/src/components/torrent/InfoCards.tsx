@@ -1,11 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { augmentPreview, removePreviewCandidate } from '@/api/torrentApi';
-import { searchBangumi } from '@/api/rssApi';
+import { searchBangumiOnline, type BangumiOnlineResult } from '@/api/rssApi';
+import SearchResultDialog from '@/components/shared/SearchResultDialog';
 import type { TorrentPreviewResponse } from '@/types/preview';
 
 interface Props {
   searchResult: TorrentPreviewResponse;
   onPreviewChange: (view: TorrentPreviewResponse) => void;
+}
+
+interface OnlineSearch {
+  request: number;
+  previewId: string;
+  target: string;
+  query: string;
+  results: BangumiOnlineResult[];
+  loading: boolean;
+  error: string;
 }
 
 export default function InfoCards({ searchResult, onPreviewChange }: Props) {
@@ -15,24 +26,65 @@ export default function InfoCards({ searchResult, onPreviewChange }: Props) {
   const [inputs, setInputs] = useState({ tmdb: '', bangumi: '', tvdb: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [results, setResults] = useState<{ bangumi_id: number; name: string }[]>([]);
+  const [onlineSearch, setOnlineSearch] = useState<OnlineSearch | null>(null);
+  const requestRef = useRef(0);
+  const mutatingRef = useRef(false);
+  const composingRef = useRef(false);
+  const activeSearch = onlineSearch?.previewId === searchResult.preview_id && onlineSearch.target === target ? onlineSearch : null;
+  useEffect(() => () => { ++requestRef.current; }, []);
+  const closeSearch = () => {
+    ++requestRef.current;
+    setOnlineSearch(null);
+  };
   const entry = searchResult.search_results[target];
   const catalog = searchResult.episode_catalog;
-  const mutate = async (provider: 'tmdb' | 'tvdb' | 'bangumi', id: number, remove = false) => {
+  const mutate = async (provider: 'tmdb' | 'tvdb' | 'bangumi', id: number, remove = false, selection = false) => {
+    if (mutatingRef.current) return;
     if (!Number.isInteger(id) || id <= 0 || !target) { setError('请输入有效的平台 ID'); return; }
+    mutatingRef.current = true;
     setBusy(true); setError('');
+    if (selection) setOnlineSearch(current => current ? { ...current, error: '' } : current);
     try {
       onPreviewChange(await (remove ? removePreviewCandidate(searchResult, provider, id, target)
         : augmentPreview(searchResult, provider, id, target)));
       setInputs(previous => ({ ...previous, [provider]: '' }));
-      setResults([]);
-    } catch (error) { setError(error instanceof Error ? error.message : String(error)); }
-    finally { setBusy(false); }
+      closeSearch();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (selection) setOnlineSearch(current => current ? { ...current, error: message } : current);
+      else setError(message);
+    }
+    finally { mutatingRef.current = false; setBusy(false); }
+  };
+  const submit = async (provider: 'tmdb' | 'tvdb' | 'bangumi') => {
+    if (mutatingRef.current) return;
+    const query = inputs[provider].trim();
+    if (!query) { setError(provider === 'bangumi' ? '请输入 Bangumi ID 或作品名称' : '请输入有效的平台 ID'); return; }
+    if (provider !== 'bangumi' || /^\d+$/.test(query)) {
+      if (!/^\d+$/.test(query)) { setError('请输入有效的平台 ID'); return; }
+      await mutate(provider, Number(query));
+      return;
+    }
+    if (!target) { setError('请先选择要添加候选的作品'); return; }
+    const request = ++requestRef.current;
+    setError('');
+    setOnlineSearch({ request, previewId: searchResult.preview_id, target, query, results: [], loading: true, error: '' });
+    try {
+      const results = await searchBangumiOnline(query);
+      // 关闭弹窗或重新搜索后，忽略旧请求的结果。
+      if (request !== requestRef.current) return;
+      setOnlineSearch(current => current?.request === request ? { ...current, results, loading: false } : current);
+    } catch (error) {
+      if (request !== requestRef.current) return;
+      setOnlineSearch(current => current?.request === request ? {
+        ...current, loading: false, error: error instanceof Error ? error.message : 'Bangumi 搜索失败',
+      } : current);
+    }
   };
   return <section className="mb-8 rounded-xl border border-border bg-card p-6">
     <h3 className="font-bold">参与集数匹配的作品候选</h3>
     <p className="mt-2 text-xs text-muted-foreground">添加目录后可逐集调整；点击下载时提交的集数映射决定每个文件使用的作品关系。</p>
-    {keys.length > 1 && <select aria-label="作品" className="my-4 rounded border p-2" value={target} disabled={busy} onChange={event => setShow(event.target.value)}>
+    {keys.length > 1 && <select aria-label="作品" className="my-4 rounded border p-2" value={target} disabled={busy} onChange={event => { closeSearch(); setShow(event.target.value); }}>
       {keys.map(key => <option key={key} value={key}>{key}</option>)}
     </select>}
     <div className="mt-4 grid gap-6 md:grid-cols-3">
@@ -50,21 +102,24 @@ export default function InfoCards({ searchResult, onPreviewChange }: Props) {
           </div>;
         })}
         <div className="flex gap-2">
-          <input aria-label={`${provider} ID`} className="min-w-0 flex-1 rounded border border-border bg-background p-2 text-sm" placeholder={provider === 'bangumi' ? 'Bangumi ID 或作品名称' : `${provider.toUpperCase()} ID`} value={inputs[provider]} disabled={busy}
+          <input aria-label={provider === 'bangumi' ? 'Bangumi ID 或作品名称' : `${provider.toUpperCase()} ID`} className="min-w-0 flex-1 rounded border border-border bg-background p-2 text-sm" placeholder={provider === 'bangumi' ? 'Bangumi ID 或作品名称' : `${provider.toUpperCase()} ID`} value={inputs[provider]} disabled={busy}
             onChange={event => setInputs(previous => ({ ...previous, [provider]: event.target.value }))}
-            onKeyDown={event => { if (event.key === 'Enter') void mutate(provider, Number(inputs[provider])); }} />
-          <button disabled={busy} className="rounded bg-primary px-3 text-sm text-primary-foreground disabled:opacity-50" onClick={async () => {
-            if (provider === 'bangumi' && inputs.bangumi.trim() && !/^\d+$/.test(inputs.bangumi.trim())) {
-              setBusy(true); setError('');
-              try { setResults(await searchBangumi(inputs.bangumi)); }
-              catch (error) { setError(error instanceof Error ? error.message : String(error)); }
-              finally { setBusy(false); }
-            } else void mutate(provider, Number(inputs[provider]));
-          }}>{provider === 'bangumi' && inputs.bangumi && !/^\d+$/.test(inputs.bangumi) ? '搜索' : '添加'}</button>
+            onCompositionStart={() => { composingRef.current = true; }}
+            onCompositionEnd={() => { composingRef.current = false; }}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && !composingRef.current && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+                event.preventDefault();
+                void submit(provider);
+              }
+            }} />
+          <button type="button" disabled={busy} className="rounded bg-primary px-3 text-sm text-primary-foreground disabled:opacity-50" onClick={() => { void submit(provider); }}>
+            {provider === 'bangumi' && inputs.bangumi.trim() && !/^\d+$/.test(inputs.bangumi.trim()) ? '搜索' : '添加'}
+          </button>
         </div>
-        {provider === 'bangumi' && results.map(result => <button className="block text-left text-xs text-primary" disabled={busy} key={result.bangumi_id} onClick={() => mutate('bangumi', result.bangumi_id)}>{result.name} · {result.bangumi_id}</button>)}
       </div>)}
     </div>
     {error && <p role="alert" className="mt-3 text-sm text-destructive">{error}</p>}
+    {activeSearch && <SearchResultDialog {...activeSearch} selecting={busy} onClose={closeSearch}
+      onSelect={item => { void mutate('bangumi', item.bangumi_id, false, true); }} />}
   </section>;
 }
