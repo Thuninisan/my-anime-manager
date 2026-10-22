@@ -6,10 +6,10 @@ interface Props {
   onOpenHistory: (bangumiId: number, subscription: SubscriptionOut) => void;
   onUnsubscribe: (bangumiId: number, subscription: SubscriptionOut) => void;
   onActivate: (bangumiId: number) => Promise<void>;
-  onSetTmdb?: (bangumiId: number, name: string) => void;
+  onEditMapping: (bangumiId: number, name: string) => void;
 }
 
-export default function SubscriptionCard({ subscription: s, onOpenHistory, onUnsubscribe, onActivate, onSetTmdb }: Props) {
+export default function SubscriptionCard({ subscription: s, onOpenHistory, onUnsubscribe, onActivate, onEditMapping }: Props) {
   const rangeStart = s.bgm?.sortrange?.[0] ?? 1;
   const totalEps = s.bgm?.sortrange ? s.bgm.sortrange[1] - rangeStart + 1 : 0;
   const downloaded = s.downloaded_count || 0;
@@ -141,19 +141,19 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
             </span>
           )}
         </div>
-        {/* Missing TMDB warning — Tier-2 manual override trigger */}
         {(!s.resource_identity.tmdb_series_id && !s.resource_identity.tmdb_movie_id) && (
-          <button
-            className="w-full text-[10px] px-2 py-1 rounded bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors font-medium"
-            onClick={(e) => {
-              e.stopPropagation();
-              onSetTmdb?.(s.bangumi_id, s.name);
-            }}
-            title="TMDB ID missing — metadata (NFO, images) will not be generated. Click to set manually."
-          >
-            Missing TMDB ID — click to set
-          </button>
+          <p className="text-xs text-destructive">缺少 TMDB 关联{s.resource_identity.media_type === 'tv' ? '，可通过编辑映射补充。' : '。'}</p>
         )}
+        <button
+          type="button"
+          className="w-full flex items-center justify-center gap-2 text-xs px-3 py-2 rounded border border-border text-primary hover:bg-muted transition-colors"
+          onClick={() => onEditMapping(s.bangumi_id, s.name)}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4Z" />
+          </svg>
+          编辑映射
+        </button>
       </div>
     </div>
   );

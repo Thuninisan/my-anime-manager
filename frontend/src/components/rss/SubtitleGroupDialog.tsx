@@ -20,6 +20,7 @@ interface Props {
   takenRoles: { primary: boolean; backup: boolean };
   onDeleteRss: (type: 'primary' | 'backup') => void;
   onClose: () => void;
+  onEditMapping: (bangumiId: number, name: string) => void;
 }
 
 export default function SubtitleGroupDialog({
@@ -27,7 +28,7 @@ export default function SubtitleGroupDialog({
   subscribingId, excludePatterns,
   onToggleFeed, onToggleTag, onToggleTagBox, onSubscribe,
   onExcludeChange,
-  getSubMode, takenRoles, onDeleteRss, onClose,
+  getSubMode, takenRoles, onDeleteRss, onClose, onEditMapping,
 }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md p-4">
@@ -67,6 +68,7 @@ export default function SubtitleGroupDialog({
               <div className="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-sm text-muted-foreground">
                 <span>Mikan ID: <span className="font-medium text-foreground">{result.mikan_id}</span></span>
                 <span>Bangumi ID: <span className="font-medium text-foreground">{result.bangumi_id}</span></span>
+                <button type="button" className="text-primary hover:underline" onClick={() => onEditMapping(result.bangumi_id, result.name)}>编辑映射</button>
                 {meta?.air_date && <span>开播日期: {meta.air_date}</span>}
               </div>
 

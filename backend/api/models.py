@@ -1,6 +1,6 @@
 """API request/response Pydantic models."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from ..domain.resource import ResourceIdentity
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -169,11 +169,11 @@ class MappingPatch(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     title_cn: str | None = None
     title_jp: str | None = None
-    mikan_id: int | None = None
-    tmdb_id: int | None = None
-    tvdb_id: int | None = None
-    tmdb_season: int | None = None
-    tvdb_season: int | None = None
+    mikan_id: int | None = Field(default=None, gt=0)
+    tmdb_id: int | None = Field(default=None, gt=0)
+    tvdb_id: int | None = Field(default=None, gt=0)
+    tmdb_season: int | None = Field(default=None, ge=0)
+    tvdb_season: int | None = Field(default=None, ge=0)
     tmdb_series_title_cn: str | None = None
     tmdb_series_title_jp: str | None = None
     tvdb_series_title_cn: str | None = None

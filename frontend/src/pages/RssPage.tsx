@@ -10,7 +10,9 @@ import MikanSearchDialog from '@/components/rss/MikanSearchDialog';
 import SubscriptionList from '@/components/rss/SubscriptionList';
 import DownloadHistoryDialog from '@/components/rss/DownloadHistoryDialog';
 import UnsubscribeDialog from '@/components/rss/UnsubscribeDialog';
-import TmdbSearchDialog from '@/components/rss/TmdbSearchDialog';
+import MappingEditDialog from '@/components/rss/MappingEditDialog';
+import type { BangumiMapping } from '@/types/mapping';
+import { toast } from 'sonner';
 import { useRssSearch } from '@/hooks/useRssSearch';
 import { useSubscriptions } from '@/hooks/useSubscriptions';
 import { useDownloadHistory } from '@/hooks/useDownloadHistory';
@@ -32,8 +34,8 @@ export default function RssPage() {
   const [subscribingId, setSubscribingId] = useState<number | null>(null);
   const [excludePatterns, setExcludePatterns] = useState<Record<number, string[]>>({});
 
-  // TMDB manual override state
-  const [tmdbDialog, setTmdbDialog] = useState<{ bangumi_id: number; name: string } | null>(null);
+  // 订阅和字幕组共用映射编辑入口。
+  const [mappingDialog, setMappingDialog] = useState<{ bangumi_id: number; name: string } | null>(null);
 
   const handleSearch = (id: number, candidate?: { has_mikan_id: boolean; name: string }) => {
     setEntryError('');
@@ -95,13 +97,22 @@ export default function RssPage() {
     refreshSubs();
   };
 
-  const handleSetTmdb = (bangumiId: number, name: string) => {
-    setTmdbDialog({ bangumi_id: bangumiId, name });
+  const handleEditMapping = (bangumiId: number, name: string) => {
+    setMappingDialog({ bangumi_id: bangumiId, name });
   };
 
-  const handleTmdbAssigned = (_tmdbId: number, _tmdbSeason: number | null) => {
-    setTmdbDialog(null);
-    refreshSubs();
+  const handleMappingSaved = (saved: BangumiMapping, previous: BangumiMapping) => {
+    setMappingDialog(null);
+    toast.success('映射已保存，后续匹配和下载将使用新映射');
+    void refreshSubs();
+    if (result?.bangumi_id === saved.bangumi_id && saved.mikan_id !== previous.mikan_id) {
+      // 重新读取新来源，避免继续展示和选择旧来源的字幕组。
+      setExpanded({});
+      setFilterTags({});
+      setTagBoxOpen({});
+      setExcludePatterns({});
+      void search(String(saved.bangumi_id), { has_mikan_id: saved.mikan_id !== null, name: result.name });
+    }
   };
 
   const toggleFeed = async (rssUrl: string) => {
@@ -215,6 +226,7 @@ export default function RssPage() {
           takenRoles={takenRoles}
           onDeleteRss={handleDeleteGroupRss}
           onClose={clearSearch}
+          onEditMapping={handleEditMapping}
         />
       )}
 
@@ -237,7 +249,7 @@ export default function RssPage() {
           onOpenHistory={openHistory}
           onUnsubscribe={(_bangumiId, sub) => setUnsubTarget(sub)}
           onActivate={activate}
-          onSetTmdb={handleSetTmdb}
+          onEditMapping={handleEditMapping}
         />
       </div>
 
@@ -260,13 +272,14 @@ export default function RssPage() {
         }}
       />
 
-      {tmdbDialog && (
-        <TmdbSearchDialog
-          open={true}
-          bangumiId={tmdbDialog.bangumi_id}
-          bangumiName={tmdbDialog.name}
-          onClose={() => setTmdbDialog(null)}
-          onAssigned={handleTmdbAssigned}
+      {mappingDialog && (
+        <MappingEditDialog
+          key={mappingDialog.bangumi_id}
+          bangumiId={mappingDialog.bangumi_id}
+          name={mappingDialog.name}
+          isMovie={subscriptions.find(sub => sub.bangumi_id === mappingDialog.bangumi_id)?.resource_identity.media_type === 'movie'}
+          onClose={() => setMappingDialog(null)}
+          onSaved={handleMappingSaved}
         />
       )}
     </>

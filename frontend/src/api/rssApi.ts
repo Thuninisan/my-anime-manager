@@ -1,7 +1,30 @@
 import type { BangumiRssResponse, ManualSubscribeIn, MikanSearchResult, RssDataStatus, RssFeedResponse, RssSettings, SubscriptionIn, SubscriptionOut } from '../types/preview';
 import type { NfoRefreshTask } from '../types/nfoRefresh';
+import type { BangumiMapping, MappingUpdate } from '../types/mapping';
 
 const API_BASE = '/api/rss';
+
+async function readMappingResponse(res: Response): Promise<BangumiMapping> {
+  const body = await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail = body?.detail;
+    const message = typeof detail === 'string' ? detail : Array.isArray(detail)
+      ? detail.map((item: { loc?: (string | number)[]; msg?: string }) => `${item.loc?.slice(1).join('.') || '字段'}: ${item.msg || '无效'}`).join('；')
+      : `映射操作失败 (HTTP ${res.status})`;
+    throw new Error(message);
+  }
+  return body;
+}
+
+export async function getBangumiMapping(bangumiId: number): Promise<BangumiMapping> {
+  return readMappingResponse(await fetch(`${API_BASE}/bangumi/${bangumiId}/mapping`, { cache: 'no-store' }));
+}
+
+export async function updateBangumiMapping(bangumiId: number, changes: MappingUpdate): Promise<BangumiMapping> {
+  return readMappingResponse(await fetch(`${API_BASE}/bangumi/${bangumiId}/mapping`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(changes),
+  }));
+}
 
 export async function getNfoRefreshTask(bangumiId: number): Promise<NfoRefreshTask | null> {
   const res = await fetch(`${API_BASE}/download-history/${bangumiId}/regen-nfo`, { cache: 'no-store' });

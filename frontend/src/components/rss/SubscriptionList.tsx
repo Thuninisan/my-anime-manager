@@ -8,7 +8,7 @@ interface Props {
   onOpenHistory: (bangumiId: number, subscription: SubscriptionOut) => void;
   onUnsubscribe: (bangumiId: number, subscription: SubscriptionOut) => void;
   onActivate: (bangumiId: number) => Promise<void>;
-  onSetTmdb?: (bangumiId: number, name: string) => void;
+  onEditMapping: (bangumiId: number, name: string) => void;
 }
 
 function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
@@ -39,7 +39,7 @@ function AddCard({ onClick }: { onClick: () => void }) {
 }
 
 export default function SubscriptionList({
-  subscriptions, loading, onOpenHistory, onUnsubscribe, onActivate, onSetTmdb,
+  subscriptions, loading, onOpenHistory, onUnsubscribe, onActivate, onEditMapping,
 }: Props) {
   const { ongoing, completed } = useMemo(() => {
     const active: SubscriptionOut[] = [];
@@ -88,7 +88,7 @@ export default function SubscriptionList({
                 onOpenHistory={onOpenHistory}
                 onUnsubscribe={onUnsubscribe}
                 onActivate={onActivate}
-                onSetTmdb={onSetTmdb}
+                onEditMapping={onEditMapping}
               />
             ))}
           </div>
@@ -114,7 +114,7 @@ export default function SubscriptionList({
                 onOpenHistory={onOpenHistory}
                 onUnsubscribe={onUnsubscribe}
                 onActivate={onActivate}
-                onSetTmdb={onSetTmdb}
+                onEditMapping={onEditMapping}
               />
             ))}
             <AddCard onClick={() => {}} />
