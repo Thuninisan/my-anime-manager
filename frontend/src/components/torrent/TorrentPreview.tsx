@@ -250,7 +250,7 @@ export default function TorrentPreview({
                 }}>{source.toUpperCase()}</button>;
             })}
           </div>
-          <p className="text-xs text-muted-foreground">按文件解析出的季号、集号匹配 {searchResult.episode_match_source?.toUpperCase()}，再按集名匹配另外两个来源。手动修改会保留。</p>
+          <p className="text-xs text-muted-foreground">按文件解析出的季号、集号匹配 {searchResult.episode_match_source.toUpperCase()}，再按集名匹配另外两个来源。手动修改会保留。</p>
           {indexError && <p className="text-xs text-destructive">{indexError}</p>}
         </div>
 

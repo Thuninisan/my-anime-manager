@@ -3,7 +3,7 @@ from typing import Literal, NotRequired
 from typing_extensions import TypedDict
 from pydantic import ConfigDict
 from .resource import ResourceCandidate
-from .episode import EpisodeCatalog, EpisodeMetadata, ParsedEpisodeRef, EpisodeMapping
+from .episode import EpisodeCatalog, EpisodeMetadata, ParsedEpisodeRef, EpisodeMapping, EpisodeMatchSource
 
 PREVIEW_SCHEMA_VERSION = 4
 PreviewFileType = Literal["video", "subtitle", "font", "audio", "other"]
@@ -54,7 +54,7 @@ class PreviewContextSnapshot(TypedDict):
     series_contexts: dict[str, SeriesContext]
     episode_catalog: EpisodeCatalog
     episode_metadata: EpisodeMetadataStore
-    episode_match_source: str
+    episode_match_source: EpisodeMatchSource
 
 
 class PreviewDownloadFile(TypedDict):
@@ -102,7 +102,15 @@ class TorrentPreviewResponse(TypedDict):
     expires_at: str
     torrent_name: str
     resource_id: int | None
-    episode_match_source: str
+    episode_match_source: EpisodeMatchSource
     parsed_files: list[PreviewParsedFileView]
     search_results: dict[str, PreviewSearchEntry]
     episode_catalog: EpisodeCatalog
+
+
+def default_episode_match_source(catalog: EpisodeCatalog) -> EpisodeMatchSource:
+    """预览入口统一优先使用有剧集的 TVDB 目录，否则选择 TMDB。"""
+    if any(season["episodes"] for series in catalog["tvdb"].values()
+           for season in series["seasons"].values()):
+        return "tvdb"
+    return "tmdb"

@@ -221,7 +221,7 @@ export interface TorrentPreviewResponse {
   parsed_files: import('./matchTable').ParsedFile[];
   search_results: Record<string, import('./matchTable').SearchEntry>;
   episode_catalog: import('./episode').EpisodeCatalog;
-  episode_match_source?: 'tmdb' | 'tvdb';
+  episode_match_source: import('./episode').EpisodeMatchSource;
   torrent_name: string;
   error?: string;
   resource_id?: number;

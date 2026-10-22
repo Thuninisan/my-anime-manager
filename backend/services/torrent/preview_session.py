@@ -129,6 +129,9 @@ def discover_mapping_candidates(context):
 def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
     from .preview_files import unify_files
     result = unify_files(result)
+    match_source = result.get("index")
+    if match_source not in ("tmdb", "tvdb"):
+        raise ValueError("invalid_episode_match_source")
     files = [{"file_id": file_id(item["torrent_path"]), "file_name": item["file_name"],
               "torrent_path": item["torrent_path"], "show_key": item["show_name"],
               "parsed": item["parsed_episode"], "type": item["type"],
@@ -149,7 +152,7 @@ def build_snapshot(result: dict, source: Path) -> PreviewContextSnapshot:
             "parsed_files": files, "series_contexts": series,
             "episode_catalog": episode_catalog(result.get("provider_catalogs", {})),
             "episode_metadata": normalize_metadata(result.get("provider_catalogs", {})),
-            "episode_match_source": result.get("index", "tvdb")}
+            "episode_match_source": match_source}
 
 
 def deduplicate_candidates(candidates):

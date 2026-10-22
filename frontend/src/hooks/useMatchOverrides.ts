@@ -76,7 +76,7 @@ export function useMatchOverrides(
       const specials = manualVideoFiles(data.parsed_files);
       const spRows: MatchRow[] = specials.map(s => ({
         file_name: s.file_name, torrent_path: s.torrent_path || s.file_name, show_name: s.show_name || '-',
-        mapping: createEpisodeMapping(s.parsed, null, null, null, null, data.episode_match_source ?? null),
+        mapping: createEpisodeMapping(s.parsed, null, null, null, null, data.episode_match_source),
         bgm_entry: '-', bgm_ep_name: '-', bgm_ep_name_cn: '', tmdb_ep_name: '-',
         matched: false, media_type: 'special',
       }));
@@ -351,8 +351,8 @@ export function useMatchOverrides(
       const entry = searchResults[r.show_name] ?? (contexts.length === 1 ? contexts[0] : undefined);
       const allowed = (provider: 'tmdb' | 'tvdb' | 'bangumi', id: number | null) => id == null || candidateIds(entry, provider).includes(id);
       const valid = allowed('bangumi', mapping.bangumi.subject_id) && allowed('tmdb', mapping.tmdb.series_id) && allowed('tvdb', mapping.tvdb.series_id);
-      const anchor = mapping[mapping.match_source ?? 'tmdb'];
-      const source = mapping.match_source ?? 'tmdb';
+      const source = data.episode_match_source;
+      const anchor = mapping[source];
       const anchorSeasons = source === 'tmdb' ? episodeData.tmdb[String(anchor.series_id)] : episodeData.tvdb[String(anchor.series_id)]?.seasons;
       const anchorExists = anchorSeasons?.[String(anchor.season_number)]?.episodes.some(ep => ep.episode_number === anchor.episode_number);
       const matched = valid && (r.media_type === 'movie' ? !!(effectiveBgmId && r.tmdb_movie_id)
@@ -372,7 +372,7 @@ export function useMatchOverrides(
         matched,
       };
     });
-  }, [initialRows, overrides, bgmEntryOptions, searchResults, episodeData]);
+  }, [initialRows, overrides, bgmEntryOptions, searchResults, episodeData, data.episode_match_source]);
 
   // ── Split rows by media_type ──
   const movieRows = useMemo(

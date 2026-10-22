@@ -56,7 +56,7 @@ MIN_MATCH_SCORE = 0.6
 def fuzzy_match_episode(bgm_name: str, tmdb_name: str) -> float:
     """Compare a Bangumi episode name against a TMDB episode name.
 
-    Three-tier matching (matches ``MatchTable.tsx:fuzzyMatchTmdb()``):
+    按以下三个层级计算后端剧集标题的相似度：
 
     1. **Exact match** after normalization → 1.0
     2. **Substring / contains** match → 0.8

@@ -1,4 +1,4 @@
-/** Public preview projection and legacy matcher coordinate boundary. */
+/** 预览响应与平台剧集坐标的适配边界。 */
 import type { EpisodeCatalog, CatalogSeason, EpisodeMapping, TmdbEpisodeRef, ParsedEpisodeRef, BangumiCatalogEpisode, EpisodeMatchSource } from '@/types/episode';
 import type { ParsedFile } from '@/types/matchTable';
 import type { TorrentPreviewResponse } from '@/types/preview';
@@ -49,8 +49,7 @@ export function normalizeEpisodeCatalog(value: unknown): EpisodeCatalog {
         episode_number: num(ep.episode_number),
         // Do not substitute ep for sort; preserve raw sort if supplied, including null.
         episode_absolute: num(ep.episode_absolute),
-        name: str(ep.name), name_cn: str(ep.name_cn),
-        matching_absolute: num(ep.matching_absolute) };
+        name: str(ep.name), name_cn: str(ep.name_cn) };
       return [normalized];
     }) };
   }
@@ -60,6 +59,10 @@ export function normalizeEpisodeCatalog(value: unknown): EpisodeCatalog {
 
 export function normalizeTorrentPreview(value: unknown): TorrentPreviewResponse {
   const raw = object(value);
+  const matchSource = raw.episode_match_source;
+  if (matchSource !== 'tmdb' && matchSource !== 'tvdb') {
+    throw new Error('预览缺少有效的集数匹配源，请重新解析种子');
+  }
   const parsedFiles = (value: unknown): ParsedFile[] => list(value).map(value => {
     const file = object(value);
     const coordinate = object(file.parsed_episode);
@@ -76,7 +79,7 @@ export function normalizeTorrentPreview(value: unknown): TorrentPreviewResponse 
   return {
     preview_id: str(raw.preview_id), revision: num(raw.revision) ?? 0, expires_at: str(raw.expires_at),
     search_results: object(raw.search_results) as TorrentPreviewResponse['search_results'],
-    episode_match_source: raw.episode_match_source === 'tmdb' ? 'tmdb' : raw.episode_match_source === 'tvdb' ? 'tvdb' : undefined,
+    episode_match_source: matchSource,
     resource_id: num(raw.resource_id) ?? undefined,
     torrent_name: str(raw.torrent_name),
     episode_catalog: normalizeEpisodeCatalog(raw.episode_catalog),
@@ -99,11 +102,6 @@ export function createEpisodeMapping(parsed: ParsedEpisodeRef, subjectId: number
 
 export function catalogSeriesTitle(catalog: EpisodeCatalog, id: string): string | undefined {
   return catalog.tmdb_series_titles?.[id];
-}
-
-/** Preserve the pre-existing sort→ep fallback only inside legacy matching. */
-export function matchingBangumiAbsolute(episode: BangumiCatalogEpisode): number | null {
-  return episode.matching_absolute ?? episode.episode_absolute ?? episode.episode_number;
 }
 
 /** Provisional recommendation only; final provider references live in each mapping. */

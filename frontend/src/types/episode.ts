@@ -46,7 +46,6 @@ export interface CatalogSeason {
 }
 
 export interface BangumiCatalogEpisode extends BangumiEpisodeRef {
-  matching_absolute?: number | null;
   name: string;
   name_cn?: string;
   episode_id: number;

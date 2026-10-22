@@ -6,6 +6,7 @@ entries discovered through the mapping table.
 """
 
 from ...domain.episode_adapters import episode_catalog, parsed_episode_ref
+from ...domain.preview import default_episode_match_source
 
 import logging
 from collections import Counter
@@ -129,8 +130,9 @@ async def search_by_tmdb(
     from .preview_session import candidate_context
     search_results = {key: candidate_context(key, entry, provider_catalogs) for key, entry in search_results.items()}
 
+    catalog = episode_catalog(provider_catalogs)
     return unify_files({
-        "index": "tmdb" if provider_catalogs.get("tmdb") else "tvdb" if provider_catalogs.get("tvdb") else "tmdb",
+        "index": default_episode_match_source(catalog),
         "torrent_name": torrent_name,
         "torrent_path": torrent_path,
         "total_files": len(file_list),
@@ -152,5 +154,5 @@ async def search_by_tmdb(
         "show_names": show_names,
         "search_results": search_results,
         "provider_catalogs": provider_catalogs,
-        "episode_catalog": episode_catalog(provider_catalogs),
+        "episode_catalog": catalog,
     }, original_files, excluded_paths)

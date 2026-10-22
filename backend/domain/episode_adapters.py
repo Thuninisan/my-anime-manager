@@ -44,8 +44,7 @@ def episode_catalog(data: dict) -> EpisodeCatalog:
     """Normalize legacy provider catalogs at the preview/search boundary.
 
     Legacy provider_catalogs remains available for the existing NFO/download pipeline.
-    ep and raw sort are independent; legacy sort's historical fallback stays in
-    the legacy payload only.
+    ep 与原始 sort 独立保留，不为集数匹配生成替代编号。
     """
     result: EpisodeCatalog = {"tmdb": {}, "bangumi": {}, "tvdb": {}}
     for provider in ("tmdb", "tvdb"):
@@ -67,7 +66,6 @@ def episode_catalog(data: dict) -> EpisodeCatalog:
         result["bangumi"][str(sid)] = {"name": entry.get("name") or "", "episodes": [
             {"subject_id": int(sid), "episode_id": ep.get("id"),
              "episode_number": ep.get("ep"), "episode_absolute": ep.get("raw_sort", ep.get("sort")),
-             "matching_absolute": ep.get("sort"),
              "name": ep.get("name") or "", **({"name_cn": ep["name_cn"] or ""} if "name_cn" in ep else {})}
             for ep in entry.get("episodes", [])]}
     return result

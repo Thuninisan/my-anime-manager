@@ -6,6 +6,7 @@ are deduplicated and run concurrently across providers.
 """
 
 from ...domain.episode_adapters import episode_catalog, parsed_episode_ref
+from ...domain.preview import default_episode_match_source
 
 import logging
 import asyncio
@@ -741,8 +742,8 @@ async def parse_and_search(torrent_path: str) -> dict:
     logger.info("Fetching TMDB, TVDB and Bangumi episode catalogs concurrently")
     provider_catalogs = await _fetch_provider_catalogs(search_results, parsed_files)
 
-    # Default to an available index; explicit user switches remain strict.
-    available_index = "tvdb" if provider_catalogs.get("tvdb") else "tmdb"
+    catalog = episode_catalog(provider_catalogs)
+    available_index = default_episode_match_source(catalog)
 
     # ── Step 6: Collect SP/Extra files (no re-parsing) ──
     # Files in special directories were marked is_extra during Step 2.
@@ -786,7 +787,7 @@ async def parse_and_search(torrent_path: str) -> dict:
         "search_results": search_results,
         "search_results_backup": search_results_backup,
         "provider_catalogs": provider_catalogs,
-        "episode_catalog": episode_catalog(provider_catalogs),
+        "episode_catalog": catalog,
     }, original_files, excluded_paths)
 
 

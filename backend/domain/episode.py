@@ -106,7 +106,6 @@ class CatalogSeason(TypedDict):
 
 
 class BangumiCatalogEpisode(BangumiEpisodeRef):
-    matching_absolute: NotRequired[int | float | None]
     name: str
     name_cn: NotRequired[str]
 
