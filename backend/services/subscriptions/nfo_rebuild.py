@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import shutil
 from pathlib import Path
 import tempfile
 from collections import Counter
@@ -151,6 +152,14 @@ async def rebuild_for_mapping(task, persist):
                     season_key = hashlib.sha256(str(media.parent).encode()).hexdigest()[:16]
                     staged_media = stage_root / show_key / season_key / media.name
                     staged_media.parent.mkdir(parents=True, exist_ok=True)
+                    # 暂存旧的共享 NFO，使简介补全失败时同样能保留有效中文。
+                    for source, target in (
+                        (media.parent / "season.nfo", staged_media.parent / "season.nfo"),
+                        (media.parent.parent / "tvshow.nfo", staged_media.parent.parent / "tvshow.nfo"),
+                    ):
+                        safe_path(source)
+                        if source.is_file() and not target.exists():
+                            shutil.copyfile(source, target)
                     results = []
                     thumbnail_results = []
                     thumbnail_status = "pending"

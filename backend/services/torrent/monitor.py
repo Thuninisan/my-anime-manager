@@ -246,6 +246,9 @@ async def monitor_download(
             elif skip_nfo:
                 logger.info("NFO 已预生成，跳过内联 NFO 生成 [%s]", torrent_name)
             else:
+                from ..metadata.context import MetadataContext
+                from ..metadata.plots import PlotResolution, resolve_series_plot, resolve_season_plot
+                metadata_ctx = MetadataContext()
                 for f in files:
                     is_sub = f.get("is_subtitle", False)
                     if is_sub:
@@ -262,21 +265,28 @@ async def monitor_download(
                     season_dir = Path(hardlink_root) / Path(rel_path).parent
                     show_dir = season_dir.parent
                     season_dir.mkdir(parents=True, exist_ok=True)
+                    mapping = f["episode_mapping"]
 
                     # tvshow.nfo (once per show_dir)
                     show_key = str(show_dir)
                     if show_key not in seen_show_dirs:
                         seen_show_dirs.add(show_key)
                         show_nfo_exists = (show_dir / "tvshow.nfo").exists()
+                        show_plot = PlotResolution()
+                        if not show_nfo_exists:
+                            show_plot = await resolve_series_plot(
+                                tmdb_id=mapping["tmdb"]["series_id"] or 0,
+                                tvdb_id=mapping["tvdb"]["series_id"] or 0,
+                                metadata_ctx=metadata_ctx, context=f"{show_dir} tvshow.nfo")
                         generate_tv_show_nfo(
                             title=f.get("tmdb_show_name", ""),
                             original_title=f.get("bangumi_show_name", ""),
-                            plot="",
+                            plot=show_plot.text,
                             output_dir=str(show_dir),
                         )
                         nfo_generated += 1
                         if not show_nfo_exists:
-                            logger.info("NFO [%s tvshow.nfo] 字段来源：标题=TMDB 映射；原名=Bangumi 映射；简介=空", show_dir)
+                            logger.info("NFO [%s tvshow.nfo] 字段来源：标题=TMDB 映射；原名=Bangumi 映射；简介=%s", show_dir, show_plot.source)
                         logger.info("   tvshow.nfo → %s", show_dir / "tvshow.nfo")
 
                     # season.nfo (once per season_dir)
@@ -286,10 +296,16 @@ async def monitor_download(
                         season_nfo_exists = (season_dir / "season.nfo").exists()
                         bgm_id = f["episode_mapping"]["bangumi"]["subject_id"] or 0
                         tmdb_season = f["episode_mapping"]["tmdb"]["season_number"] or 0
+                        season_plot = PlotResolution()
+                        if not season_nfo_exists:
+                            season_plot = await resolve_season_plot(
+                                tmdb_id=mapping["tmdb"]["series_id"] or 0,
+                                tmdb_season=mapping["tmdb"]["season_number"], bangumi_id=bgm_id,
+                                metadata_ctx=metadata_ctx, context=f"{season_dir} season.nfo")
                         generate_season_nfo(
                             title=f"Season {tmdb_season}",
                             original_title="",
-                            plot="",
+                            plot=season_plot.text,
                             premiered="",
                             season_number=tmdb_season,
                             bangumi_id=bgm_id,
@@ -297,7 +313,7 @@ async def monitor_download(
                         )
                         nfo_generated += 1
                         if not season_nfo_exists:
-                            logger.info("NFO [%s season.nfo] 字段来源：季号=TMDB 映射；Bangumi ID=Bangumi 映射；简介=空", season_dir)
+                            logger.info("NFO [%s season.nfo] 字段来源：季号=TMDB 映射；Bangumi ID=Bangumi 映射；简介=%s", season_dir, season_plot.source)
                         logger.info("   season.nfo → %s", season_dir / "season.nfo")
 
                     # Resolve the already confirmed mapping; no compatibility numbering.
@@ -305,7 +321,7 @@ async def monitor_download(
                     from ...domain.episode_metadata_adapters import provider_metadata_candidates
                     from ..metadata.nfo.nfo_xml import generate_episode_nfo
                     resolved = await resolve_nfo_episode(f["episode_mapping"], provider_metadata_candidates(),
-                        show_name=f.get("tmdb_show_name", ""))
+                        show_name=f.get("tmdb_show_name", ""), metadata_ctx=metadata_ctx)
                     resolved["metadata"]["original_title"] = f.get("bangumi_show_name", "")
                     resolved["provenance"]["original_title"] = "display_context"
                     generate_episode_nfo(resolved, show_name=f.get("tmdb_show_name", ""),

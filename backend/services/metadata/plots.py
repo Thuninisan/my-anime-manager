@@ -1,19 +1,14 @@
-"""Episode / season plot resolution with a three-tier fallback chain.
-
-Fallback order
-  1. TMDB  — season detail in ``zh-CN``
-  2. TVDB  — flat episode list in ``zho``
-  3. Bangumi → DeepSeek  — Japanese ``desc`` field translated to Chinese
-
-MetadataContext reuses previously acquired provider data within a batch.
-"""
+"""集、季和作品的中文简介解析，按层级选择来源并共用翻译兜底。"""
 
 import logging
+from dataclasses import dataclass
+from pathlib import Path
+from xml.etree import ElementTree
 
 from ...clients import tmdb as tmdb_client
 from ...clients import tvdb as tvdb_client
 from .providers.bangumi import get_cached_episodes
-from .translation import is_chinese_plot, translate_ja_to_zh
+from .translation import is_chinese_plot, translate_ja_to_zh, translate_synopsis_to_zh
 
 logger = logging.getLogger(__name__)
 
@@ -148,51 +143,173 @@ async def resolve_episode_plot(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Season-level plot (Bangumi summary → Chinese)
+# 季与作品简介：中文优先，缺失时翻译同一层级的原文
 # ═══════════════════════════════════════════════════════════════════════
 
 BGM_SUMMARY_MARKER = "[简介原文]"
 
 
+@dataclass(frozen=True)
+class PlotResolution:
+    """季和作品简介的解析结果，失败不进入成功缓存。"""
+
+    text: str = ""
+    source: str | None = None
+    status: str = "missing"
+
+
+def retain_existing_plot(result: PlotResolution, path: Path) -> PlotResolution:
+    """新简介不可用时保留已有的有效中文，避免覆盖刷新造成内容退化。"""
+    if result.text or not path.is_file():
+        return result
+    try:
+        text = (ElementTree.parse(path).getroot().findtext("plot") or "").strip()
+    except (OSError, ElementTree.ParseError):
+        logger.warning("NFO [%s 简介] 无法读取旧简介", path, exc_info=True)
+        return result
+    if is_chinese_plot(text):
+        logger.warning("NFO [%s 简介] 新简介状态=%s，降级保留旧中文简介", path, result.status)
+        return PlotResolution(text, "existing", "preserved")
+    return result
+
+
+async def _overview(loader, *, context: str, source: str) -> tuple[str, bool]:
+    """单个来源失败时继续兜底，不影响下载流程。"""
+    try:
+        data = await loader()
+        text = (data.get("overview") or "").strip()
+        logger.info("NFO [%s 简介] %s：%s", context, source,
+                    "命中中文" if is_chinese_plot(text) else "非中文" if text else "无简介")
+        return text, False
+    except Exception:
+        logger.warning("NFO [%s 简介] %s 获取失败", context, source, exc_info=True)
+        return "", True
+
+
+def _finish_plot(result: PlotResolution, *, context: str, cache: dict, key: tuple) -> PlotResolution:
+    if result.text:
+        cache[key] = result
+    logger.info("NFO [%s 简介] 最终来源=%s，状态=%s", context, result.source, result.status)
+    return result
+
+
+async def _translate_plots(
+    candidates: list[tuple[str, str]], *, scope: str, context: str, seen: set[str],
+) -> PlotResolution:
+    """按候选优先级翻译，相同原文仅尝试一次。"""
+    for source, text in candidates:
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        logger.info("NFO [%s 简介] %s：尝试翻译", context, source)
+        translated = await translate_synopsis_to_zh(text, scope=scope)
+        logger.info("NFO [%s 简介] %s：%s", context, source, "翻译成功" if translated else "翻译失败")
+        if translated:
+            return PlotResolution(translated, f"{source}:translated", "translated")
+    return PlotResolution(status="failed" if seen else "missing")
+
+
+async def resolve_series_plot(
+    *, tmdb_id: int = 0, tvdb_id: int = 0, metadata_ctx=None,
+    context: str = "tvshow.nfo",
+) -> PlotResolution:
+    """优先使用同一作品的现成中文，再翻译作品原文，不借用某一季的简介。"""
+    from .context import MetadataContext
+    ctx = metadata_ctx or MetadataContext()
+    key = ("series", tmdb_id, tvdb_id)
+    if key in ctx.resolved_plots:
+        return _finish_plot(ctx.resolved_plots[key], context=context, cache=ctx.resolved_plots, key=key)
+    candidates = []
+    attempted: set[str] = set()
+    failed = False
+    for source, enabled, loader in (
+        ("tmdb", tmdb_id, lambda: ctx.get_tmdb_detail(tmdb_id, "zh-CN")),
+        ("tvdb", tvdb_id, lambda: ctx.get_tvdb_series_translation(tvdb_id, "zho")),
+    ):
+        if not enabled:
+            continue
+        text, error = await _overview(loader, context=context, source=f"{source} 中文")
+        failed |= error
+        if is_chinese_plot(text):
+            return _finish_plot(PlotResolution(text, source, "chinese"), context=context,
+                                cache=ctx.resolved_plots, key=key)
+        if text:
+            candidates.append((source, text))
+
+    # 先保留中文端点返回的原文，再按平台优先级补取日文和英文。
+    for source, enabled, loaders in (
+        ("tmdb", tmdb_id, [lambda lang=lang: ctx.get_tmdb_detail(tmdb_id, lang) for lang in ("ja", "en")]),
+        ("tvdb", tvdb_id, [lambda lang=lang: ctx.get_tvdb_series_translation(tvdb_id, lang) for lang in ("jpn", "eng")]),
+    ):
+        originals = [(name, text) for name, text in candidates if name == source]
+        if enabled and not originals:
+            for loader in loaders:
+                text, error = await _overview(loader, context=context, source=f"{source} 原文")
+                failed |= error
+                if text:
+                    originals.append((source, text))
+                    break
+        result = await _translate_plots(originals, scope="series", context=context, seen=attempted)
+        failed |= result.status == "failed"
+        if result.text:
+            return _finish_plot(result, context=context, cache=ctx.resolved_plots, key=key)
+    return _finish_plot(PlotResolution(status="failed" if failed else "missing"),
+                        context=context, cache=ctx.resolved_plots, key=key)
+
+
 async def resolve_season_plot(
-    bangumi_summary: str, *, context: str = "season.nfo",
-    selected_source: list[str] | None = None,
-) -> str:
-    """Extract or translate a Bangumi subject summary for season.nfo.
-
-    Bangumi summaries sometimes embed a Chinese translation prefixed
-    with ``[简介原文]``.  When that marker is present the text before it
-    is used directly (no API call).  Otherwise the summary is sent to
-    DeepSeek for Japanese → Chinese translation.
-
-    Args:
-        bangumi_summary: Raw ``summary`` field from Bangumi subject API.
-
-    Returns:
-        Chinese plot text, or ``""`` on empty input.  On translation
-        failure an empty string is returned.
-    """
-    text = bangumi_summary.strip()
-    if not text:
-        logger.info("NFO [%s 简介] Bangumi：无简介", context)
-        return ""
-
+    bangumi_summary: str = "", *, tmdb_id: int = 0, tmdb_season: int | None = None,
+    bangumi_id: int = 0, metadata_ctx=None, context: str = "season.nfo",
+) -> PlotResolution:
+    """只使用对应季与已映射 Bangumi 条目的简介，不使用作品简介代替。"""
+    from .context import MetadataContext
+    ctx = metadata_ctx or MetadataContext()
+    key = ("season", tmdb_id, tmdb_season, bangumi_id, bangumi_summary)
+    if key in ctx.resolved_plots:
+        return _finish_plot(ctx.resolved_plots[key], context=context, cache=ctx.resolved_plots, key=key)
+    foreign = ""
+    attempted: set[str] = set()
+    failed = False
+    if tmdb_id and tmdb_season is not None:
+        foreign, failed = await _overview(
+            lambda: ctx.get_tmdb_season_detail(tmdb_id, tmdb_season, "zh-CN"),
+            context=context, source="TMDB 季中文")
+        if is_chinese_plot(foreign):
+            return _finish_plot(PlotResolution(foreign, "tmdb", "chinese"), context=context,
+                                cache=ctx.resolved_plots, key=key)
+    text = (bangumi_summary or "").strip()
+    if not text and bangumi_id:
+        try:
+            text = ((await ctx.get_bgm_subject(bangumi_id)).get("summary") or "").strip()
+        except Exception:
+            failed = True
+            logger.warning("NFO [%s 简介] Bangumi summary 获取失败", context, exc_info=True)
     if BGM_SUMMARY_MARKER in text:
-        chinese = text.split(BGM_SUMMARY_MARKER)[0].rstrip("\r\n")
+        chinese, original = text.split(BGM_SUMMARY_MARKER, 1)
         chinese = chinese.strip()
         if is_chinese_plot(chinese):
-            if selected_source is not None:
-                selected_source.append("Bangumi 内嵌中文")
-            logger.info("NFO [%s 简介] Bangumi：命中内嵌中文简介", context)
-            return chinese
-
-    logger.info("NFO [%s 简介] Bangumi：尝试 DeepSeek 翻译", context)
-    translated = await translate_ja_to_zh(text)
-    if translated and selected_source is not None:
-        selected_source.append("Bangumi → DeepSeek")
-    logger.info("NFO [%s 简介] Bangumi → DeepSeek：%s", context,
-                "翻译成功" if translated else "翻译失败，简介为空")
-    return translated
+            return _finish_plot(PlotResolution(chinese, "bangumi", "chinese"), context=context,
+                                cache=ctx.resolved_plots, key=key)
+        text = original.strip() or chinese
+    result = await _translate_plots([("bangumi", text)], scope="season", context=context, seen=attempted)
+    failed |= result.status == "failed"
+    if result.text:
+        return _finish_plot(result, context=context, cache=ctx.resolved_plots, key=key)
+    if tmdb_id and tmdb_season is not None:
+        if not foreign:
+            for language in ("ja", "en"):
+                foreign, error = await _overview(
+                    lambda: ctx.get_tmdb_season_detail(tmdb_id, tmdb_season, language),
+                    context=context, source=f"TMDB 季 {language}")
+                failed |= error
+                if foreign:
+                    break
+        result = await _translate_plots([("tmdb", foreign)], scope="season", context=context, seen=attempted)
+        failed |= result.status == "failed"
+        if result.text:
+            return _finish_plot(result, context=context, cache=ctx.resolved_plots, key=key)
+    return _finish_plot(PlotResolution(status="failed" if failed else "missing"),
+                        context=context, cache=ctx.resolved_plots, key=key)
 
 
 # ═══════════════════════════════════════════════════════════════════════

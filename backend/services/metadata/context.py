@@ -8,6 +8,9 @@ class MetadataContext:
         self.tvdb_episode_translations = {}
         self.tmdb_details = {}
         self.tmdb_season_maps = {}
+        self.tmdb_season_details = {}
+        self.tvdb_series_translations = {}
+        self.resolved_plots = {}
         self.tmdb_selected_seasons = {}
         self.tmdb_images = {}
         self.tvdb_series = {}
@@ -41,6 +44,32 @@ class MetadataContext:
         if bangumi_id not in self.bgm_episodes:
             self.bgm_episodes[bangumi_id] = await get_cached_episodes(bangumi_id)
         return self.bgm_episodes[bangumi_id]
+
+    async def get_tmdb_season_detail(self, tmdb_id: int, season: int, language: str) -> dict:
+        from ...clients import tmdb as client
+        key = (tmdb_id, season, language)
+        if key not in self.tmdb_season_details:
+            cached = self.tmdb_season_maps.get((tmdb_id, language), {}).get(season, {})
+            if "overview" in cached:
+                self.tmdb_season_details[key] = cached
+            else:
+                self.tmdb_season_details[key] = (await client.get_season_detail(
+                    tmdb_id, season, language=language)).json()
+        return self.tmdb_season_details[key]
+
+    async def get_tvdb_series_translation(self, tvdb_id: int, language: str) -> dict:
+        from ...clients import tvdb as client
+        import httpx
+        key = (tvdb_id, language)
+        if key not in self.tvdb_series_translations:
+            try:
+                payload = (await client.get_series_translations(tvdb_id, language)).json()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code != 404:
+                    raise
+                payload = {}
+            self.tvdb_series_translations[key] = payload.get("data", payload) or {}
+        return self.tvdb_series_translations[key]
 
     async def get_bgm_subject(self, bangumi_id: int) -> dict:
         from ...clients import bangumi as client

@@ -242,6 +242,7 @@ async def build_season_episode_map(
         if episodes:
             season_map[s] = {
                 "name": data.get("name", f"Season {s}"),
+                "overview": data.get("overview", ""),
                 "episodes": episodes,
             }
             logger.debug(f"   ✅ S{s:02d}: {len(episodes)} 集 — {data.get('name', f'Season {s}')}")
@@ -274,6 +275,7 @@ async def build_season_episode_map(
                 episodes.sort(key=lambda e: e["epNum"])
                 season_map[0] = {
                     "name": data.get("name", "Specials"),
+                    "overview": data.get("overview", ""),
                     "episodes": episodes,
                 }
                 logger.debug(f"   ✅ S00 (Specials): {len(episodes)} 集")

@@ -64,7 +64,7 @@ async def batch_nfo_generator(
 
     template = path_template if path_template is not None else config.RSS_PATH_TEMPLATE
 
-    def write_file(kind, path, writer, **kwargs):
+    def write_file(kind, path, writer, *, plot_result=None, **kwargs):
         if refresh_results is None:
             return writer(**kwargs)
         try:
@@ -74,12 +74,22 @@ async def batch_nfo_generator(
             logger.exception("NFO refresh failed: %s", path)
             refresh_results.append({"kind": kind, "path": str(path), "status": "failed", "message": str(exc)})
             return None
-        refresh_results.append({"kind": kind, "path": str(path), "status": "success",
-                                "message": "已覆盖" if existed else "已生成"})
+        result = {"kind": kind, "path": str(path), "status": "success",
+                  "message": "已覆盖" if existed else "已生成"}
+        if plot_result is not None:
+            result.update(plot_source=plot_result.source, plot_status=plot_result.status)
+            if plot_result.status in {"preserved", "failed", "missing"}:
+                result["message"] += "；" + {
+                    "preserved": "新简介不可用，已保留旧中文简介",
+                    "failed": "中文简介补全失败，简介留空",
+                    "missing": "没有可用简介，简介留空",
+                }[plot_result.status]
+        refresh_results.append(result)
         return output
 
     from ....domain.episode_metadata_adapters import metadata_candidates_from_catalogs
     from ..resolution import resolve_nfo_episode
+    from ..plots import retain_existing_plot, resolve_series_plot, resolve_season_plot
     mappings = [episode["episode_mapping"] for episode in episodes]
 
     # ── Phase 1: Collect already determined identities ───────────────
@@ -262,15 +272,20 @@ async def batch_nfo_generator(
             seen_show.add(show_key)
             show_nfo_exists = (show_dir / "tvshow.nfo").exists()
             if not show_nfo_exists:
-                logger.info("NFO [%s tvshow.nfo] 标题/原名/简介：TMDB；TMDB ID：TMDB；TVDB ID：TVDB", show_dir)
+                logger.info("NFO [%s tvshow.nfo] 标题/原名：TMDB；简介：中文解析；TMDB ID：TMDB；TVDB ID：TVDB", show_dir)
             if refresh_results is not None and not show.get("title"):
                 refresh_results.append({"kind": "show", "path": str(show_dir / "tvshow.nfo"),
                                         "status": "failed", "message": "未获取到作品元数据，已保留原 NFO"})
-            else:
+            elif overwrite_assets or not show_nfo_exists:
+                show_plot = await resolve_series_plot(
+                    tmdb_id=tmdb_id, tvdb_id=tvdb_id, metadata_ctx=metadata_ctx,
+                    context=f"{show_dir} tvshow.nfo")
+                show_plot = retain_existing_plot(show_plot, show_dir / "tvshow.nfo")
                 written = write_file("show", show_dir / "tvshow.nfo", generate_tv_show_nfo,
+                    plot_result=show_plot,
                     title=show.get("title", str(tmdb_id)),
                     original_title=show.get("original_title", ""),
-                    plot=show.get("overview", ""),
+                    plot=show_plot.text,
                     output_dir=str(show_dir),
                     tvdb_id=tvdb_id,
                     tmdb_id=tmdb_id,
@@ -291,38 +306,26 @@ async def batch_nfo_generator(
             seen_season.add(season_key)
             effective_tvdb_season = tvdb_season if tvdb_season is not None else tmdb_season
 
-            # Resolve season plot: TMDB overview → BGM summary fallback
-            season_plot = show.get("overview", "")
-            if season_plot:
-                logger.info("NFO [%s season.nfo 简介] TMDB：命中", season_dir)
-            if not season_plot:
-                logger.info("NFO [%s season.nfo 简介] TMDB：无简介，尝试 Bangumi", season_dir)
-                subject_data = bgm_subject_data_cache.get(bgm_id, {})
-                bgm_summary = subject_data.get("summary", "")
-                if bgm_summary:
-                    try:
-                        from ..plots import resolve_season_plot
-                        resolved_plot = await resolve_season_plot(bgm_summary, context=str(season_dir))
-                        if resolved_plot:
-                            season_plot = resolved_plot
-                    except Exception:
-                        pass
-
             season_nfo_exists = (season_dir / "season.nfo").exists()
-            if not season_nfo_exists:
+            if overwrite_assets or not season_nfo_exists:
+                season_plot = await resolve_season_plot(
+                    tmdb_id=tmdb_id, tmdb_season=tmdb_season, bangumi_id=bgm_id,
+                    metadata_ctx=metadata_ctx, context=f"{season_dir} season.nfo")
+                season_plot = retain_existing_plot(season_plot, season_dir / "season.nfo")
                 logger.info("NFO [%s season.nfo] 标题/季号：季映射；原名/Bangumi ID：Bangumi；播出日期：TMDB", season_dir)
-            written = write_file("season", season_dir / "season.nfo", generate_season_nfo,
-                title=f"Season {effective_tvdb_season}",
-                original_title=bgm_subject_name,
-                plot=season_plot,
-                premiered=show.get("first_air_date", ""),
-                season_number=resolved["season_number"],
-                bangumi_id=bgm_id,
-                output_dir=str(season_dir),
-                tvdb_season_id=tvdb_id,
-                overwrite=overwrite_assets,
-            )
-            nfo_count += int(bool(written) and (overwrite_assets or not season_nfo_exists))
+                written = write_file("season", season_dir / "season.nfo", generate_season_nfo,
+                    plot_result=season_plot,
+                    title=f"Season {effective_tvdb_season}",
+                    original_title=bgm_subject_name,
+                    plot=season_plot.text,
+                    premiered=show.get("first_air_date", ""),
+                    season_number=resolved["season_number"],
+                    bangumi_id=bgm_id,
+                    output_dir=str(season_dir),
+                    tvdb_season_id=tvdb_id,
+                    overwrite=overwrite_assets,
+                )
+                nfo_count += int(bool(written) and (overwrite_assets or not season_nfo_exists))
             # Season poster from BGM images if available
             bgm_subject_images = None
             for e in bgm_cache.get(bgm_id, []):

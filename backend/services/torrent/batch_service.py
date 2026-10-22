@@ -23,7 +23,7 @@ from ..metadata.providers import bangumi as bangumi_service
 from ...domain.bangumi_chain import find_target_entry
 from ..metadata.nfo.images import download_season_poster, download_show_images
 from ..metadata.nfo.nfo_xml import generate_season_nfo, generate_tv_show_nfo
-from ..metadata.plots import resolve_season_plot
+from ..metadata.plots import PlotResolution, resolve_season_plot, resolve_series_plot
 from ...utils.torrent_parser import parse_qbit_file_list
 from ...utils.torrent_file_reader import read_torrent_file_list
 
@@ -606,56 +606,36 @@ async def generate_metadata_collection(
     # ── tvshow.nfo ──────────────────────────────────────────────────
     logger.debug("📄 生成 tvshow.nfo...")
 
-    # Fetch TMDB zh-CN detail + plot fallback
-    from ...clients import tmdb as tmdb_client
     title_zh = tvshow["title"]
     original_zh = tvshow["original_title"]
-    plot_zh = tvshow["plot"]
-    title_source = "预览数据"
-    original_source = "预览数据"
-    plot_source = "预览数据" if plot_zh else "空简介"
-    logger.info("NFO [%s tvshow.nfo 简介] 预览数据：%s", output_root,
-                "有简介" if plot_zh else "无简介")
-    try:
-        detail_zh = await tmdb_client.get_tv_detail(tvshow["tmdb_series_id"], language="zh-CN")
-        if detail_zh.get("name"):
-            title_zh = detail_zh["name"]
-            title_source = "TMDB zh-CN"
-        if detail_zh.get("original_name"):
-            original_zh = detail_zh["original_name"]
-            original_source = "TMDB zh-CN"
-        if detail_zh.get("overview"):
-            plot_zh = detail_zh["overview"]
-            plot_source = "TMDB zh-CN"
-        logger.info("NFO [%s tvshow.nfo 简介] TMDB zh-CN：%s", output_root,
-                    "命中" if detail_zh.get("overview") else "无简介，使用预览数据")
-    except Exception:
-        logger.warning("NFO [%s tvshow.nfo 简介] TMDB zh-CN：请求失败，使用预览数据", output_root, exc_info=True)
-
-    # Fallback: if no Chinese overview, try Bangumi summary from first season
-    if not plot_zh and seasons:
-        logger.info("NFO [%s tvshow.nfo 简介] 尝试 Bangumi 季简介", output_root)
-        first_season = next(iter(seasons.values()))
-        season_source: list[str] = []
-        season_plot = await resolve_season_plot(first_season.get("bgm_plot", ""),
-                                                context=f"{output_root} tvshow.nfo",
-                                                selected_source=season_source)
-        if season_plot:
-            plot_zh = season_plot
-            plot_source = season_source[0]
-
+    title_source = original_source = "预览数据"
     show_nfo_exists = (Path(output_root) / "tvshow.nfo").exists()
+    show_plot = PlotResolution()
+    if not show_nfo_exists:
+        try:
+            detail_zh = await metadata_ctx.get_tmdb_detail(tvshow["tmdb_series_id"], "zh-CN")
+            if detail_zh.get("name"):
+                title_zh = detail_zh["name"]
+                title_source = "TMDB zh-CN"
+            if detail_zh.get("original_name"):
+                original_zh = detail_zh["original_name"]
+                original_source = "TMDB zh-CN"
+        except Exception:
+            logger.warning("NFO [%s tvshow.nfo] 获取中文标题失败，使用预览数据", output_root, exc_info=True)
+        show_plot = await resolve_series_plot(
+            tmdb_id=tvshow["tmdb_series_id"], tvdb_id=tvshow.get("tvdb_series_id") or 0,
+            metadata_ctx=metadata_ctx, context=f"{output_root} tvshow.nfo")
     nfo_path = generate_tv_show_nfo(
         title=title_zh,
         original_title=original_zh,
-        plot=plot_zh,
+        plot=show_plot.text,
         output_dir=output_root,
         tvdb_id=tvshow.get("tvdb_series_id", 0),
         tmdb_id=tvshow["tmdb_series_id"],
     )
     if not show_nfo_exists:
         logger.info("NFO [%s] 字段来源：标题=%s；原名=%s；简介=%s；TMDB ID=TMDB；TVDB ID=TVDB",
-                    nfo_path, title_source, original_source, plot_source)
+                    nfo_path, title_source, original_source, show_plot.source)
     logger.debug(f"   ✅ tvshow.nfo: {nfo_path}")
     summary["nfoGenerated"] += 1
 
@@ -678,15 +658,28 @@ async def generate_metadata_collection(
                 logger.debug(f"   🖼️ Season {season_number} poster → {poster}")
                 summary["imagesDownloaded"] += 1
 
-        season_source = []
-        season_plot = await resolve_season_plot(season.get("bgm_plot", ""),
-                                                context=f"{season_dir} season.nfo",
-                                                selected_source=season_source)
         season_nfo_exists = (Path(season_dir) / "season.nfo").exists()
+        season_plot = PlotResolution()
+        if not season_nfo_exists:
+            # 输出季号可能经过重排，只使用唯一且明确的 TMDB 季映射。
+            tmdb_coordinates = {
+                (mappings[name]["tmdb"]["series_id"], mappings[name]["tmdb"]["season_number"])
+                for name, episode in episodes.items()
+                if episode["season_number"] == season_number
+                and mappings[name]["tmdb"]["series_id"]
+                and mappings[name]["tmdb"]["season_number"] is not None
+            }
+            tmdb_id, tmdb_season = next(iter(tmdb_coordinates)) if len(tmdb_coordinates) == 1 else (0, None)
+            if len(tmdb_coordinates) > 1:
+                logger.warning("NFO [%s 简介] 包含多个 TMDB 季，跳过 TMDB 季简介", season_dir)
+            season_plot = await resolve_season_plot(
+                season.get("bgm_plot", ""), tmdb_id=tmdb_id, tmdb_season=tmdb_season,
+                bangumi_id=season["bgm_id"], metadata_ctx=metadata_ctx,
+                context=f"{season_dir} season.nfo")
         nfo = generate_season_nfo(
             title=season["bgm_title"],
             original_title=season["bgm_original"],
-            plot=season_plot,
+            plot=season_plot.text,
             premiered=season.get("bgm_premiered", ""),
             season_number=season_number,
             bangumi_id=season["bgm_id"],
@@ -694,7 +687,7 @@ async def generate_metadata_collection(
         )
         if not season_nfo_exists:
             logger.info("NFO [%s] 字段来源：标题/原名/ID/播出日期=Bangumi；简介=%s",
-                        nfo, season_source[0] if season_source else "空简介")
+                        nfo, season_plot.source or "空简介")
         logger.debug(f"   📄 Season {season_number} nfo → {nfo}")
         summary["nfoGenerated"] += 1
 

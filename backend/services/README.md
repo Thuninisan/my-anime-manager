@@ -62,3 +62,11 @@ EpisodeCatalog、EpisodeMapping 和 ResolvedEpisode 为准。HTTP 协议和数�
 - 增加设置的运行时副作用：`system/settings.py`，由它通知拥有状态的服务。
 
 不增加只转发数据库调用的查询包装，不建立空模块，也不通过大型 Service 类或通用工作流框架替代明确的业务入口。
+
+## 季与作品的 NFO 简介
+
+- `metadata/plots.py` 分别解析 series 和 season 简介，返回文本、来源和状态；XML 写入层只接收最终文本。
+- series 优先 TMDB 中文 overview、TVDB 中文 overview，再依次翻译同一作品的 TMDB、TVDB 原文；缺少原文时按日文、英文补取。不使用任意一季的 Bangumi summary 代替作品简介。
+- season 优先对应 TMDB 季的中文 overview、已映射 Bangumi subject 的内嵌中文，再依次翻译 Bangumi summary、TMDB 季原文。季号来自平台映射，支持第 0 季；不使用整部作品的 overview 代替季简介。
+- `metadata/translation.py` 共用各层级的简介翻译、中文校验和重试能力，缓存键包含文本范围与原文。仅成功译文和成功解析结果进入缓存，补全失败允许后续任务重试。
+- 已有季或作品 NFO 未开启覆盖时，不额外解析简介。覆盖刷新及映射重建中，新简介不可用时保留旧的有效中文；没有可保留内容则留空，并记录来源与降级状态。

@@ -1,13 +1,4 @@
-"""Translation service — Japanese → Chinese via DeepSeek.
-
-Used by the episode-plot fallback chain when neither TMDB nor TVDB
-have a Chinese plot available.
-
-Every translation result is verified before it is returned: an output
-that still looks like the original Japanese (an echo of the input, or
-high kana density) is logged and retried with a stricter system
-prompt.  Only verified Chinese translations are cached.
-"""
+"""简介翻译服务：各层级共用中文校验与重试，仅缓存通过校验的译文。"""
 
 import asyncio
 import difflib
@@ -18,9 +9,8 @@ from ...clients.deepseek import chat
 
 logger = logging.getLogger(__name__)
 
-# Simple in-memory cache keyed by original Japanese text.
-# Only verified Chinese translations are stored here — never echoes.
-_translation_cache: dict[str, str] = {}
+# 按简介范围和原文缓存，仅保存通过中文校验的译文。
+_translation_cache: dict[tuple[str, str], str] = {}
 
 # Titles have a different prompt and include show context; keep their cache separate.
 _title_translation_cache: dict[tuple[str, str], str] = {}
@@ -116,7 +106,7 @@ _ANIME_SYNOPSIS_RULES = (
 
 ANIME_TRANSLATION_SYSTEM = (
     "You are a professional anime subtitle translator. "
-    "Translate the following Japanese anime episode synopsis into "
+    "Translate the following anime synopsis from its source language into "
     "Simplified Chinese (zh-CN).\n\n"
     "Rules:\n"
     + _ANIME_SYNOPSIS_RULES
@@ -178,7 +168,7 @@ def _looks_untranslated(input_text: str, output_text: str) -> bool:
     ).ratio() > _ECHO_SIMILARITY
 
 
-async def translate_ja_to_zh(text: str) -> str:
+async def translate_synopsis_to_zh(text: str, *, scope: str = "episode") -> str:
     """Translate an unlabelled synopsis into Chinese.
 
     Return empty on exhausted retries; never publish the foreign source as
@@ -188,8 +178,9 @@ async def translate_ja_to_zh(text: str) -> str:
     if not text:
         return ""
 
-    if text in _translation_cache:
-        return _translation_cache[text]
+    key = (scope, text)
+    if key in _translation_cache:
+        return _translation_cache[key]
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         system = (
@@ -198,12 +189,12 @@ async def translate_ja_to_zh(text: str) -> str:
             else ANIME_TRANSLATION_RETRY_SYSTEM
         )
         try:
-            result = await chat(
+            result = await asyncio.wait_for(chat(
                 prompt=text,
-                system=system,
+                system=system + f"\nThe synopsis describes an anime {scope}. Preserve this scope.",
                 temperature=0.2,
                 max_tokens=min(max(len(text) * 3, 600), 8192),
-            )
+            ), timeout=30.0)
             translated = result.strip()
         except Exception:
             logger.warning(
@@ -213,7 +204,7 @@ async def translate_ja_to_zh(text: str) -> str:
             continue
 
         logger.info(
-            "DeepSeek episode plot translation output (attempt %d/%d): %s",
+            "DeepSeek synopsis translation output (attempt %d/%d): %s",
             attempt, MAX_ATTEMPTS, translated,
         )
 
@@ -233,9 +224,9 @@ async def translate_ja_to_zh(text: str) -> str:
             continue
 
         # Verified Chinese translation — cache and return.
-        _translation_cache[text] = translated
+        _translation_cache[key] = translated
         logger.info(
-            "DeepSeek translated episode plot (%d → %d chars)",
+            "DeepSeek translated synopsis (%d → %d chars)",
             len(text), len(translated),
         )
         return translated
@@ -247,3 +238,8 @@ async def translate_ja_to_zh(text: str) -> str:
         MAX_ATTEMPTS,
     )
     return ""
+
+
+async def translate_ja_to_zh(text: str) -> str:
+    """兼容现有单集简介翻译入口。"""
+    return await translate_synopsis_to_zh(text, scope="episode")
