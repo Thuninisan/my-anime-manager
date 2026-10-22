@@ -52,6 +52,8 @@ interface MappingCardProps {
   onTvdbSeasonChange?: (value: string) => void;
   onTvdbEpChange?: (value: string) => void;
   onToggleMatched: () => void;
+  onFillDown?: () => void;
+  canFillDown?: boolean;
 }
 
 export default function MappingCard({
@@ -83,6 +85,8 @@ export default function MappingCard({
   onTvdbSeasonChange,
   onTvdbEpChange,
   onToggleMatched,
+  onFillDown,
+  canFillDown,
 }: MappingCardProps) {
   const isSp = variant === 'sp';
   const isMovie = variant === 'movie';
@@ -301,7 +305,19 @@ export default function MappingCard({
             </div>
           </>
         )}
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
+          {!isMovie && <button
+            type="button"
+            aria-label="向下顺序填充"
+            title="向下顺序填充：从下一文件开始覆盖当前作品同分组的后续映射（包含筛选隐藏的文件）。各平台仅在当前 Bangumi 条目或 TMDB/TVDB 季内顺序排列，超出后留空；未选择剧集的平台跳过。"
+            disabled={!canFillDown}
+            onClick={onFillDown}
+            className="inline-flex items-center justify-center rounded-md border border-border p-1.5 text-muted-foreground hover:text-primary hover:border-primary/50 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 4v16m-6-6 6 6 6-6" />
+            </svg>
+          </button>}
           <button
             className="cursor-pointer select-none transition-all hover:scale-105 active:scale-95"
             onClick={onToggleMatched}

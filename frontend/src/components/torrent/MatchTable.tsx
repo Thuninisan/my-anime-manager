@@ -53,6 +53,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
   // ── Matching state + handlers ──
   const {
     overrides,
+    fillNotice, canFillDown, handleFillDown, undoFillDown,
     rows,
     movieRows,
     tvRows,
@@ -116,6 +117,10 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
           onClick={() => changePreference(value)}>{value === 'all' ? '全部' : value === 'simplified' ? '简体' : '繁体'}</button>)}
         <span className="text-xs text-muted-foreground">按文件名识别，语言未知默认保留；切换选项会重置逐文件选择。</span>
       </div>
+      {fillNotice && <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-xs">
+        <span className="flex-1">{fillNotice}</span>
+        <button type="button" onClick={undoFillDown} className="cursor-pointer font-medium text-primary underline underline-offset-2">撤销填充</button>
+      </div>}
       {subtitleFilter !== 'all' && !rows.some(visible) && <p className="text-sm text-muted-foreground">当前筛选下没有已选视频。</p>}
       {/* ── Movie Table ── */}
       {movieRows.length > 0 && (
@@ -207,6 +212,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
               return (
                 <MappingCard
                   key={i} row={r} rowIndex={i} variant="tv"
+                  canFillDown={canFillDown(i)} onFillDown={() => handleFillDown(i)}
                   torrentName={torrentName}
                   onSubtitleUploaded={(original, stored) => { handleSubtitleUploaded(original, stored); setAssociation(`upload:${stored}`, r.torrent_path); }}
                   {...subProps(r)}
@@ -274,6 +280,7 @@ export default function MatchTable({ data, onRowsComputed, onSubtitlesChange, on
               return (
                 <MappingCard
                   key={i} row={r} rowIndex={i} variant="sp"
+                  canFillDown={canFillDown(i)} onFillDown={() => handleFillDown(i)}
                   torrentName={torrentName}
                   onSubtitleUploaded={(original, stored) => { handleSubtitleUploaded(original, stored); setAssociation(`upload:${stored}`, r.torrent_path); }}
                   {...subProps(r)}

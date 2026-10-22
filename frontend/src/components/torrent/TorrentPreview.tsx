@@ -1,3 +1,4 @@
+import { submissionEpisodeMapping } from '@/lib/sequenceFill';
 import { automaticVideoFiles, processableVideoFiles, ignoredFiles, subtitleFiles, candidateIds } from '@/lib/episodeAdapters';
 import type { TorrentPreviewResponse } from '@/types/preview';
 import { useMemo, useState, useCallback } from 'react';
@@ -109,10 +110,10 @@ export default function TorrentPreview({
         return file.file_id;
       };
       for (const row of matchedRows) {
-        files.push({ file_id: requiredFileId(row.torrent_path), mapping: row.mapping, ...(row.tmdb_movie_id ? { tmdb_movie_id: row.tmdb_movie_id } : {}) });
+        files.push({ file_id: requiredFileId(row.torrent_path), mapping: submissionEpisodeMapping(row.mapping), ...(row.tmdb_movie_id ? { tmdb_movie_id: row.tmdb_movie_id } : {}) });
         for (const sub of associations[row.torrent_path]?.selected || []) {
           if (sub.source !== 'torrent') continue;
-          files.push({ file_id: requiredFileId(sub.path), mapping: row.mapping, ...(row.tmdb_movie_id ? { tmdb_movie_id: row.tmdb_movie_id } : {}), subtitle_suffix: subtitleSuffix(row, sub.id) });
+          files.push({ file_id: requiredFileId(sub.path), mapping: submissionEpisodeMapping(row.mapping), ...(row.tmdb_movie_id ? { tmdb_movie_id: row.tmdb_movie_id } : {}), subtitle_suffix: subtitleSuffix(row, sub.id) });
         }
       }
 
@@ -127,7 +128,7 @@ export default function TorrentPreview({
             file_id: requiredFileId(matchingRow.torrent_path),
             stored_filename: usub.storedFilename,
             original_filename: usub.originalFilename,
-            mapping: matchingRow.mapping, ...(matchingRow.tmdb_movie_id ? { tmdb_movie_id: matchingRow.tmdb_movie_id } : {}),
+            mapping: submissionEpisodeMapping(matchingRow.mapping), ...(matchingRow.tmdb_movie_id ? { tmdb_movie_id: matchingRow.tmdb_movie_id } : {}),
           });
         }
       }

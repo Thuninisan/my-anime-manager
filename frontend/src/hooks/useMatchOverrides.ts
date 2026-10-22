@@ -9,6 +9,7 @@ import { createEpisodeMapping } from '@/lib/episodeAdapters';
  * (applies overrides on top of auto-computed matches).
  */
 
+import { buildSequenceFillPlan } from '@/lib/sequenceFill';
 import { useState, useMemo, useCallback } from 'react';
 import type { MatchRow, SearchEntry, BgmEpisode, BgmEntry, TmdbSeason } from '@/types/matchTable';
 import { computeMatches, DuplicateEpisodeError, matchEpisodeTitles } from '@/lib/matchUtils';
@@ -17,18 +18,22 @@ import { computeMatches, DuplicateEpisodeError, matchEpisodeTitles } from '@/lib
 export interface MatchOverrides {
   bgmEntryId?: number;
   bgmEpSort?: number;
-  bgmEpId?: number;
+  bgmEpId?: number | null;
   tmdbSeason?: number;
-  tmdbEp?: number;
+  tmdbEp?: number | null;
   tmdbShowId?: number;
   tvdbShowId?: number;
   tvdbSeason?: number;
-  tvdbEp?: number;
+  tvdbEp?: number | null;
   manualMatched?: boolean;
 }
 
 // ── Hook return type ──
 export interface UseMatchOverridesReturn {
+  fillNotice: string | null;
+  canFillDown: (rowIndex: number) => boolean;
+  handleFillDown: (rowIndex: number) => void;
+  undoFillDown: () => void;
   overrides: Record<number, MatchOverrides>;
   rows: MatchRow[];
   movieRows: (MatchRow & { _idx: number })[];
@@ -91,6 +96,7 @@ export function useMatchOverrides(
 
   // ── Per-row overrides ──
   const [overridesByFile, setOverridesByFile] = useState<Record<string, MatchOverrides>>({});
+  const [fillUndo, setFillUndo] = useState<{ previous: Record<string, MatchOverrides>; revision: number; previewId: string; message: string } | null>(null);
   const rowKey = useCallback((row: MatchRow) => data.parsed_files
     .find(file => file.torrent_path === row.torrent_path)?.file_id || row.torrent_path,
   [data.parsed_files]);
@@ -99,6 +105,7 @@ export function useMatchOverrides(
   const overrides = useMemo(() => Object.fromEntries(initialRows.map((row, index) =>
     [index, overridesByFile[rowKey(row)] ?? {}])), [initialRows, overridesByFile, rowKey]);
   const setOverrides = (update: (previous: Record<number, MatchOverrides>) => Record<number, MatchOverrides>) => {
+    setFillUndo(null);
     setOverridesByFile(previous => {
       const indexed = Object.fromEntries(initialRows.map((row, index) => [index, previous[rowKey(row)] ?? {}]));
       const next = update(indexed);
@@ -136,7 +143,7 @@ export function useMatchOverrides(
           ...buildBaseOverride(rowIndex, existing),
           bgmEntryId: entryId,
           bgmEpSort: firstEp?.episode_absolute ?? undefined,
-          bgmEpId: firstEp?.episode_id,
+          bgmEpId: firstEp?.episode_id ?? null,
         },
       };
     });
@@ -177,7 +184,7 @@ export function useMatchOverrides(
           [rowIndex]: {
             ...buildBaseOverride(rowIndex, existing),
             tmdbSeason: season,
-            tmdbEp: firstEp,
+            tmdbEp: firstEp ?? null,
             tmdbShowId: tmdbShowId,
           },
         };
@@ -199,7 +206,7 @@ export function useMatchOverrides(
         [rowIndex]: {
           ...buildBaseOverride(rowIndex, existing),
           tmdbSeason: season,
-          tmdbEp: firstEp,
+          tmdbEp: firstEp ?? null,
         },
       };
     });
@@ -250,7 +257,7 @@ export function useMatchOverrides(
             ...buildBaseOverride(rowIndex, existing),
             tvdbShowId: tvdbShowId,
             tvdbSeason: season,
-            tvdbEp: firstEp,
+            tvdbEp: firstEp ?? null,
           },
         };
       });
@@ -272,7 +279,7 @@ export function useMatchOverrides(
           ...base,
           tvdbShowId: base.tvdbShowId ?? initialRows[rowIndex]?.mapping.tvdb.series_id ?? undefined,
           tvdbSeason: season,
-          tvdbEp: firstEp,
+          tvdbEp: firstEp ?? null,
         },
       };
     });
@@ -303,15 +310,15 @@ export function useMatchOverrides(
       const effectiveBgmId = ov.bgmEntryId ?? r.mapping.bangumi.subject_id ?? 0;
       const ovEntry = bgmEntryOptions.find((e) => e.id === effectiveBgmId);
       const eps = getBgmEpisodes(effectiveBgmId);
-      const ovEp = ov.bgmEpId != null
+      const ovEp = ov.bgmEpId === null ? undefined : ov.bgmEpId != null
         ? eps.find((e) => e.episode_id === ov.bgmEpId)
         : ov.bgmEpSort != null ? eps.find((e) => e.episode_absolute === ov.bgmEpSort)
           : eps.find((e) => e.episode_id === r.mapping.bangumi.episode_id);
 
       // TMDB ep name lookup (display only)
-      let tmdbEpName = r.tmdb_ep_name;
+      let tmdbEpName = r.media_type === 'movie' ? r.tmdb_ep_name : '-';
       const effTmdbSeason = ov.tmdbSeason ?? r.mapping.tmdb.season_number;
-      const effTmdbEp = ov.tmdbEp ?? r.mapping.tmdb.episode_number;
+      const effTmdbEp = ov.tmdbEp !== undefined ? ov.tmdbEp : r.mapping.tmdb.episode_number;
       if (effTmdbSeason != null && effTmdbEp != null) {
         const tmdbSeriesId = ov.tmdbShowId ?? r.mapping.tmdb.series_id;
         const tmdbSeasons: Record<string, CatalogSeason> =
@@ -341,7 +348,7 @@ export function useMatchOverrides(
           episode_absolute: r.media_type === 'movie' ? null : ovEp?.episode_absolute ?? null },
         tmdb: resolve('tmdb', ov.tmdbShowId ?? r.mapping.tmdb.series_id ?? undefined, effTmdbSeason, effTmdbEp),
         tvdb: resolve('tvdb', ov.tvdbShowId ?? r.mapping.tvdb.series_id ?? undefined,
-          ov.tvdbSeason ?? r.mapping.tvdb.season_number, ov.tvdbEp ?? r.mapping.tvdb.episode_number),
+          ov.tvdbSeason ?? r.mapping.tvdb.season_number, ov.tvdbEp !== undefined ? ov.tvdbEp : r.mapping.tvdb.episode_number),
       };
       const contexts = Object.values(searchResults).filter(context =>
         (['tmdb', 'tvdb', 'bangumi'] as const).every(provider => {
@@ -360,19 +367,55 @@ export function useMatchOverrides(
       return {
         ...r,
         match_status: r.match_status ? { ...r.match_status,
-          ...(ov.bgmEntryId != null || ov.bgmEpId != null ? { bangumi: 'manual' as const } : {}),
-          ...(ov.tmdbSeason != null || ov.tmdbEp != null ? { tmdb: 'manual' as const } : {}),
-          ...(ov.tvdbSeason != null || ov.tvdbEp != null ? { tvdb: 'manual' as const } : {}),
+          ...(ov.bgmEntryId != null || ov.bgmEpId !== undefined ? { bangumi: ovEp ? 'manual' as const : 'missing' as const } : {}),
+          ...(ov.tmdbSeason != null || ov.tmdbEp !== undefined ? { tmdb: mapping.tmdb.episode_number != null ? 'manual' as const : 'missing' as const } : {}),
+          ...(ov.tvdbSeason != null || ov.tvdbEp !== undefined ? { tvdb: mapping.tvdb.episode_number != null ? 'manual' as const : 'missing' as const } : {}),
         } : undefined,
         mapping,
         bgm_entry: ovEntry?.name || (effectiveBgmId ? `ID ${effectiveBgmId}` : '-'),
-        bgm_ep_name: r.media_type === 'movie' ? ovEntry?.name || r.bgm_ep_name : ovEp?.name || r.bgm_ep_name,
-        bgm_ep_name_cn: r.media_type === 'movie' ? '' : ovEp?.name_cn || r.bgm_ep_name_cn,
+        bgm_ep_name: r.media_type === 'movie' ? ovEntry?.name || r.bgm_ep_name : ovEp?.name || '-',
+        bgm_ep_name_cn: r.media_type === 'movie' ? '' : ovEp?.name_cn || '',
         tmdb_ep_name: tmdbEpName,
         matched,
       };
     });
   }, [initialRows, overrides, bgmEntryOptions, searchResults, episodeData, data.episode_match_source]);
+
+  // 使用完整列表定位后续文件，不受字幕筛选影响，不跨作品或正片/特典分组。
+  const targetsAfter = (index: number) => rows.slice(index + 1).filter(row =>
+    row.media_type === rows[index]?.media_type && row.show_name === rows[index]?.show_name && row.media_type !== 'movie');
+  const canFillDown = (index: number) => !!rows[index] && targetsAfter(index).length > 0 &&
+    buildSequenceFillPlan(rows[index].mapping, 0, episodeData).active;
+  const handleFillDown = (index: number) => {
+    const anchor = rows[index];
+    if (!anchor || anchor.media_type === 'movie') return;
+    const targets = targetsAfter(index);
+    if (!targets.length) return;
+    const plan = buildSequenceFillPlan(anchor.mapping, targets.length, episodeData);
+    const summary = Object.entries(plan.counts).filter(([, counts]) => counts.filled || counts.cleared)
+      .map(([provider, counts]) => `${provider.toUpperCase()} 填入 ${counts.filled} 集、留空 ${counts.cleared} 集`).join('；');
+    if (!plan.active) return;
+    const next = { ...overridesByFile };
+    targets.forEach((row, i) => {
+      const patch = plan.patches[i];
+      const ov = { ...next[rowKey(row)] };
+      if (patch.bangumi) Object.assign(ov, { bgmEntryId: patch.bangumi.subject_id!,
+        bgmEpId: patch.bangumi.episode_id, bgmEpSort: undefined });
+      if (patch.tmdb) Object.assign(ov, { tmdbShowId: patch.tmdb.series_id!,
+        tmdbSeason: patch.tmdb.season_number!, tmdbEp: patch.tmdb.episode_number });
+      if (patch.tvdb) Object.assign(ov, { tvdbShowId: patch.tvdb.series_id!,
+        tvdbSeason: patch.tvdb.season_number!, tvdbEp: patch.tvdb.episode_number });
+      next[rowKey(row)] = ov;
+    });
+    setFillUndo({ previous: overridesByFile, previewId: data.preview_id, revision: data.revision,
+      message: `已向下顺序填充 ${targets.length} 个文件。${summary}${plan.warnings.length ? `；${plan.warnings.join('；')}` : ''}` });
+    setOverridesByFile(next);
+  };
+  const fillNotice = fillUndo?.previewId === data.preview_id && fillUndo.revision === data.revision ? fillUndo.message : null;
+  const undoFillDown = () => {
+    if (fillUndo && fillNotice) setOverridesByFile(fillUndo.previous);
+    setFillUndo(null);
+  };
 
   // ── Split rows by media_type ──
   const movieRows = useMemo(
@@ -389,6 +432,7 @@ export function useMatchOverrides(
   );
 
   return {
+    fillNotice, canFillDown, handleFillDown, undoFillDown,
     overrides,
     rows,
     movieRows,
