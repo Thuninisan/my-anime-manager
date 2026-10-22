@@ -68,6 +68,17 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
               <path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/>
             </svg>
           </button>
+          <button
+            type="button"
+            className="bg-card text-primary p-3 rounded-full shadow-md hover:bg-accent hover:text-accent-foreground transition-colors cursor-pointer"
+            onClick={(e) => { e.stopPropagation(); onEditMapping(s.bangumi_id, s.name); }}
+            title="编辑映射"
+            aria-label="编辑映射"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4Z" />
+            </svg>
+          </button>
           {isActive ? (
             <button
               className="bg-card text-destructive p-3 rounded-full shadow-md hover:bg-destructive hover:text-destructive-foreground transition-colors cursor-pointer"
@@ -144,16 +155,6 @@ export default function SubscriptionCard({ subscription: s, onOpenHistory, onUns
         {(!s.resource_identity.tmdb_series_id && !s.resource_identity.tmdb_movie_id) && (
           <p className="text-xs text-destructive">缺少 TMDB 关联{s.resource_identity.media_type === 'tv' ? '，可通过编辑映射补充。' : '。'}</p>
         )}
-        <button
-          type="button"
-          className="w-full flex items-center justify-center gap-2 text-xs px-3 py-2 rounded border border-border text-primary hover:bg-muted transition-colors"
-          onClick={() => onEditMapping(s.bangumi_id, s.name)}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4Z" />
-          </svg>
-          编辑映射
-        </button>
       </div>
     </div>
   );
